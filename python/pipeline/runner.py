@@ -19,7 +19,8 @@ from .llm import _last_llm_stats
 from .notes import _markdown_bullets, generate_enhanced_notes
 from .speakers import _guess_remote_speakers, _load_continuation_segments, guess_speaker_from_tracks, load_accessibility_timeline, load_ax_participants, match_speaker_from_timeline, resolve_other_participant_name
 from .transcribe import transcribe_with_silence_removal
-from .vocabulary import build_vocabulary_prompt, learn_from_transcript
+from .context import build_context
+from .vocabulary import learn_from_transcript
 
 
 def log_resource_usage(recording_id: str, stage_timings: dict[str, float], audio_duration: float, speech_duration: float, llm_stats: dict[str, Any] | None = None) -> None:
@@ -73,6 +74,7 @@ _VERSIONED_OUTPUTS = (
     "gemini_diarization.json",
     "call_summary.json",
     "audio_transcribed.wav",
+    "transcription_context.json",
 )
 
 
@@ -125,7 +127,12 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         part_files.append(folder / f"audio_part{part_idx}.mov")
         part_idx += 1
 
-    prompt = build_vocabulary_prompt(title)
+    # Per-chunk Whisper prompts from everything known about this meeting
+    # (attendees, title, notes, nearby screenshot text, past meetings,
+    # vocabulary) — see pipeline/context.py. Saved to
+    # transcription_context.json for debugging and training.
+    context = build_context(folder, title)
+    prompt = context.prompt()
     raw_segments = []
     total_audio_duration = 0.0
     total_speech_duration = 0.0
@@ -135,7 +142,13 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
     for idx, pfile in enumerate(part_files):
         p_label = f" (Part {idx + 1}/{len(part_files)})" if len(part_files) > 1 else ""
         _write_progress(folder, "transcribing", f"Transcribing audio{p_label}...", percent=15 + int(idx * 25 / len(part_files)))
-        p_segs, p_dur, p_speech = transcribe_with_silence_removal(pfile, prompt, folder=(folder if idx == 0 else None))
+        def prompt_for(start: float, end: float, offset: float = current_time_offset) -> str:
+            chunk_prompt = context.prompt(start + offset, end + offset)
+            context.record(start + offset, end + offset, chunk_prompt)
+            return chunk_prompt
+
+        p_segs, p_dur, p_speech = transcribe_with_silence_removal(pfile, prompt, folder=(folder if idx == 0 else None),
+                                                                  prompt_for=prompt_for)
         for s in p_segs:
             raw_segments.append({
                 **s,
@@ -148,6 +161,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
 
     audio_duration = total_audio_duration
     speech_duration = total_speech_duration
+    context.save(folder)
     stage_timings["transcription"] = time.time() - t0
     raw_segments.sort(key=lambda s: s["start"])
     _write_progress(folder, "aligning_speakers", "Aligning speakers and audio tracks...", percent=45)
@@ -402,6 +416,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
 
 def main() -> None:
     import sys
+    paths.ensure_data_dir()  # owner-only umask for everything this run writes
     if len(sys.argv) < 2:
         print("Usage: python -m pipeline.runner <recording_folder_or_id>")
         sys.exit(1)

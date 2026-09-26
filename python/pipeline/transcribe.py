@@ -6,7 +6,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import ai_trace
 import db
@@ -166,13 +166,14 @@ def plan_chunks(speech_segments: list[tuple[float, float]], target: float = CHUN
     return chunks
 
 
-def _transcribe_chunks(audio_path: Path, speech_segments: list[tuple[float, float]], prompt: str) -> list[dict[str, Any]]:
+def _transcribe_chunks(audio_path: Path, speech_segments: list[tuple[float, float]], prompt: str,
+                       prompt_for: Optional[Callable[[float, float], str]] = None) -> list[dict[str, Any]]:
     segments: list[dict[str, Any]] = []
     chunks = plan_chunks(speech_segments)
     for start, end in chunks:
         clip = extract_clip(audio_path, start, end)
         try:
-            result = transcribe_local_mlx(clip, prompt=prompt)
+            result = transcribe_local_mlx(clip, prompt=prompt_for(start, end) if prompt_for else prompt)
         finally:
             clip.unlink(missing_ok=True)
         for seg in result.get("segments", []):
@@ -182,7 +183,8 @@ def _transcribe_chunks(audio_path: Path, speech_segments: list[tuple[float, floa
     return segments
 
 
-def transcribe_with_silence_removal(audio_path: Path, prompt: str, folder: Optional[Path] = None) -> tuple[list[dict[str, Any]], float, float]:
+def transcribe_with_silence_removal(audio_path: Path, prompt: str, folder: Optional[Path] = None,
+                                    prompt_for: Optional[Callable[[float, float], str]] = None) -> tuple[list[dict[str, Any]], float, float]:
     """Detect and drop dead air, transcribe the remaining speech in a single
     Whisper pass, then shift segment timestamps back onto the original
     recording's timeline. Returns (segments, audio_duration, speech_duration).
@@ -221,7 +223,7 @@ def transcribe_with_silence_removal(audio_path: Path, prompt: str, folder: Optio
         # natural pauses gives turn-sized segments that speaker attribution
         # can label individually. Falls back to the single spliced pass.
         try:
-            chunked = _transcribe_chunks(mixed_audio_path, speech_segments, prompt)
+            chunked = _transcribe_chunks(mixed_audio_path, speech_segments, prompt, prompt_for)
         except Exception as exc:
             print(f"[Local MLX] Chunked transcription failed, using single pass: {exc}", flush=True)
             result = transcribe_local_mlx(trimmed_path, prompt=prompt)
