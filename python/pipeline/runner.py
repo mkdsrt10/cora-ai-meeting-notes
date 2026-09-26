@@ -19,7 +19,9 @@ from .llm import _last_llm_stats
 from .notes import _markdown_bullets, generate_enhanced_notes
 from .speakers import _guess_remote_speakers, _load_continuation_segments, guess_speaker_from_tracks, load_accessibility_timeline, load_ax_participants, match_speaker_from_timeline, resolve_other_participant_name
 from .transcribe import transcribe_with_silence_removal
+from . import romanize
 from .context import build_context
+from .llm import LazyLLM
 from .vocabulary import learn_from_transcript
 
 
@@ -209,7 +211,21 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
 
     # 2a. Name the remote turns the audio couldn't attribute (several other
     # people on the call): conversational rules first, then the local LLM.
-    _guess_remote_speakers(folder, aligned_segments, ax_participants, title)
+    # One local model serves both text passes below, then is released
+    # before the notes stage loads its own.
+    text_llm = LazyLLM(db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT))
+    try:
+        # 2a-i. Romanized Hinglish: convert any Devanagari the ASR produced
+        # (see pipeline/romanize.py) before names and notes are derived.
+        if any(romanize.DEVANAGARI.search(s["text"]) for s in aligned_segments):
+            _write_progress(folder, "romanizing", "Converting to Romanized Hinglish...", percent=46)
+            stats = romanize.romanize_segments(aligned_segments, generate=lambda prompt: text_llm.generate(
+                prompt, name="romanize", prompt_template=romanize.INSTRUCTION, max_tokens=2000))
+            print(f"[Local Pipeline] Romanization: {stats}", flush=True)
+        # 2a-ii. Name remote turns the audio couldn't attribute.
+        _guess_remote_speakers(folder, aligned_segments, ax_participants, title, text_llm)
+    finally:
+        text_llm.release()
     assigned_speakers = {s["speaker_name"] for s in aligned_segments}
 
     # 2b. If this recording is linked as a continuation of an earlier one,

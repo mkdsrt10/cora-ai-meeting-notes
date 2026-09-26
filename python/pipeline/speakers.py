@@ -9,8 +9,6 @@ import db
 from participants import _BAD_PARTICIPANT_WORDS, clean_and_validate_participant  # noqa: F401
 from .audio import track_mean_volume
 from .common import _parse_ts, _write_progress
-from .config import LOCAL_LLM_MODEL_DEFAULT, _release_mlx_model
-from .llm import traced_generate
 
 
 def _load_continuation_segments(folder: Path) -> tuple[list[dict[str, Any]], float]:
@@ -100,7 +98,7 @@ def resolve_other_participant_name(participants: list[str]) -> Optional[str]:
     return others[0] if len(others) == 1 else None
 
 
-def _guess_remote_speakers(folder: Path, segments: list[dict[str, Any]], roster: list[str], title: str) -> None:
+def _guess_remote_speakers(folder: Path, segments: list[dict[str, Any]], roster: list[str], title: str, llm) -> None:
     import speaker_guess
 
     self_name = db.get_setting("pending_self_name") or (db.get_person(db.get_self_person_id() or "") or {}).get("name")
@@ -108,31 +106,15 @@ def _guess_remote_speakers(folder: Path, segments: list[dict[str, Any]], roster:
     if not any(s["speaker_id"] == speaker_guess.UNRESOLVED for s in segments) or not others:
         return
     _write_progress(folder, "identifying_speakers", "Working out who said what...", percent=48)
-    model_id = db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT)
-    loaded: dict[str, Any] = {}
-
     def generate(prompt: str) -> str:
-        import mlx_lm
-        if "model" not in loaded:
-            loaded["model"], loaded["tokenizer"] = mlx_lm.load(model_id)
-        tokenizer = loaded["tokenizer"]
-        try:
-            chat = tokenizer.apply_chat_template([{"role": "user", "content": prompt}], tokenize=False,
-                                                 add_generation_prompt=True)
-        except Exception:
-            chat = f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
-        return traced_generate(loaded["model"], tokenizer, chat, max_tokens=1500, model_id=model_id,
-                               name="speaker_guess", prompt_template=speaker_guess.INSTRUCTION,
-                               input_payload={"prompt": prompt, "roster": others})
+        return llm.generate(prompt, name="speaker_guess", prompt_template=speaker_guess.INSTRUCTION,
+                            input_payload={"prompt": prompt, "roster": others})
 
     try:
-        stats = speaker_guess.guess_speakers(segments, roster, self_name, title, generate=generate, model_id=model_id)
+        stats = speaker_guess.guess_speakers(segments, roster, self_name, title, generate=generate, model_id=llm.model_id)
         print(f"[Local Pipeline] Speaker naming: {stats}", flush=True)
     except Exception as exc:  # naming is an enhancement; never fail the pipeline over it
         print(f"[Local Pipeline] Speaker naming skipped: {exc}", flush=True)
-    finally:
-        if "model" in loaded:
-            _release_mlx_model(loaded["model"], loaded["tokenizer"])
 
 
 def match_speaker_from_timeline(start_sec: float, end_sec: float, timeline: list[dict[str, Any]]) -> Optional[str]:

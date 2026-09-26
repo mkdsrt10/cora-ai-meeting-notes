@@ -310,7 +310,10 @@ def _curated_terms() -> list[str]:
 def build_context(folder: Path, title: str = "") -> MeetingContext:
     """Everything known about this meeting, ranked for Whisper's prompt."""
     recording_id = folder.name
-    ctx = MeetingContext(base_hint=DEFAULT_KEYWORDS or "")
+    from .romanize import ROMAN_PRIMER, target_script
+    # A Romanized Hinglish sample nudges the ASR to write Hindi in Latin script.
+    hint = " ".join(h for h in (ROMAN_PRIMER if target_script() == "roman" else "", DEFAULT_KEYWORDS or "") if h)
+    ctx = MeetingContext(base_hint=hint)
     ctx.title = title if title and not _RAW_TITLE.match(title) else ""
     ctx.attendees = _attendees(folder, recording_id)
     for name in ctx.attendees:

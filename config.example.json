@@ -18,5 +18,6 @@
     "store_payloads": true,
     "retention_days": 180
   },
-  "participant_stopwords": []
+  "participant_stopwords": [],
+  "transcript_script": "roman"
 }

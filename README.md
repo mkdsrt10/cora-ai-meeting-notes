@@ -79,6 +79,7 @@ first run):
 | `silence_min_gap_seconds` / `silence_threshold_db` | Tuning for the dead-air detection that runs before local transcription |
 | `plugins.coaching.enabled` | Turn the optional coaching plugin on/off without deleting it |
 | `enterprise_lockdown` | `true` disables every outbound feature — see [Security](#security) |
+| `transcript_script` | `roman` (default): Romanized Hinglish — Devanagari from the ASR is converted (original kept as training data); `native`: leave as transcribed |
 | `local_tracing` | Local AI-call trace store for retraining and benchmarks — see [docs/TRACING.md](docs/TRACING.md) |
 | `participant_stopwords` | Extra words (e.g. your workspace/org name) that should never be treated as a participant name |
 

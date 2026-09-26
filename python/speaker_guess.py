@@ -25,7 +25,7 @@ from typing import Any, Callable, Optional
 
 UNRESOLVED = "Participant"
 MIN_CONFIDENCE = 0.6
-LLM_WINDOW_CHARS = 6000
+LLM_WINDOW_CHARS = 3500  # small enough that one reply fits the token cap
 PROMPT_ID = "speaker_guess.v2"
 
 INSTRUCTION = """You identify who is speaking in a meeting transcript.

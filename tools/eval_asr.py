@@ -9,7 +9,8 @@ Reference-free checks, useful when changing prompts or models:
   * prompt leakage — segments that look copied from the prompt ("Attendees:",
     "Terms:", long runs of comma-separated names), a known Whisper failure
     mode when a prompt is fed into near-silence;
-  * volume — words and segments.
+  * volume — words and segments;
+  * script — share of Devanagari letters (target 0% for Romanized Hinglish).
 
     python tools/eval_asr.py <recording-id> [--against versions/<stamp>]
 
@@ -26,6 +27,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 import paths  # noqa: E402
 
+DEVANAGARI = re.compile(r"[\u0900-\u097F]")
+LETTERS = re.compile(r"[\u0900-\u097FA-Za-z]")
 LEAK = re.compile(r"\b(?:Attendees|Terms|Meeting)\s*:|(?:\b[A-Z][\w-]+,\s*){5,}")
 
 
@@ -58,6 +61,7 @@ def score(segments: list[dict], names: list[str], terms: list[str]) -> dict:
         "attendee_names_heard": f"{present(names)}/{len(names)}",
         "context_terms_heard": f"{present(terms)}/{len(terms)}",
         "prompt_leak_segments": sum(1 for s in segments if LEAK.search(s.get("text", ""))),
+        "devanagari_share": f"{100 * len(DEVANAGARI.findall(text)) / max(len(LETTERS.findall(text)), 1):.0f}%",
     }
 
 

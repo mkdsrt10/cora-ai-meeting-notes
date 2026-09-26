@@ -85,3 +85,32 @@ def _chunk_transcript(text: str, max_chars: int = 32000, overlap: int = 1000) ->
             break
         start = end - overlap
     return chunks
+
+
+class LazyLLM:
+    """One local chat model shared by several pipeline passes (romanization,
+    speaker naming); loaded on first use, released by release()."""
+
+    def __init__(self, model_id: str) -> None:
+        self.model_id = model_id
+        self._model = None
+        self._tokenizer = None
+
+    def generate(self, prompt: str, *, name: str, max_tokens: int = 1500,
+                 prompt_template: str | None = None, input_payload: Any = None) -> str:
+        import mlx_lm
+        if self._model is None:
+            self._model, self._tokenizer = mlx_lm.load(self.model_id)
+        try:
+            chat = self._tokenizer.apply_chat_template([{"role": "user", "content": prompt}], tokenize=False,
+                                                       add_generation_prompt=True)
+        except Exception:
+            chat = f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+        return traced_generate(self._model, self._tokenizer, chat, max_tokens=max_tokens, model_id=self.model_id,
+                               name=name, prompt_template=prompt_template, input_payload=input_payload or {"prompt": prompt})
+
+    def release(self) -> None:
+        if self._model is not None:
+            from .config import _release_mlx_model
+            _release_mlx_model(self._model, self._tokenizer)
+            self._model = self._tokenizer = None
