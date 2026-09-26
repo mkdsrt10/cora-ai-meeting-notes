@@ -52,3 +52,7 @@ curated_domain_vocabulary.json
 .permissions-v1
 weekly_reports/
 coach_data.json
+
+# App build output (scripts/build-app.sh)
+build/
+dist/

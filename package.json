@@ -1,7 +1,7 @@
 {
   "name": "cora",
   "productName": "Cora AI Meeting Notes",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Cora AI Meeting Notes \u2014 local-first meeting capture, transcription and notes for macOS",
   "main": "src/main.js",
   "scripts": {
@@ -18,7 +18,14 @@
       "target": [
         "dir"
       ],
-      "icon": "src/icon.icns"
+      "icon": "src/icon.icns",
+      "identity": null,
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Cora records your side of meetings so it can transcribe them on this Mac.",
+        "NSAppleEventsUsageDescription": "Cora checks which meeting app is in front to detect when a meeting starts.",
+        "LSMinimumSystemVersion": "14.0"
+      }
     },
     "files": [
       "src/**/*",
@@ -27,13 +34,25 @@
       "python/**/*",
       "plugins/**/*",
       "package.json",
-      "config.example.json"
+      "config.example.json",
+      "!**/__pycache__/**",
+      "!python/**/*.pyc"
     ],
     "asarUnpack": [
       "python/**",
       "capture/**",
       "bin/**",
-      "plugins/**"
+      "plugins/**",
+      "src/ui/web/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build/python-runtime",
+        "to": "python-runtime",
+        "filter": [
+          "**/*"
+        ]
+      }
     ]
   },
   "devDependencies": {

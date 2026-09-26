@@ -30,7 +30,13 @@ audio leaves your Mac unless you explicitly turn on an optional cloud feature.
 - [Homebrew](https://brew.sh). The setup script installs `ffmpeg`, `node` and
   [`uv`](https://docs.astral.sh/uv/) if they're missing.
 
-## Quickstart
+## Install
+
+Download the `.dmg` from the [latest release](https://github.com/mkdsrt10/cora-ai-meeting-notes/releases/latest)
+and follow [docs/INSTALL.md](docs/INSTALL.md) (the build is not notarized yet, so first launch needs one
+extra step). Or build from source:
+
+## Quickstart (from source)
 
 ```bash
 git clone https://github.com/mkdsrt10/cora-ai-meeting-notes.git
@@ -53,6 +59,7 @@ others in onboarding or point `local_whisper_models` at your own fine-tuned chec
 |---|---|
 | `make setup` | One-time machine setup (idempotent) |
 | `make dev` | Build native helpers if needed, start the app |
+| `make app` | Build a self-contained `.app` and `.dmg` in `dist/` |
 | `make build-native` | Compile the Swift helpers in `capture/` and `bin/` |
 | `make lint` / `make test` | ruff + ESLint (+ cross-file UI lint) / pytest — the same checks CI runs |
 
@@ -103,7 +110,7 @@ tools/                 traces, audio repair, model conversion, dataset tools
 tests/                 pytest suite (API security, pipeline pieces, tracing, editing)
 ```
 
-Data flows: capture → `inbox/` → archive (two-track audio + playback mix) →
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full picture. Data flows: capture → `inbox/` → archive (two-track audio + playback mix) →
 `pipeline.runner` (silence detection → chunked Whisper → speaker attribution → LLM speaker naming →
 enhanced notes) → SQLite + files in the recording folder → UI / MCP. Every AI call is recorded in the
 local trace store.

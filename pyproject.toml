@@ -1,6 +1,6 @@
 [project]
 name = "cora"
-version = "1.0.0"
+version = "0.1.0"
 description = "Cora AI Meeting Notes: local-first meeting memory for macOS: capture, transcribe, and summarize meetings on Apple Silicon."
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -3,7 +3,7 @@ SWIFTC ?= swiftc
 SWIFT_FLAGS ?= -O
 NATIVE := capture/dual-capture capture/mic-watch capture/speaker-watch bin/mac-ocr
 
-.PHONY: setup build-native dev lint test clean install-app
+.PHONY: setup build-native dev lint test clean install-app app
 
 setup:
 	./scripts/bootstrap.sh
@@ -21,6 +21,9 @@ $(NATIVE):
 
 dev: build-native
 	npm start
+
+app:  ## build a self-contained .app and .dmg in dist/
+	./scripts/build-app.sh
 
 install-app:  ## refresh the code inside /Applications/Cora.app (quit it first)
 	./scripts/install-app.sh

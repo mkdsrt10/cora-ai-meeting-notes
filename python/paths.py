@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 APP_NAME = "Cora AI Meeting Notes"
@@ -68,8 +69,10 @@ _PERMS_MARKER = DATA_DIR / ".permissions-v1"
 
 
 def venv_python() -> Path:
+    """Interpreter for child Python processes: the checkout's .venv, or else
+    the one running now (the bundled runtime in a packaged app)."""
     candidate = APP_ROOT / ".venv" / "bin" / "python"
-    return candidate if candidate.exists() else Path(shutil.which("python3") or "python3")
+    return candidate if candidate.exists() else Path(sys.executable)
 
 
 def ensure_data_dir() -> Path:
