@@ -1,0 +1,17 @@
+name: Feature request
+description: Suggest an idea
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes: {label: What problem would this solve?}
+    validations: {required: true}
+  - type: textarea
+    id: idea
+    attributes: {label: Proposed solution}
+  - type: dropdown
+    id: privacy
+    attributes:
+      label: Does it need to send data off the Mac?
+      options: ["No — fully local", "Yes — opt-in only", "Not sure"]
+    validations: {required: true}

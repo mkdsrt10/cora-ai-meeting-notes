@@ -1,0 +1,8 @@
+{
+  "_comment": "Example domain vocabulary used to bias Whisper's initial prompt. Your own copy lives in the Cora data directory (curated_domain_vocabulary.json) and is never committed. Generate one from your meetings with tools/build_curated_vocab.py.",
+  "people": [],
+  "clients_and_orgs": ["OpenAI", "Anthropic", "Google"],
+  "products_and_projects": ["Zoom", "Google Meet", "Slack", "Notion", "Jira"],
+  "technical_terms": ["API", "SDK", "LLM", "MLX", "Whisper", "Kubernetes", "PostgreSQL", "OKR", "KPI", "roadmap", "sprint", "backlog"],
+  "hinglish_phrases": ["theek hai", "haan", "matlab", "achha", "chalo"]
+}

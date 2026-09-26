@@ -1,0 +1,45 @@
+{
+  "name": "cora",
+  "productName": "Cora AI Meeting Notes",
+  "version": "1.0.0",
+  "description": "Cora AI Meeting Notes \u2014 local-first meeting capture, transcription and notes for macOS",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "build": "electron-builder",
+    "mcp": ".venv/bin/python python/mcp_server.py"
+  },
+  "build": {
+    "appId": "ai.cora.desktop",
+    "productName": "Cora AI Meeting Notes",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        "dir"
+      ],
+      "icon": "src/icon.icns"
+    },
+    "files": [
+      "src/**/*",
+      "capture/**/*",
+      "bin/**/*",
+      "python/**/*",
+      "plugins/**/*",
+      "package.json",
+      "config.example.json"
+    ],
+    "asarUnpack": [
+      "python/**",
+      "capture/**",
+      "bin/**",
+      "plugins/**"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0"
+  }
+}

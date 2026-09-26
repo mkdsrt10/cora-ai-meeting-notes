@@ -1,0 +1,22 @@
+{
+  "language": null,
+  "minimum_age_seconds": 5,
+  "process_existing_on_first_run": false,
+  "whisper_model": "mlx-community/whisper-small-mlx",
+  "silence_threshold_db": "-50dB",
+  "silence_min_gap_seconds": 1.2,
+  "transcription_vocabulary_hint": "",
+  "local_whisper_models": [],
+  "enterprise_lockdown": false,
+  "plugins": {
+    "coaching": {
+      "enabled": true
+    }
+  },
+  "local_tracing": {
+    "enabled": true,
+    "store_payloads": true,
+    "retention_days": 180
+  },
+  "participant_stopwords": []
+}

@@ -1,0 +1,54 @@
+# Virtual environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# OS & editor artifacts
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.ruff_cache/
+.pipeline.lock
+
+# Audio recordings & local dataset artifacts
+recordings/
+inbox/
+whisper_full_dataset/
+voicecoach.db*
+traces.db*
+logs/
+dist/
+.gstack/
+node_modules/
+state.json
+datasage.eda.json
+screenshot_*.png
+
+# Voice reference clips for speaker matching — real people's names + voice
+# biometric data. Names/metadata live in the people table in voicecoach.db
+# (already ignored above); the raw audio clips themselves must never be
+# committed. This does not scrub clips already in git history — see the
+# people/ cleanup note before this repo is ever made public.
+people/
+
+# Per-launch local API token written by python/server.py
+.api_token
+
+# Local backups of in-progress edits
+backups/
+
+# Compiled native helpers — built from source by `make build-native`
+capture/dual-capture
+capture/mic-watch
+capture/speaker-watch
+bin/mac-ocr
+
+# Per-user config and vocabulary (live in the data dir; see config.example.json)
+config.json
+curated_domain_vocabulary.json
+.permissions-v1
+weekly_reports/
+coach_data.json
