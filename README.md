@@ -41,12 +41,12 @@ If you build something on it, I'd genuinely like to know — see [Contributing](
 - **Structures notes** (summary, decisions, action items) using a small local LLM
   (Qwen3 4B by default, via MLX) — again, no cloud call for this by default.
 
-Behind the app layer in this repo, there's an ongoing (and mostly unpublished, for now) effort on
-the model and data side — fine-tuning the ASR model, curating training data from corrected
-transcripts, and evaluation tooling. `tools/` holds what's public so far
-(`curate_training_data.py`, `extract_whisper_dataset.py`, `convert_whisper_to_mlx.py`,
-`eval_asr.py`); more on how the models themselves are trained and improved is coming as that work
-matures.
+Behind the app layer in this repo, there's an ongoing effort on the model and data side —
+fine-tuning the ASR model, curating training data from corrected transcripts, and evaluation
+tooling. `tools/` holds what's public so far (`curate_training_data.py`,
+`extract_whisper_dataset.py`, `convert_whisper_to_mlx.py`, `eval_asr.py`); the reasoning behind
+several of the pipeline's design choices — and where a local model still falls short of a cloud
+one — is written up in [docs/RESEARCH.md](docs/RESEARCH.md). More is coming as that work matures.
 
 ## Requirements
 
