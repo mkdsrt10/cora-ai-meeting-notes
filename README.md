@@ -5,6 +5,29 @@ identifies speakers, and structures notes so what was said and decided is never 
 calls, all on your own machine by default. No account, no API key required to get started, no
 audio leaves your Mac unless you explicitly turn on an optional cloud feature.
 
+## Why this exists
+
+Camera phones didn't turn everyone into a professional photographer, but they did move "taking a
+good photo" from something you needed a professional for into something a phone just does by
+default. The next stretch should do the same thing to sitting in a meeting with someone smart
+taking notes for you — and right now, that mostly means renting the intelligence, one recording at
+a time, from whichever cloud vendor is behind the app.
+
+Cora is a bet on the other direction: that people should own that intelligence rather than rent it
+— their meetings, their transcripts, and the model reading them, running on hardware they already
+have, under their control. Local models keep getting better, and the point of building this
+in the open is to keep pushing until fully local isn't a compromise, just the obvious default —
+while still leaving the door open to a cloud model for anyone who wants the extra accuracy.
+
+Tools like [Granola](https://www.granola.ai) got this kind of AI meeting memory genuinely right as
+a product, and that's real credit — it's what convinced me this was worth building on. But it's
+closed: you can't see how it decided who said what, can't add a capability it doesn't have, can't
+point it at your own fine-tuned model, can't take your data and build on top of it. Cora AI Meeting
+Notes is meant to be the open, local-first, **customizable** version of that idea — a memory
+system, a base for plugins, a thing you can actually own and extend rather than just subscribe to.
+If you build something on it, I'd genuinely like to know — see [Contributing](#contributing) and
+[License](#license).
+
 ## What it does
 
 - **Records** meetings (system audio + mic) via a native Swift capture helper, with automatic
@@ -172,4 +195,7 @@ described in [SECURITY.md](SECURITY.md).
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE) © 2026 [Mayank Dubey](https://github.com/mkdsrt10). You're free to use, modify,
+fork and build commercial products on this code — the one condition MIT asks for in return is
+keeping that copyright notice in copies or forks, so the origin stays attributed. Please don't
+strip it or re-attribute the project to someone else.
