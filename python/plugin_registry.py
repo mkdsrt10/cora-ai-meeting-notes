@@ -17,7 +17,9 @@ import paths
 CONFIG_PATH = paths.CONFIG_PATH
 
 _DEFAULTS: dict[str, Any] = {
-    "coaching": {"enabled": True},
+    # Off unless explicitly enabled: an early prototype that still calls a
+    # cloud API (Gemini) for scoring — see plugins/coaching/README.md.
+    "coaching": {"enabled": False},
 }
 
 

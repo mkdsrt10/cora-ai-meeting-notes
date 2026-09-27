@@ -17,10 +17,13 @@ audio leaves your Mac unless you explicitly turn on an optional cloud feature.
   framework, so on-screen text ends up searchable alongside the transcript.
 - **Structures notes** (summary, decisions, action items) using a small local LLM
   (Qwen3 4B by default, via MLX) — again, no cloud call for this by default.
-- **Optional executive coaching** (`plugins/coaching/`) — scoring rubrics, delivery metrics,
-  a goals/practice-queue habit loop — is a separate, deletable plugin. It's the one part of Cora
-  that still calls a cloud API (Google Gemini) for its scoring; disable or remove it and the rest
-  of the app is unaffected. See [plugins/coaching/README.md](plugins/coaching/README.md).
+
+Behind the app layer in this repo, there's an ongoing (and mostly unpublished, for now) effort on
+the model and data side — fine-tuning the ASR model, curating training data from corrected
+transcripts, and evaluation tooling. `tools/` holds what's public so far
+(`curate_training_data.py`, `extract_whisper_dataset.py`, `convert_whisper_to_mlx.py`,
+`eval_asr.py`); more on how the models themselves are trained and improved is coming as that work
+matures.
 
 ## Requirements
 
@@ -84,7 +87,7 @@ first run):
 | `local_whisper_models` | Your own checkpoints, in priority order: `[{"path": "~/my-whisper-mlx", "label": "..."}]` |
 | `transcription_vocabulary_hint` | A static base hint biasing Whisper's spelling, combined at runtime with a glossary from known people and past transcripts |
 | `silence_min_gap_seconds` / `silence_threshold_db` | Tuning for the dead-air detection that runs before local transcription |
-| `plugins.coaching.enabled` | Turn the optional coaching plugin on/off without deleting it |
+| `plugins.<name>.enabled` | Turn an installed plugin on/off without deleting it — see [Plugins](#plugins-experimental) |
 | `enterprise_lockdown` | `true` disables every outbound feature — see [Security](#security) |
 | `transcript_script` | `roman` (default): Romanized Hinglish — Devanagari from the ASR is converted (original kept as training data); `native`: leave as transcribed |
 | `local_tracing` | Local AI-call trace store for retraining and benchmarks — see [docs/TRACING.md](docs/TRACING.md) |
@@ -105,7 +108,7 @@ python/server.py       starts the local API
 python/api/            router, auth (token/Host/Origin), http handler, views, routes/<area>.py
 python/pipeline/       config · audio · vocabulary · transcribe · speakers · llm · notes · runner
 python/                db, credentials, paths, policy (lockdown), ai_trace, transcript_edit, …
-plugins/coaching/      optional coaching plugin
+plugins/               optional, independently loadable plugins (see Plugins below)
 tools/                 traces, audio repair, model conversion, dataset tools
 tests/                 pytest suite (API security, pipeline pieces, tracing, editing)
 ```
@@ -118,21 +121,14 @@ local trace store.
 `python/paths.py` is the single source of truth for code vs. data locations, and
 `python/policy.py` holds the enterprise-lockdown switch every outbound feature checks.
 
-Core meeting intelligence (`python/diarization.py`) never imports the coaching plugin directly —
-it goes through `python/plugin_registry.py`, which returns `None` if the plugin is disabled or its
-directory doesn't exist. Deleting `plugins/coaching/` entirely is a supported way to run a
-coaching-free build.
-
 ## Privacy
 
 - Transcription, diarization, and note structuring run locally by default (`local_meeting_pipeline.py`).
-- The one thing that still calls a cloud API is the optional coaching plugin's scoring pass
-  (transcript + a re-encoded copy of the audio go to Google Gemini, and the remote copy is deleted
-  after analysis) — see [plugins/coaching/README.md](plugins/coaching/README.md) for exactly what
-  it sends and how to turn it off.
 - Voice reference clips used for local speaker recognition live in the data directory's `people/`
   folder — they never leave your machine.
 - Langfuse tracing is **off** unless you supply your own project keys and enable it.
+- An installed plugin can add its own network calls (see [Plugins](#plugins-experimental)) — none
+  are enabled by default.
 
 ## Security
 
@@ -146,13 +142,27 @@ coaching-free build.
   `VOICECOACH_ENTERPRISE_LOCKDOWN=1` via MDM, which the app can't override) blocks tracing, cloud LLM
   and transcription providers, VM sync and data contribution; only localhost model endpoints remain.
 
+## Plugins (experimental)
+
+Cora's core (record → transcribe → diarize → summarize) is fully self-contained; `plugins/` is a
+mechanism for bolting on optional functionality without touching it. Core code never imports a
+plugin directly — it goes through `python/plugin_registry.py`, which returns `None` if the plugin
+is disabled or its directory doesn't exist, so deleting a plugin's folder is always a safe way to
+run without it.
+
+There's currently one plugin, `plugins/coaching/` (meeting-archetype classification, per-speaker
+scoring, delivery metrics, a goals/practice-queue habit loop). **It's an early, unfinished
+prototype** — expect rough edges and breaking changes — and it still calls Google Gemini's cloud
+API for scoring rather than running locally; see [plugins/coaching/README.md](plugins/coaching/README.md)
+for exactly what it sends. It's off by default (`config.json`'s `plugins.coaching.enabled`). More
+plugins, and a documented plugin interface, are planned.
+
 ## Known limitations / in progress
 
 - Windows/Linux are not supported; this is a macOS-only project for now.
 - Live/streaming transcription during an active recording is not yet implemented — transcription
   happens after you stop recording.
-- The `plugins/coaching/` scoring pass depends on Google Gemini; a fully local coaching mode isn't
-  built yet (see `plugins/coaching/coach_engine.py` for a local, non-LLM heuristic starting point).
+- The plugin system itself is early — see [Plugins](#plugins-experimental).
 
 ## Contributing
 

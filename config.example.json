@@ -10,7 +10,7 @@
   "enterprise_lockdown": false,
   "plugins": {
     "coaching": {
-      "enabled": true
+      "enabled": false
     }
   },
   "local_tracing": {
