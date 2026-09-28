@@ -11,4 +11,5 @@
   load().catch(error=>toast(error.message,true));
   loadFolders();
   loadLocalStats();
+  checkModelsOnStartup();
 })();

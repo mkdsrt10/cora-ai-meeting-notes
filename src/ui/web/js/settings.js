@@ -56,10 +56,14 @@ async function renderSettingsModels(){
   const host = $('#settingsModelRows');
   if(!host) return;
   try{
-    const res = await api('/api/onboarding/models');
-    const whisperRows = (res.whisper_options || []).map((o,i) => `<option value="${esc(o.id)}">${esc(o.label)}${o.already_downloaded ? ' · on your Mac' : ''}</option>`).join('');
+    const [res, modelStatus] = await Promise.all([
+      api('/api/onboarding/models'),
+      api('/api/models/status').catch(() => null),
+    ]);
+    const whisperOptions = res.whisper_options || [];
+    const whisperRows = whisperOptions.map((o,i) => `<option value="${esc(o.id)}">${esc(o.label)}${o.already_downloaded ? ' · on your Mac' : ''}</option>`).join('');
     const liquidRows = (res.liquid_options || []).map(o => `<option value="${esc(o.id)}" ${o.id === res.selected_liquid_model ? 'selected' : ''}>${esc(o.label)}${o.already_downloaded ? ' · on your Mac' : ''}</option>`).join('');
-    const currentWhisper = res.whisper_options?.[0]?.id;
+    const currentWhisper = modelStatus?.whisper?.model_id || whisperOptions[0]?.id;
     host.innerHTML = `
       <div class="settings-model-row">
         <div class="settings-model-icon">
@@ -67,6 +71,7 @@ async function renderSettingsModels(){
         </div>
         <div><div class="model-title">Transcription</div><div class="model-sub">${esc(res.whisper_options?.[0]?.tradeoff || '')}</div></div>
         <select id="settingsWhisperModel">${whisperRows}</select>
+        <div id="settingsWhisperModelAction" style="margin-left:8px"></div>
       </div>
       <div class="settings-model-row">
         <div class="settings-model-icon">
@@ -91,9 +96,24 @@ async function renderSettingsModels(){
       </div>
     `;
     $('#settingsWhisperModel').value = currentWhisper;
+    // Only show a Download action when the currently-selected option needs
+    // it — once it's on your Mac, the dropdown selection itself is enough.
+    const updateWhisperAction = () => {
+      const selected = whisperOptions.find(o => o.id === $('#settingsWhisperModel')?.value);
+      const host = $('#settingsWhisperModelAction');
+      if(!host) return;
+      if(!selected || selected.already_downloaded){ host.innerHTML = ''; return; }
+      host.innerHTML = '<button class="button secondary small model-setup-download">Download</button>';
+      host.querySelector('.model-setup-download').onclick = () => startModelDownload(selected.id, host, () => {
+        selected.already_downloaded = true;
+        updateWhisperAction();
+      });
+    };
+    updateWhisperAction();
     $('#settingsWhisperModel')?.addEventListener('change', async (e) => {
       try{ await saveSetting('whisper_model_choice', e.target.value); toast('Saved — used on the next recording processed'); }
       catch(error){ toast(error.message, true); }
+      updateWhisperAction();
     });
     $('#settingsLiquidModel')?.addEventListener('change', async (e) => {
       try{ await saveSetting('liquid_model', e.target.value); toast('Saved — used on the next summary generated'); }

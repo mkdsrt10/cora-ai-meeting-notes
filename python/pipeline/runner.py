@@ -14,7 +14,7 @@ import ai_trace
 import db
 import paths
 from .common import _parse_ts, _write_progress, format_ts
-from .config import LOCAL_LLM_MODEL_DEFAULT, MLX_WHISPER_MODEL
+from .config import LOCAL_LLM_MODEL_DEFAULT, resolve_whisper_model
 from .llm import _last_llm_stats
 from .notes import _markdown_bullets, generate_enhanced_notes
 from .speakers import _guess_remote_speakers, _load_continuation_segments, guess_speaker_from_tracks, load_accessibility_timeline, load_ax_participants, match_speaker_from_timeline, resolve_other_participant_name
@@ -347,7 +347,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         tracing.trace_pipeline_run(
             recording_id=folder.name,
             pipeline_type="local_meeting_pipeline",
-            model=Path(MLX_WHISPER_MODEL).name if os.path.isabs(MLX_WHISPER_MODEL) else MLX_WHISPER_MODEL,
+            model=(lambda m: Path(m).name if os.path.isabs(m) else m)(resolve_whisper_model()),
             input_summary={
                 "audio_file": audio_file.name,
                 "audio_duration_seconds": round(audio_duration, 1),

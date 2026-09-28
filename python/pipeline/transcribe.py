@@ -11,7 +11,7 @@ from typing import Any, Callable, Optional
 import ai_trace
 import db
 from .audio import _to_original_time, build_trimmed_audio, ensure_mixed_audio, extract_clip, find_speech_segments, probe_duration
-from .config import MLX_WHISPER_MODEL
+from .config import resolve_whisper_model
 
 
 def collapse_repetition_loops(text: str) -> str:
@@ -53,14 +53,15 @@ def transcribe_local_mlx(audio_path: Path, prompt: str = "") -> dict[str, Any]:
     """
     import mlx_whisper
 
+    model_id = resolve_whisper_model()
     decode_params = dict(language="en", condition_on_previous_text=False, temperature=(0.0, 0.2, 0.4),
                          compression_ratio_threshold=2.4, logprob_threshold=-1.0, no_speech_threshold=0.5,
                          word_timestamps=False)
     audio_info = ai_trace.file_fingerprint(audio_path)
-    with ai_trace.span("transcription", "whisper.local_pipeline", provider="mlx", model=MLX_WHISPER_MODEL,
+    with ai_trace.span("transcription", "whisper.local_pipeline", provider="mlx", model=model_id,
                        input={"audio": audio_info, "initial_prompt": prompt}, params=decode_params,
                        prompt_template=prompt) as trace:
-        result = _whisper_transcribe(mlx_whisper, audio_path, prompt)
+        result = _whisper_transcribe(mlx_whisper, audio_path, prompt, model_id)
         trace.set_output(_whisper_trace_output(result), audio_s=audio_info.get("duration_s"),
                          segments=len(result.get("segments", [])))
     for seg in result.get("segments", []):
@@ -82,10 +83,10 @@ def _whisper_trace_output(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _whisper_transcribe(mlx_whisper, audio_path: Path, prompt: str) -> dict[str, Any]:
+def _whisper_transcribe(mlx_whisper, audio_path: Path, prompt: str, model_id: str) -> dict[str, Any]:
     return mlx_whisper.transcribe(
         str(audio_path),
-        path_or_hf_repo=MLX_WHISPER_MODEL,
+        path_or_hf_repo=model_id,
         language="en",
         initial_prompt=prompt,
         condition_on_previous_text=False,
@@ -201,7 +202,8 @@ def transcribe_with_silence_removal(audio_path: Path, prompt: str, folder: Optio
     anti-repetition setting is meant to prevent, but which a 70-minute
     uninterrupted pass could still trigger during long true-silence stretches.
     """
-    model_label = Path(MLX_WHISPER_MODEL).name if os.path.isabs(MLX_WHISPER_MODEL) else MLX_WHISPER_MODEL
+    model_id = resolve_whisper_model()
+    model_label = Path(model_id).name if os.path.isabs(model_id) else model_id
     duration = probe_duration(audio_path)
     mixed_audio_path = ensure_mixed_audio(audio_path)
     speech_segments = find_speech_segments(mixed_audio_path)

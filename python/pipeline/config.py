@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import db
 import paths
@@ -30,34 +30,101 @@ def _config() -> dict[str, Any]:
         return {}
 
 
+def _dir_has_weights(model_dir: Path) -> bool:
+    """Whether model_dir actually has real (non-empty) weights, not just a
+    config/tokenizer — covers both mlx_whisper's expected filenames
+    (weights.safetensors, falling back to weights.npz — see
+    mlx_whisper.load_models.load_model) and mlx_lm's sharded *.safetensors.
+
+    A directory that exists but is missing its weights (an interrupted
+    download or conversion, or files cleaned up under disk pressure) used
+    to get selected anyway — mlx_whisper's own load_model() only checks
+    model_dir.exists(), so it picked the broken directory and every
+    recording failed with an opaque "[load_npz] ... not a zip file" error
+    until the whole app was restarted onto a different choice.
+    """
+    for pattern in ("weights.safetensors", "weights.npz", "*.safetensors"):
+        for f in model_dir.glob(pattern):
+            if f.is_file() and f.stat().st_size > 0:
+                return True
+    return False
+
+
+def _hf_snapshot_dir(repo_id: str) -> Optional[Path]:
+    """The downloaded snapshot folder for a cached HF repo id, or None if
+    it's never been fetched (or the cache entry is an empty shell)."""
+    cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / ("models--" + repo_id.replace("/", "--"))
+    snapshots = cache_dir / "snapshots"
+    if not snapshots.is_dir():
+        return None
+    for snap in snapshots.iterdir():
+        if snap.is_dir():
+            return snap
+    return None
+
+
+def model_ready(model_id: str) -> bool:
+    """Whether model_id — a local directory path, or an HF repo id — has
+    real weights available right now: a local fine-tune whose weights went
+    missing, or an HF repo never (fully) downloaded, both read as not
+    ready, rather than surfacing as an opaque crash deep inside mlx later."""
+    path = Path(model_id).expanduser()
+    if path.is_dir():
+        return _dir_has_weights(path)
+    snap = _hf_snapshot_dir(model_id)
+    return bool(snap) and _dir_has_weights(snap)
+
+
+def whisper_model_status() -> dict[str, Any]:
+    model_id = resolve_whisper_model()
+    return {"model_id": model_id, "ready": model_ready(model_id)}
+
+
+def llm_model_status() -> dict[str, Any]:
+    model_id = db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT)
+    return {"model_id": model_id, "ready": model_ready(model_id)}
+
+
 def local_whisper_models() -> list[dict[str, Any]]:
     """Fine-tuned local checkpoints listed in config.json, in priority order.
 
     Each entry: {"path": "~/my-whisper-mlx", "label": ..., "tradeoff": ...}.
-    Only entries whose path exists are returned.
+    Only entries that exist AND have actual weights are returned.
     """
     models = []
     for entry in _config().get("local_whisper_models") or []:
         if isinstance(entry, str):
             entry = {"path": entry}
         path = Path(str(entry.get("path", ""))).expanduser()
-        if entry.get("path") and path.exists():
+        if entry.get("path") and path.is_dir() and _dir_has_weights(path):
             models.append({**entry, "path": path})
     return models
 
 
-def _resolve_whisper_model() -> str:
+def resolve_whisper_model() -> str:
+    """Which Whisper model to transcribe with, right now.
+
+    Deliberately re-read on every call rather than cached at import time: a
+    server process can live across many settings changes (switching models
+    in the UI, a local checkpoint's weights going missing), and a stale
+    cached choice previously meant a broken local model kept getting picked
+    every run until the whole app was restarted.
+    """
     # An explicit onboarding choice (db setting) wins over the automatic
-    # fine-tuned-model-if-present fallback chain.
+    # fine-tuned-model-if-present fallback chain — but only when it still
+    # resolves to something real. A Hugging Face repo id (no local path)
+    # can't be validated without a network call, so those are trusted as
+    # given; an explicit *local* choice whose weights have since gone
+    # missing falls through instead of repeating the same failure forever.
     chosen = db.get_setting("whisper_model_choice")
     if chosen:
-        return chosen
+        chosen_path = Path(str(chosen)).expanduser()
+        if not chosen_path.is_dir() or _dir_has_weights(chosen_path):
+            return chosen
+        print(f"[Local MLX] Configured whisper_model_choice {chosen!r} has no weights; falling back.", flush=True)
     for model in local_whisper_models():
         return str(model["path"])
     return _config().get("whisper_model") or PUBLIC_WHISPER_FALLBACK
-
-
-MLX_WHISPER_MODEL = _resolve_whisper_model()
 
 
 LOCAL_LLM_MODEL_DEFAULT = "mlx-community/Qwen3-4B-Instruct-2507-4bit"

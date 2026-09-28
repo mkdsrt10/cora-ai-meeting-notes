@@ -183,8 +183,10 @@ LOCAL_LLM_MODELS = [
 
 
 def _hf_cache_has(repo_id: str) -> bool:
-    cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / ("models--" + repo_id.replace("/", "--"))
-    return cache_dir.exists()
+    """Whether repo_id has real, usable weights cached locally — not just an
+    empty/interrupted cache directory. See pipeline.config.model_ready."""
+    import pipeline.config as pcfg
+    return pcfg.model_ready(repo_id)
 
 
 def local_usage_stats() -> dict[str, Any]:
@@ -262,6 +264,12 @@ def available_models() -> dict[str, Any]:
         "already_downloaded": _hf_cache_has("mlx-community/whisper-small-mlx"),
         "tradeoff": "Works out of the box, no personal fine-tuning — good general accuracy.",
     })
+    whisper_options.append({
+        "id": "mayank-dubey-ai/whisper-large-v3-turbo-hinglish-mlx",
+        "label": "Whisper Turbo Hinglish (public fine-tune)",
+        "already_downloaded": _hf_cache_has("mayank-dubey-ai/whisper-large-v3-turbo-hinglish-mlx"),
+        "tradeoff": "4-layer turbo decoder fine-tuned on Hindi-English speech — fast, no personal setup needed. For the deepest, most loop-resistant option see docs/RESEARCH.md on decoder depth.",
+    })
     liquid_options = [
         {**model, "already_downloaded": _hf_cache_has(model["id"])}
         for model in LOCAL_LLM_MODELS
@@ -270,7 +278,7 @@ def available_models() -> dict[str, Any]:
         "whisper_options": whisper_options,
         "liquid_options": liquid_options,
         "selected_liquid_model": db.get_setting("liquid_model", LOCAL_LLM_MODELS[0]["id"]),
-        "note": "Models download automatically the first time you process a recording if not already cached — no separate download step blocks setup.",
+        "note": "Download a model ahead of time from here, or from the startup prompt — otherwise it downloads automatically the first time you process a recording.",
     }
 
 

@@ -550,6 +550,25 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="modelSetupModal" style="display:none">
+  <div class="modal" style="max-width: 560px;">
+    <header>
+      <div>
+        <span class="kicker">LOCAL AI SETUP</span>
+        <h2>Set up a transcription model</h2>
+        <p>No transcription model is ready on this Mac yet. Pick one below to download it — this only happens once.</p>
+      </div>
+      <button class="modal-close" id="closeModelSetupModal" aria-label="Close">✕</button>
+    </header>
+
+    <div style="margin-top: 18px; display: flex; flex-direction: column; gap: 10px;" id="modelSetupWhisperList"></div>
+
+    <div class="modal-actions" style="margin-top: 20px; justify-content: flex-end;">
+      <button class="button secondary" id="modelSetupLater" type="button">Not now</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="credentialsModal">
   <div class="modal" style="max-width: 560px;">
     <header>
@@ -636,6 +655,7 @@
 <script src="/js/sessions.js"></script>
 <script src="/js/memory.js"></script>
 <script src="/js/settings.js"></script>
+<script src="/js/model-setup.js"></script>
 <script src="/js/notepad.js"></script>
 <script src="/js/transcript.js"></script>
 <script src="/js/detail.js"></script>

@@ -2,6 +2,7 @@
 from __future__ import annotations
 import datetime as dt
 import shutil
+from pathlib import Path
 
 from api.router import route
 import credentials
@@ -84,6 +85,35 @@ def get_api_onboarding_meeting_types(req, path: str, query: dict) -> None:
 @route("GET", '/api/onboarding/models')
 def get_api_onboarding_models(req, path: str, query: dict) -> None:
     return req.send_json(available_models())
+
+
+@route("GET", '/api/models/status')
+def get_api_models_status(req, path: str, query: dict) -> None:
+    """Whether the currently selected transcription/notes models actually
+    have weights on disk right now — checked at startup (and can be
+    re-checked any time) so a broken or never-downloaded model surfaces as
+    a clear "pick or download one" prompt instead of failing deep inside a
+    recording with an opaque mlx error."""
+    import pipeline.config as pcfg
+    return req.send_json({"whisper": pcfg.whisper_model_status(), "liquid": pcfg.llm_model_status()})
+
+
+@route("POST", '/api/models/download')
+def post_api_models_download(req, path: str, body: dict) -> None:
+    model_id = str(body.get("id", "")).strip()
+    if not model_id or "/" not in model_id or Path(model_id).expanduser().is_absolute():
+        raise ValueError("id must be a Hugging Face repo id (e.g. 'org/model') — a local path can't be downloaded")
+    import download_manager
+    return req.send_json(download_manager.start(model_id))
+
+
+@route("GET", '/api/models/download-status')
+def get_api_models_download_status(req, path: str, query: dict) -> None:
+    model_id = query.get("id", [""])[0]
+    if not model_id:
+        raise ValueError("id is required")
+    import download_manager
+    return req.send_json(download_manager.status(model_id))
 
 
 @route("POST", '/api/memory/terms')
