@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0 — 2026-09-29
+
+- Model setup from the UI: a startup check prompts to download or pick a model when the configured
+  one isn't ready, with live download progress; the same flow is wired into Settings.
+- Added `mayank-dubey-ai/whisper-large-v3-turbo-hinglish-mlx` as a one-click public Hinglish
+  fine-tune, no personal checkpoint or local conversion required.
+- Fixed a bug where the transcription model choice was cached at process startup, so switching
+  models (or fixing a broken local checkpoint) silently had no effect until a full app restart.
+- Fixed local Whisper model selection only checking that a directory existed, not that it actually
+  had weight files — a checkpoint that lost its weights (e.g. to disk pressure) would keep being
+  picked over a working fallback, failing every transcription with an opaque `load_npz` error.
+- `docs/RESEARCH.md`: why local meeting intelligence breaks, and what fixes it.
+
 ## 0.1.0 — 2026-09-26 — first public release
 
 - Local-first meeting capture, transcription (MLX Whisper), speaker attribution and notes on Apple Silicon.
