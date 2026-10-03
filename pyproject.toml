@@ -9,7 +9,7 @@ requires-python = ">=3.10"
 # System dependency (not pip-installable): `brew install ffmpeg`.
 dependencies = [
     "mlx>=0.32",
-    "mlx-metal>=0.32",
+    "mlx-metal>=0.32.3",
     "mlx-whisper>=0.4",
     "mlx-lm>=0.31",
     "numpy>=2.2",
