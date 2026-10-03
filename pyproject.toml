@@ -8,7 +8,7 @@ requires-python = ">=3.10"
 # Apple Silicon only — mlx/mlx-whisper/mlx-lm require Metal.
 # System dependency (not pip-installable): `brew install ffmpeg`.
 dependencies = [
-    "mlx>=0.32",
+    "mlx>=0.32.3",
     "mlx-metal>=0.32",
     "mlx-whisper>=0.4",
     "mlx-lm>=0.31",
