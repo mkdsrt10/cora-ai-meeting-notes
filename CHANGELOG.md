@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1 — 2026-10-05
+
+- Added `mayank-dubey-ai/tara-mlx` — a public MLX conversion of Trelis Tara (Apache 2.0, full
+  32-layer decoder) — as a one-click downloadable Whisper model, offered as the recommended
+  high-accuracy option alongside the existing turbo fine-tune.
+- The model-download prompt now also fires immediately after first-run onboarding finishes,
+  instead of only on the next app launch — so a freshly chosen model that isn't downloaded yet
+  gets a visible download-with-progress prompt right away, rather than silently downloading on
+  the first recording with no UI feedback.
+
 ## 0.2.0 — 2026-09-29
 
 - Model setup from the UI: a startup check prompts to download or pick a model when the configured

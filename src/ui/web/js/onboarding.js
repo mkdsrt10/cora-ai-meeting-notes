@@ -124,6 +124,11 @@ function closeOnboarding(){
   $('#onboardingOverlay').style.display = 'none';
   $('.app-shell').style.display = '';
   load().catch(error=>toast(error.message,true));
+  // The model picked during onboarding may not actually be downloaded yet —
+  // surface the same download-with-progress prompt used on later launches
+  // immediately, instead of waiting for the next app start (or a recording
+  // silently triggering a blind download with no UI feedback).
+  checkModelsOnStartup();
 }
 
 // Onboarding tabs
