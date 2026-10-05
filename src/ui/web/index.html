@@ -372,6 +372,7 @@
           <button class="settings-nav-item" data-settings-panel="cloud-models">Cloud LLMs &amp; APIs</button>
           <button class="settings-nav-item" data-settings-panel="mcp">Claude / ChatGPT (MCP)</button>
           <button class="settings-nav-item" data-settings-panel="privacy">Data &amp; privacy</button>
+          <button class="settings-nav-item" data-settings-panel="logs">Notifications &amp; logs</button>
         </div>
         <div class="settings-content">
 
@@ -521,6 +522,27 @@
             <p class="settings-sub">Cora's coaching plugin is the only part that calls a cloud API — see plugins/coaching/README.md.</p>
             <div class="storage-grid"><article><span>Archive size</span><strong id="archiveSize">—</strong></article><article><span>Audio size</span><strong id="audioSize">—</strong></article><article><span>Free space</span><strong id="storageFree">—</strong></article><article><span>Estimated runway</span><strong id="storageDays">—</strong></article></div>
             <button class="button secondary" id="settingsOpenFolder">Open local data folder</button>
+          </div>
+
+          <div class="settings-panel" data-settings-content="logs" hidden>
+            <h1 class="settings-title">Notifications &amp; logs</h1>
+            <p class="settings-sub">A record of what Cora has shown you and the pipeline's own logs — useful for spotting failures after the fact, or sending to support.</p>
+
+            <h4 style="margin-top:20px">Recent notifications</h4>
+            <div id="notificationsList" class="settings-model-rows"><p class="muted">Loading…</p></div>
+
+            <h4 style="margin-top:24px">Log files</h4>
+            <div id="logFilesList" class="settings-model-rows"><p class="muted">Loading…</p></div>
+            <pre class="notepad-readonly" id="logFileViewer" style="display:none;font-size:11px;padding:10px;border-radius:6px;background:var(--surface-2);border:1px solid var(--hairline);max-height:320px;overflow:auto;margin-top:10px;"></pre>
+
+            <h4 style="margin-top:24px">Send logs</h4>
+            <p class="muted" style="margin:4px 0 8px;">Bundles recent notifications and pipeline logs into a zip. Nothing is sent anywhere unless you set a server URL below (e.g. a Tailscale address you control) and click Send — otherwise it's just saved locally for you to pick up.</p>
+            <div class="settings-field"><label for="settingsLogUploadUrl">Log upload server URL (optional)</label><input type="text" id="settingsLogUploadUrl" placeholder="http://100.x.x.x:8080/ingest"></div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="button secondary" id="logsBundleSaveBtn" type="button">Save bundle locally</button>
+              <button class="button primary" id="logsBundleSendBtn" type="button">Save &amp; send to server</button>
+            </div>
+            <p class="muted" id="logsBundleStatus" style="margin-top:8px"></p>
           </div>
 
         </div>

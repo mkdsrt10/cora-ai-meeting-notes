@@ -463,6 +463,17 @@ def all_recordings() -> list[dict[str, Any]]:
     rows = db.get_all_recordings()
     items = []
     for row in rows:
+        # A recording started via pause/resume (or the detail page's
+        # "Continue this meeting" button) carries continues_recording_id and
+        # is always transient: the pipeline merges its content into the
+        # parent recording and deletes this row once processing finishes
+        # (pipeline/runner.py). Showing it in the dashboard in the meantime
+        # makes one meeting look like two — the parent sitting there and
+        # this one going through its own recording/processing status — so
+        # it's left out of the main list entirely; its content still shows
+        # up, just under the parent, once the merge completes.
+        if (row.get("metadata") or {}).get("continues_recording_id"):
+            continue
         if row.get("status") in PENDING_TITLES:
             items.append(recording_item(row))
             continue

@@ -17,7 +17,9 @@ def test_expected_endpoints_are_registered():
     routes = set(router.registered())
     for expected in [("GET", "/api/dashboard"), ("GET", "/api/recording"), ("POST", "/api/recording/transcript/edit"),
                      ("POST", "/api/process-recording"), ("GET", "/media/"), ("POST", "/api/credentials/save"),
-                     ("GET", "/api/settings"), ("POST", "/api/settings")]:
+                     ("GET", "/api/settings"), ("POST", "/api/settings"),
+                     ("GET", "/api/notifications"), ("POST", "/api/notifications/log"),
+                     ("GET", "/api/logs"), ("GET", "/api/logs/file"), ("POST", "/api/logs/bundle")]:
         assert expected in routes, expected
     assert len(routes) >= 70
 

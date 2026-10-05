@@ -72,3 +72,18 @@ def test_transcribed_recording_without_audio_stays_listed(recording):
     from api import views
     rec_id, _folder = recording
     assert rec_id in {item["id"] for item in views.all_recordings()}
+
+
+def test_continuation_child_is_hidden_from_the_dashboard_list(recording):
+    """A recording started via pause/resume (or "Continue this meeting")
+    carries continues_recording_id and is only ever transient — the
+    pipeline merges it into the parent and deletes it once processed. It
+    must never show up as its own card in the meantime, or one meeting
+    looks like two (the bug this list filter fixes)."""
+    from api import views
+    parent_id, _parent_folder = recording
+    db.create_pending_recording("child_123", source_stem="child_123", recorded_at="2026-09-25T10:05:00",
+                                 status="recording", continues_recording_id=parent_id)
+    ids = {item["id"] for item in views.all_recordings()}
+    assert parent_id in ids
+    assert "child_123" not in ids

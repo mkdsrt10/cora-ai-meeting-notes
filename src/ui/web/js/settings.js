@@ -39,6 +39,7 @@ async function loadSettingsView(){
 
   await renderSettingsModels();
   await loadMcpSettings();
+  loadLogsSettings();
   try {
     const credsRes = await api('/api/credentials/status');
     const c = credsRes.credentials || {};
@@ -268,3 +269,99 @@ $('#settingsCredSaveBtn')?.addEventListener('click', async () => {
     }
   }
 });
+
+// --- Notifications & logs ---
+
+const LOG_LEVEL_CLASS = { error: 'needs_diarization', warning: 'needs_diarization', info: 'coached' };
+
+async function loadLogsSettings(){
+  const urlInput = $('#settingsLogUploadUrl');
+  if(urlInput && !urlInput.dataset.loaded){
+    try{
+      const res = await api('/api/settings', { method: 'POST', body: JSON.stringify({ key: 'log_upload_url' }) });
+      urlInput.value = res.value || '';
+      urlInput.dataset.loaded = '1';
+    }catch{}
+  }
+  await Promise.all([renderNotificationsList(), renderLogFilesList()]);
+}
+
+async function renderNotificationsList(){
+  const host = $('#notificationsList');
+  if(!host) return;
+  try{
+    const res = await api('/api/notifications?limit=50');
+    const items = res.notifications || [];
+    host.innerHTML = items.length ? items.map(n => `
+      <div class="model-select-card">
+        <div class="model-select-info">
+          <h4>${esc(n.title || 'Cora')} <span class="stage-pill ${LOG_LEVEL_CLASS[n.level] || ''}" style="font-size:10px">${esc(n.level || 'info')}</span></h4>
+          <p>${esc(n.body || '')}</p>
+          <small class="muted">${esc(n.created_at || '')}</small>
+        </div>
+      </div>
+    `).join('') : '<p class="muted">No notifications yet.</p>';
+  }catch(error){
+    host.innerHTML = `<p class="muted">Couldn't load notifications: ${esc(error.message)}</p>`;
+  }
+}
+
+async function renderLogFilesList(){
+  const host = $('#logFilesList');
+  if(!host) return;
+  try{
+    const res = await api('/api/logs');
+    const files = res.files || [];
+    host.innerHTML = files.length ? files.map(f => `
+      <div class="model-select-card" data-log-name="${esc(f.name)}">
+        <div class="model-select-info">
+          <h4>${esc(f.name)}${f.is_error_log ? ' <span class="stage-pill needs_diarization" style="font-size:10px">error log</span>' : ''}</h4>
+          <p class="muted">${fmtBytes(f.size_bytes)} · updated ${esc(f.modified_at || '')}</p>
+        </div>
+        <div class="model-setup-action"><button class="button small" data-view-log="${esc(f.name)}">View</button></div>
+      </div>
+    `).join('') : '<p class="muted">No log files yet.</p>';
+    host.querySelectorAll('[data-view-log]').forEach(btn => {
+      btn.addEventListener('click', () => viewLogFile(btn.dataset.viewLog));
+    });
+  }catch(error){
+    host.innerHTML = `<p class="muted">Couldn't load logs: ${esc(error.message)}</p>`;
+  }
+}
+
+async function viewLogFile(name){
+  const viewer = $('#logFileViewer');
+  if(!viewer) return;
+  viewer.style.display = 'block';
+  viewer.textContent = 'Loading…';
+  try{
+    const res = await api(`/api/logs/file?name=${encodeURIComponent(name)}`);
+    viewer.textContent = (res.truncated ? `(showing the last ${fmtBytes(res.content.length)} of ${fmtBytes(res.size_bytes)})\n\n` : '') + (res.content || '(empty)');
+  }catch(error){
+    viewer.textContent = `Couldn't load ${name}: ${error.message}`;
+  }
+}
+
+async function sendLogsBundle(send){
+  const statusEl = $('#logsBundleStatus');
+  const urlInput = $('#settingsLogUploadUrl');
+  if(statusEl) statusEl.textContent = send ? 'Bundling and sending…' : 'Bundling…';
+  try{
+    if(send && urlInput?.value.trim()){
+      await saveSetting('log_upload_url', urlInput.value.trim());
+    }
+    const res = await api('/api/logs/bundle', { method: 'POST', body: JSON.stringify({ send }) });
+    if(res.sent){
+      statusEl.textContent = `Sent — also saved locally at ${res.saved_to}`;
+    } else if(send){
+      statusEl.textContent = `Couldn't send: ${res.error || 'unknown error'}. Bundle saved at ${res.saved_to}`;
+    } else {
+      statusEl.textContent = `Saved to ${res.saved_to} (${fmtBytes(res.size_bytes)})`;
+    }
+  }catch(error){
+    statusEl.textContent = `Failed: ${error.message}`;
+  }
+}
+
+$('#logsBundleSaveBtn')?.addEventListener('click', () => sendLogsBundle(false));
+$('#logsBundleSendBtn')?.addEventListener('click', () => sendLogsBundle(true));

@@ -33,6 +33,15 @@ let meetingNotified = false;
 let isProcessing = false;
 let isPaused = false;
 let pausedRecordingId = null;
+// Pause/resume works by starting a new recording linked via
+// continues_recording_id — the pipeline merges it into the original
+// meeting's folder/DB row once processed (pipeline/runner.py), deleting the
+// short-lived child row. Until that merge happens, this tracks the very
+// first recording in the current pause/resume chain, so its status (not
+// the child's) stays in sync with what's actually happening — otherwise it
+// sits stuck on "paused" while a second, unrelated-looking card appears for
+// the child, which is what made this look like two meetings instead of one.
+let continuationRootId = null;
 let isMicMuted = false;
 let floaterWindow = null;
 
@@ -84,6 +93,26 @@ function createFloaterWindow() {
   });
 
   return floaterWindow;
+}
+
+// Every OS notification Cora shows is also persisted server-side (table:
+// notifications) — Notification Center clears them quickly, and this is
+// the only durable record of what happened for diagnosing after the fact.
+// `show: false` lets a caller attach `.on('action'/'click', ...)` handlers
+// before showing it itself; everyone else gets fire-and-forget behavior
+// identical to the old `new Notification({...}).show()`.
+function notify(opts, { level = 'info', recordingId = null, show = true } = {}) {
+  const instance = new Notification(opts);
+  postJson('/api/notifications/log', {
+    level,
+    title: opts.title || '',
+    body: opts.body || '',
+    recording_id: recordingId,
+  }).catch((err) => {
+    console.error('Failed to log notification:', err.message);
+  });
+  if (show) instance.show();
+  return instance;
 }
 
 function notifyStateChange() {
@@ -364,27 +393,27 @@ async function selectMeetingArchetype(arch) {
     }
   }
   if (arch) {
-    new Notification({
+    notify({
       title: `Cora — Hat: ${arch.hat}`,
       body: arch.tip,
       icon: ICON_PATH,
-    }).show();
+    });
   } else {
-    new Notification({
+    notify({
       title: 'Cora — Auto-detect Archetype',
       body: 'Cora will analyze conversational dynamics and classify the meeting archetype after diarization.',
       icon: ICON_PATH,
-    }).show();
+    });
   }
 }
 
 function promptMeetingType() {
-  const notification = new Notification({
+  const notification = notify({
     title: 'Cora',
     body: 'What kind of meeting is this? Select an archetype for real-time executive coaching:',
     actions: MEETING_ARCHETYPES.map(a => ({ type: 'button', text: `${a.id}·${a.label}` })),
     closeButtonText: 'Auto-detect',
-  });
+  }, { show: false });
   let handled = false;
   notification.on('action', (_event, index) => {
     handled = true;
@@ -400,10 +429,10 @@ function promptMeetingType() {
   });
   notification.on('close', () => {
     if (!handled && currentArchetypeId === null) {
-      new Notification({
+      notify({
         title: 'Cora — Auto-detect Active',
         body: 'Say the main point early and end with a clear next action. Cora will classify your meeting archetype automatically.',
-      }).show();
+      });
     }
   });
   notification.show();
@@ -418,13 +447,19 @@ function startRecording(meetingTool = null, continuesRecordingId = null) {
     // LLM) is still running — starting a second one now would mean two
     // concurrent model loads competing for the same GPU/Metal resources.
     // Refuse with a clear reason rather than silently doing nothing.
-    new Notification({
+    notify({
       title: 'Cora',
       body: 'Still processing the last recording — try again in a moment.'
-    }).show();
+    }, { level: 'warning' });
     return;
   }
   currentArchetypeId = null;
+  // A brand-new recording (not a pause/resume continuation) starts its own
+  // chain. continuesRecordingId is also set by the detail page's explicit
+  // "Continue this meeting" button on an already-finished recording — that
+  // one-shot case has no live "root card" to keep in sync, so it's left out
+  // of this tracking on purpose.
+  if (!continuesRecordingId) continuationRootId = null;
 
   if (!fs.existsSync(INBOX_DIR)) {
     fs.mkdirSync(INBOX_DIR, { recursive: true });
@@ -567,10 +602,10 @@ function startRecording(meetingTool = null, continuesRecordingId = null) {
 
   notifyStateChange();
 
-  new Notification({
+  notify({
     title: 'Cora',
     body: 'Recording meeting audio...'
-  }).show();
+  }, { recordingId: recordingId });
 
   promptMeetingType();
 
@@ -589,11 +624,11 @@ async function diarizeLatestRecording({ silentIfEmpty = false } = {}) {
       // pass coming up empty is a genuine problem.
       if (silentIfEmpty) return;
       console.error('Archive pipeline produced no new recording folder; skipping auto-diarize.');
-      new Notification({
+      notify({
         title: 'Cora',
         body: 'Recording finished, but the archive step did not produce a new file. Check logs/cron-pipeline-error.log.',
         icon: ICON_PATH
-      }).show();
+      }, { level: 'error' });
       return;
     }
     await postJson('/api/process-recording', { id: newFolder.id });
@@ -604,24 +639,24 @@ async function diarizeLatestRecording({ silentIfEmpty = false } = {}) {
     const rec = updatedData.recordings.find(r => r.id === newFolder.id);
     
     if (rec && rec.analysis_stage === 'coached') {
-        new Notification({
+        notify({
           title: 'Cora',
           body: 'Executive coaching report ready. Click to view your insights.',
           icon: ICON_PATH
-        }).show();
+        });
     } else {
-        new Notification({
+        notify({
           title: 'Cora',
           body: 'Speaker separation complete. Open dashboard to select your voice.',
           icon: ICON_PATH
-        }).show();
+        });
     }
   } catch (err) {
     console.error('Speaker separation failed:', err.message);
-    new Notification({
+    notify({
       title: 'Cora',
       body: 'Could not complete speaker analysis automatically. Open the dashboard to retry.'
-    }).show();
+    }, { level: 'error' });
   } finally {
     isProcessing = false;
     notifyStateChange();
@@ -671,13 +706,18 @@ function stopRecording() {
   if (isPaused) {
     console.log(`[debug ${new Date().toISOString()}] stopRecording() called while paused -> finalizing session`);
     const recId = pausedRecordingId;
+    const rootId = continuationRootId;
     isPaused = false;
     pausedRecordingId = null;
+    continuationRootId = null;
     isProcessing = true;
     notifyStateChange();
     updateTrayMenu();
     if (recId) {
       postJson('/api/recording/status', { id: recId, status: 'processing' }).catch(() => {});
+    }
+    if (rootId && rootId !== recId) {
+      postJson('/api/recording/status', { id: rootId, status: 'processing' }).catch(() => {});
     }
     runArchivePipelineWithRetry();
     return;
@@ -708,11 +748,17 @@ function stopRecording() {
       console.error('Failed to mark pending recording as processing:', err.message);
     });
   }
+  if (continuationRootId && continuationRootId !== currentRecordingId) {
+    postJson('/api/recording/status', { id: continuationRootId, status: 'processing' }).catch((err) => {
+      console.error('Failed to mark continuation root as processing:', err.message);
+    });
+  }
+  continuationRootId = null;
 
-  new Notification({
+  notify({
     title: 'Cora',
     body: 'Meeting ended. Processing coaching report...'
-  }).show();
+  }, { recordingId: currentRecordingId });
 
   updateTrayMenu();
 
@@ -771,8 +817,16 @@ function resumeRecording() {
     return { ok: true, status: 'recording' };
   }
   const parentId = pausedRecordingId;
+  // If this is already a resume of a resume, keep pointing at the original
+  // recording in the chain (not the most recent child) so the dashboard
+  // keeps updating the same card instead of hopping to a new one each time.
+  const rootId = continuationRootId || parentId;
+  continuationRootId = rootId;
   isPaused = false;
   pausedRecordingId = null;
+  postJson('/api/recording/status', { id: rootId, status: 'recording' }).catch((err) => {
+    console.error('Failed to mark continuation root as recording again:', err.message);
+  });
   startRecording(null, parentId);
   return { ok: true, status: 'recording' };
 }
@@ -811,11 +865,11 @@ function updateTrayMenu() {
         click: () => {
           if (currentRecordingId) {
             takeMeetingScreenshot(currentRecordingId);
-            new Notification({
+            notify({
               title: 'Cora',
               body: 'Captured meeting slide with local Apple Vision OCR.',
               icon: ICON_PATH
-            }).show();
+            }, { recordingId: currentRecordingId });
           }
         }
       },
@@ -868,12 +922,12 @@ function notifyMeetingDetected(meeting) {
   if (meetingNotified || captureProcess) return;
   meetingNotified = true;
 
-  const notification = new Notification({
+  const notification = notify({
     title: 'Cora',
     body: `${meeting.label} call detected. Start recording?`,
     actions: [{ type: 'button', text: 'Start Recording' }],
     closeButtonText: 'Dismiss',
-  });
+  }, { show: false });
   notification.on('click', () => startRecording(meeting.label));
   notification.on('action', () => startRecording(meeting.label));
   notification.show();
@@ -914,13 +968,13 @@ async function checkDailyReviewNotification() {
       
       const hasCallsToday = data.home?.timeline?.length > 0;
       
-      const notification = new Notification({
+      const notification = notify({
         title: 'Cora',
-        body: hasCallsToday 
+        body: hasCallsToday
           ? "Time to review today's calls — 1 practice moment waiting."
           : "No calls today — want to practice from a past recording instead?",
         icon: ICON_PATH
-      });
+      }, { show: false });
       
       notification.on('click', () => {
         if (mainWindow) {

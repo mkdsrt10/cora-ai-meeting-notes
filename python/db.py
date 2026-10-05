@@ -138,7 +138,40 @@ def init_db():
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_training_pairs_dataset ON training_pairs(dataset_name)')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_training_pairs_rec ON training_pairs(recording_id)')
+
+        # Every OS notification Cora shows (recording started/ended,
+        # processing failures, daily review, etc.) — notifications disappear
+        # from Notification Center quickly, so this is the only durable
+        # record of what happened and when, for diagnosing after the fact.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                level TEXT DEFAULT 'info',
+                title TEXT,
+                body TEXT,
+                recording_id TEXT,
+                created_at TEXT
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at)')
         conn.commit()
+
+
+def log_notification(title: str, body: str, level: str = "info", recording_id: str | None = None) -> None:
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO notifications (level, title, body, recording_id, created_at) VALUES (?, ?, ?, ?, ?)",
+            (level, title, body, recording_id, time.strftime("%Y-%m-%dT%H:%M:%S%z")),
+        )
+        conn.commit()
+
+
+def get_notifications(limit: int = 200) -> list[dict[str, Any]]:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM notifications ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(row) for row in rows]
 
 
 def add_training_pair(pair_id: str, recording_id: str, pair_type: str, input_data: dict, expected_output: dict, metadata: dict = None, dataset_name: str = "whisper-hinglish-v2"):
