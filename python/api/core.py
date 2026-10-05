@@ -270,6 +270,12 @@ def available_models() -> dict[str, Any]:
         "already_downloaded": _hf_cache_has("mayank-dubey-ai/whisper-large-v3-turbo-hinglish-mlx"),
         "tradeoff": "4-layer turbo decoder fine-tuned on Hindi-English speech — fast, no personal setup needed. For the deepest, most loop-resistant option see docs/RESEARCH.md on decoder depth.",
     })
+    whisper_options.append({
+        "id": "mayank-dubey-ai/tara-mlx",
+        "label": "Tara (public fine-tune, recommended)",
+        "already_downloaded": _hf_cache_has("mayank-dubey-ai/tara-mlx"),
+        "tradeoff": "Full Whisper-large-v3 decoder (32 layers) fine-tuned on Hindi-English speech — the most accurate and loop-resistant option, at the cost of slower transcription than the turbo fine-tune above. See docs/RESEARCH.md on decoder depth.",
+    })
     liquid_options = [
         {**model, "already_downloaded": _hf_cache_has(model["id"])}
         for model in LOCAL_LLM_MODELS

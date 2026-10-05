@@ -77,8 +77,9 @@ repeated word/phrase down to one occurrence.
 
 **Shipped in Cora:** yes — the decode parameters and
 [`pipeline/transcribe.py:collapse_repetition_loops`](../python/pipeline/transcribe.py). The
-32-layer alternative is supported as an optional `local_whisper_models` entry (see the README's
-Configuration section) rather than the bundled default, since it's a much larger download.
+32-layer alternative is a one-click downloadable option in Settings
+([`mayank-dubey-ai/tara-mlx`](https://huggingface.co/mayank-dubey-ai/tara-mlx), an MLX conversion
+of Trelis Tara) rather than the bundled default, since it's a much larger download.
 
 ## 3. The pro-drop gap in code-mixed speech
 
