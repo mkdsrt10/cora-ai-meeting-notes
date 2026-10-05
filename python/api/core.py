@@ -179,6 +179,18 @@ LOCAL_LLM_MODELS = [
         "approx_size_gb": 1.5,
         "tradeoff": "Mid-tier model."
     },
+    {
+        "id": "mlx-community/Qwen3-8B-4bit",
+        "label": "Qwen3 8B (Higher-end Macs)",
+        "approx_size_gb": 4.6,
+        "tradeoff": "Noticeably better reasoning and notes quality than the 4B default. Needs 32GB+ of RAM to run comfortably alongside the rest of Cora's pipeline."
+    },
+    {
+        "id": "mlx-community/Qwen3-14B-4bit",
+        "label": "Qwen3 14B (High-end Macs)",
+        "approx_size_gb": 8.3,
+        "tradeoff": "The most capable local option — best for dense, technical, or long meetings. Needs 64GB+ of RAM; expect slower generation than the smaller models."
+    },
 ]
 
 
@@ -275,6 +287,12 @@ def available_models() -> dict[str, Any]:
         "label": "Tara (public fine-tune, recommended)",
         "already_downloaded": _hf_cache_has("mayank-dubey-ai/tara-mlx"),
         "tradeoff": "Full Whisper-large-v3 decoder (32 layers) fine-tuned on Hindi-English speech — the most accurate and loop-resistant option, at the cost of slower transcription than the turbo fine-tune above. See docs/RESEARCH.md on decoder depth.",
+    })
+    whisper_options.append({
+        "id": "mlx-community/whisper-large-v3-mlx",
+        "label": "Whisper large-v3 (full, general-purpose)",
+        "already_downloaded": _hf_cache_has("mlx-community/whisper-large-v3-mlx"),
+        "tradeoff": "Full-size, non-fine-tuned 32-layer decoder (~3.2GB, fp16) — best general accuracy if your meetings aren't Hindi-English specific. Slower than the turbo or quantized options above; best on 32GB+ Macs.",
     })
     liquid_options = [
         {**model, "already_downloaded": _hf_cache_has(model["id"])}

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2 — 2026-10-05
+
+- Added higher-end model options for people with more RAM to spare: `mlx-community/whisper-large-v3-mlx`
+  (full, non-fine-tuned 32-layer Whisper for general-purpose accuracy) and `mlx-community/Qwen3-8B-4bit` /
+  `mlx-community/Qwen3-14B-4bit` (better reasoning and notes quality than the 4B default, for 32GB+/64GB+
+  Macs).
+
 ## 0.2.1 — 2026-10-05
 
 - Added `mayank-dubey-ai/tara-mlx` — a public MLX conversion of Trelis Tara (Apache 2.0, full
