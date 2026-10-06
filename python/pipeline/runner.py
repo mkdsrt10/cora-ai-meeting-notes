@@ -403,6 +403,11 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         parent_meta = db.get_recording_data(parent_folder.name, "metadata") or {}
         parent_dur = float(parent_meta.get("duration_seconds", 0.0)) + float(audio_duration)
         parent_meta["duration_seconds"] = round(parent_dur, 1)
+        # The merge happening right now is what continuation_status was
+        # tracking ("recording"/"processing" this additional audio) — clear
+        # it so the dashboard stops showing that banner now that it's done.
+        parent_meta.pop("continuation_status", None)
+        parent_meta.pop("continuation_started_at", None)
         (parent_folder / "metadata.json").write_text(json.dumps(parent_meta, indent=2) + "\n")
 
         db.update_recording_data(parent_folder.name, "diarization", diarization_payload)

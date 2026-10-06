@@ -392,6 +392,16 @@ def recording_item(folder: Path | dict, detailed: bool = False) -> dict[str, Any
         }),
         "meeting_tool": metadata.get("meeting_tool"),
         "folder_id": metadata.get("folder_id"),
+        # Set while a pause/resume or "Continue this meeting" segment is
+        # being recorded/processed for this (already-complete) meeting — see
+        # db.set_continuation_status. Additive, not a replacement for this
+        # recording's own status: lets the dashboard show "still recording
+        # more audio" / "processing N more minutes" on top of the real
+        # content here, instead of either hiding it or wiping it back to a
+        # bare placeholder the way the top-level `status` column would.
+        "continuation_status": metadata.get("continuation_status"),
+        "continuation_started_at": metadata.get("continuation_started_at"),
+        "continuation_child_id": metadata.get("continuation_child_id"),
         "turn_count": len(segments),
         "scores": scores,
         "word_count": self_profile.get("words"),

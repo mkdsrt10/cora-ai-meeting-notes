@@ -454,11 +454,11 @@ function startRecording(meetingTool = null, continuesRecordingId = null) {
     return;
   }
   currentArchetypeId = null;
-  // A brand-new recording (not a pause/resume continuation) starts its own
-  // chain. continuesRecordingId is also set by the detail page's explicit
-  // "Continue this meeting" button on an already-finished recording — that
-  // one-shot case has no live "root card" to keep in sync, so it's left out
-  // of this tracking on purpose.
+  // A brand-new recording (not a continuation of any kind) starts its own
+  // chain; a continuation (pause/resume, or the detail page's "Continue
+  // this meeting" button on an already-finished recording) keeps pointing
+  // at the very first recording in the chain, so repeated continuations
+  // all update the same card instead of hopping to a new one each time.
   if (!continuesRecordingId) continuationRootId = null;
 
   if (!fs.existsSync(INBOX_DIR)) {
@@ -469,6 +469,13 @@ function startRecording(meetingTool = null, continuesRecordingId = null) {
   const recordingId = `meeting_${timestamp}`;
   currentRecordingId = recordingId;
   const outFile = path.join(INBOX_DIR, `${recordingId}.mov`);
+
+  if (continuesRecordingId) {
+    continuationRootId = continuationRootId || continuesRecordingId;
+    postJson('/api/recording/continuation-status', { id: continuationRootId, status: 'recording', child_id: recordingId }).catch((err) => {
+      console.error('Failed to mark continuation root as recording:', err.message);
+    });
+  }
 
   // Create the DB row now, before any audio exists, so it's visible in the
   // dashboard immediately instead of only appearing once the whole
@@ -717,7 +724,7 @@ function stopRecording() {
       postJson('/api/recording/status', { id: recId, status: 'processing' }).catch(() => {});
     }
     if (rootId && rootId !== recId) {
-      postJson('/api/recording/status', { id: rootId, status: 'processing' }).catch(() => {});
+      postJson('/api/recording/continuation-status', { id: rootId, status: 'processing' }).catch(() => {});
     }
     runArchivePipelineWithRetry();
     return;
@@ -749,7 +756,7 @@ function stopRecording() {
     });
   }
   if (continuationRootId && continuationRootId !== currentRecordingId) {
-    postJson('/api/recording/status', { id: continuationRootId, status: 'processing' }).catch((err) => {
+    postJson('/api/recording/continuation-status', { id: continuationRootId, status: 'processing' }).catch((err) => {
       console.error('Failed to mark continuation root as processing:', err.message);
     });
   }
@@ -817,16 +824,8 @@ function resumeRecording() {
     return { ok: true, status: 'recording' };
   }
   const parentId = pausedRecordingId;
-  // If this is already a resume of a resume, keep pointing at the original
-  // recording in the chain (not the most recent child) so the dashboard
-  // keeps updating the same card instead of hopping to a new one each time.
-  const rootId = continuationRootId || parentId;
-  continuationRootId = rootId;
   isPaused = false;
   pausedRecordingId = null;
-  postJson('/api/recording/status', { id: rootId, status: 'recording' }).catch((err) => {
-    console.error('Failed to mark continuation root as recording again:', err.message);
-  });
   startRecording(null, parentId);
   return { ok: true, status: 'recording' };
 }

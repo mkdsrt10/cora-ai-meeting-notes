@@ -19,7 +19,8 @@ def test_expected_endpoints_are_registered():
                      ("POST", "/api/process-recording"), ("GET", "/media/"), ("POST", "/api/credentials/save"),
                      ("GET", "/api/settings"), ("POST", "/api/settings"),
                      ("GET", "/api/notifications"), ("POST", "/api/notifications/log"),
-                     ("GET", "/api/logs"), ("GET", "/api/logs/file"), ("POST", "/api/logs/bundle")]:
+                     ("GET", "/api/logs"), ("GET", "/api/logs/file"), ("POST", "/api/logs/bundle"),
+                     ("POST", "/api/recording/continuation-status"), ("GET", "/api/recording/live-audio")]:
         assert expected in routes, expected
     assert len(routes) >= 70
 

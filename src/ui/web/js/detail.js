@@ -203,9 +203,38 @@ function loadNotepad(){
   const continueBtn = $('#notepadContinueBtn');
   if (continueBtn && record) {
     // Only makes sense once this recording actually has something to merge
-    // into (not while it's still recording/processing), and only one
-    // capture can run at a time.
-    continueBtn.style.display = !PENDING_STAGES.has(record.analysis_stage) ? '' : 'none';
+    // into (not while it's still recording/processing), only one capture
+    // can run at a time, and not while a previous continuation on this same
+    // recording hasn't finished merging yet (continuation_status) — letting
+    // a second one start before that lands would race both to merge into
+    // the same parent.
+    continueBtn.style.display = (!PENDING_STAGES.has(record.analysis_stage) && !record.continuation_status) ? '' : 'none';
+  }
+  const continuationBanner = $('#notepadContinuationBanner');
+  if (continuationBanner) {
+    if (record?.continuation_status) {
+      // This view re-renders on every live-state poll (every few seconds) —
+      // rebuilding the banner's innerHTML unconditionally would tear down
+      // and restart an <audio> element the user just opened with "Listen"
+      // on every poll tick. Only (re)build it when the state actually
+      // changed since the last render.
+      const renderKey = `${record.continuation_status}:${record.continuation_child_id || ''}`;
+      if (continuationBanner.dataset.renderKey !== renderKey) {
+        continuationBanner.dataset.renderKey = renderKey;
+        const label = record.continuation_status === 'recording' ? 'Recording additional audio…' : 'Processing additional audio — may take a few minutes…';
+        continuationBanner.innerHTML = `<span>🔴 ${esc(label)}</span>` +
+          (record.continuation_status === 'processing' && record.continuation_child_id
+            ? ` <button class="button secondary small" id="notepadListenContinuationBtn">▶ Listen</button>`
+            : '');
+        const listenBtn = $('#notepadListenContinuationBtn');
+        if (listenBtn) listenBtn.onclick = () => playLiveContinuationAudio(record.continuation_child_id, listenBtn);
+      }
+      continuationBanner.style.display = '';
+    } else {
+      continuationBanner.style.display = 'none';
+      continuationBanner.innerHTML = '';
+      delete continuationBanner.dataset.renderKey;
+    }
   }
 
   const folderSelect = $('#notepadFolder');
@@ -351,3 +380,21 @@ $('#topbarSyncVmBtn')?.addEventListener('click', async () => {
     }
   }
 });
+
+// Lets you listen to a pause/resume or "Continue this meeting" segment
+// while it's stopped-but-not-yet-merged (the gap this whole feature exists
+// for) — swaps the "Listen" button for a native <audio> player pointed at
+// /api/recording/live-audio, which builds (and caches) a mixed, listenable
+// copy from the still-unarchived raw recording on first request.
+function playLiveContinuationAudio(childId, triggerBtn){
+  if (!childId) { toast("Can't find the audio for this segment yet — try again in a moment.", true); return; }
+  const host = triggerBtn?.parentElement;
+  if (!host) return;
+  const player = document.createElement('audio');
+  player.controls = true;
+  player.autoplay = true;
+  player.style.height = '28px';
+  player.src = `/api/recording/live-audio?id=${encodeURIComponent(childId)}`;
+  player.onerror = () => toast("Couldn't load that audio — it may still be mid-recording.", true);
+  triggerBtn.replaceWith(player);
+}

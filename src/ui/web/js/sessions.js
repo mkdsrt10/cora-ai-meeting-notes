@@ -36,6 +36,9 @@ function renderSessions(){
   });
   $('#sessionRows').innerHTML = records.map(r => {
     const pending = PENDING_STAGES.has(r.analysis_stage);
-    return `<div class="session-row${pending ? ' session-row-pending' : ''}" data-open-id="${esc(r.id)}" role="button" tabindex="0"><div><h4>${esc(r.title)}</h4><p>${fmtDate(r.recorded_at)}</p></div><div>${stagePill(r.analysis_stage)}</div><span>${fmtDuration(r.duration_seconds)}</span><span>›</span></div>`;
+    const continuationNote = r.continuation_status
+      ? `<p class="muted">🔴 ${r.continuation_status === 'recording' ? 'Recording additional audio…' : 'Processing additional audio…'}</p>`
+      : '';
+    return `<div class="session-row${pending ? ' session-row-pending' : ''}" data-open-id="${esc(r.id)}" role="button" tabindex="0"><div><h4>${esc(r.title)}</h4><p>${fmtDate(r.recorded_at)}</p>${continuationNote}</div><div>${stagePill(r.analysis_stage)}</div><span>${fmtDuration(r.duration_seconds)}</span><span>›</span></div>`;
   }).join('') || `<div class="session-row"><p>${data.recordings.length ? 'No matching sessions.' : 'No recordings yet — start one from the tray or wait for Cora to notice your next meeting.'}</p></div>`;
 }

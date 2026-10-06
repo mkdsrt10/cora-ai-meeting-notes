@@ -48,6 +48,17 @@ def post_api_recording_status(req, path: str, body: dict) -> None:
     return req.send_json({"ok": True})
 
 
+@route("POST", '/api/recording/continuation-status')
+def post_api_recording_continuation_status(req, path: str, body: dict) -> None:
+    recording_id = safe_id(str(body.get("id", "")))
+    status = body.get("status")
+    if status is not None and status not in ("recording", "processing"):
+        raise ValueError(f"Invalid continuation status: {status}")
+    child_id = str(body.get("child_id") or "").strip() or None
+    db.set_continuation_status(recording_id, status, child_id=child_id)
+    return req.send_json({"ok": True})
+
+
 @route("POST", '/api/recording/stop')
 def post_api_recording_stop(req, path: str, body: dict) -> None:
     subprocess.run(["pkill", "-INT", "dual-capture"], check=False)
@@ -74,6 +85,8 @@ def post_api_recording_trigger_start(req, path: str, body: dict) -> None:
         status="recording",
         continues_recording_id=continues_id,
     )
+    if continues_id:
+        db.set_continuation_status(continues_id, "recording", child_id=recording_id)
     subprocess.Popen([str(capture_bin), str(out_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return req.send_json({"ok": True, "id": recording_id})
 
@@ -104,6 +117,8 @@ def post_api_recording_resume(req, path: str, body: dict) -> None:
         status="recording",
         continues_recording_id=rec_id or None,
     )
+    if rec_id:
+        db.set_continuation_status(rec_id, "recording", child_id=new_recording_id)
     subprocess.Popen([str(capture_bin), str(out_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return req.send_json({"ok": True, "id": new_recording_id, "status": "recording"})
 

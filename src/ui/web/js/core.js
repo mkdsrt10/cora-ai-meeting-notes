@@ -115,14 +115,20 @@ async function load(){
   data = await api('/api/dashboard');
   renderSessions(); renderStorage();
 
-  const hasPending = (data.recordings || []).some(r => PENDING_STAGES.has(r.analysis_stage));
+  // A recording with a live continuation_status is NOT itself pending (it's
+  // a finished meeting with a pause/resume or "Continue this meeting"
+  // segment running) — the segment itself is hidden from this list on
+  // purpose (api/views.all_recordings), so without this check it would be
+  // the only sign anything is still happening, and polling would stop
+  // before that in-progress banner ever got to update or clear.
+  const hasPending = (data.recordings || []).some(r => PENDING_STAGES.has(r.analysis_stage) || r.continuation_status);
   clearTimeout(pollTimer);
   if (hasPending) pollTimer = setTimeout(load, 3000);
 
   // Auto-refresh the open recording if currently viewing details and it changed
   if (selectedRecordingId && currentView === 'recording-detail') {
     const freshRec = (data.recordings || []).find(r => r.id === selectedRecordingId);
-    if (freshRec && (!selectedDetail || freshRec.duration_seconds !== selectedDetail.duration_seconds || freshRec.analysis_stage !== selectedDetail.analysis_stage || freshRec.title !== selectedDetail.title)) {
+    if (freshRec && (!selectedDetail || freshRec.duration_seconds !== selectedDetail.duration_seconds || freshRec.analysis_stage !== selectedDetail.analysis_stage || freshRec.title !== selectedDetail.title || freshRec.continuation_status !== selectedDetail.continuation_status)) {
       await loadSelectedRecording(selectedRecordingId);
     }
   }

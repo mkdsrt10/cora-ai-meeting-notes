@@ -261,6 +261,39 @@ def set_pending_recording_status(recording_id, status):
         conn.execute("UPDATE recordings SET status = ? WHERE id = ?", (status, recording_id))
         conn.commit()
 
+
+def set_continuation_status(recording_id, status, child_id=None):
+    """Marks a recording as having a live pause/resume or "continue this
+    meeting" segment in flight (status: "recording" | "processing"), or
+    clears it (status: None) once the segment is merged in. Written into
+    metadata rather than the `status` column on purpose — `status` is what
+    recording_item() uses to decide whether to show the bare "Recording in
+    progress…" placeholder instead of the recording's real content
+    (recordings.py / views.py), and the whole point here is a recording
+    that already has real content (a finished meeting someone is adding
+    more audio to) keeps showing that content, with this as an additive
+    banner on top — not wiped back to a placeholder while the addition is
+    in progress. child_id (the live segment's own recording id, a separate
+    DB row) is stored alongside so the UI knows which id to fetch live
+    playback for — the parent's own audio file doesn't change until the
+    segment is merged in."""
+    with get_db() as conn:
+        row = conn.execute("SELECT metadata FROM recordings WHERE id = ?", (recording_id,)).fetchone()
+        if not row:
+            return
+        meta = json.loads(row["metadata"]) if row["metadata"] else {}
+        if status:
+            meta["continuation_status"] = status
+            meta.setdefault("continuation_started_at", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+            if child_id:
+                meta["continuation_child_id"] = child_id
+        else:
+            meta.pop("continuation_status", None)
+            meta.pop("continuation_started_at", None)
+            meta.pop("continuation_child_id", None)
+        conn.execute("UPDATE recordings SET metadata = ? WHERE id = ?", (json.dumps(meta), recording_id))
+        conn.commit()
+
 def retire_pending_recording(source_stem):
     """Delete the placeholder row (if any) once the real archived row for
     the same source file has been created."""
