@@ -76,8 +76,14 @@ def model_ready(model_id: str) -> bool:
 
 
 def whisper_model_status() -> dict[str, Any]:
+    import policy
+    engine = db.get_setting("transcription_engine", "local")
+    lockdown = policy.lockdown_enabled()
+    if engine != "local" and not lockdown:
+        # A hosted engine needs no local weights, so don't nag to download any.
+        return {"model_id": engine, "ready": True, "engine": engine, "lockdown": lockdown}
     model_id = resolve_whisper_model()
-    return {"model_id": model_id, "ready": model_ready(model_id)}
+    return {"model_id": model_id, "ready": model_ready(model_id), "engine": "local", "lockdown": lockdown}
 
 
 def llm_model_status() -> dict[str, Any]:

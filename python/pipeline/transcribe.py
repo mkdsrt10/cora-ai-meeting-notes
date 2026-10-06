@@ -167,6 +167,15 @@ def plan_chunks(speech_segments: list[tuple[float, float]], target: float = CHUN
     return chunks
 
 
+def _transcribe_clip(clip: Path, prompt: str) -> dict[str, Any]:
+    """One chunk through the selected engine (local MLX unless the user
+    opted into a hosted one in Settings — see cloud_asr)."""
+    from . import cloud_asr
+    if cloud_asr.engine() != "local":
+        return cloud_asr.transcribe_clip(clip, prompt)
+    return transcribe_local_mlx(clip, prompt=prompt)
+
+
 def _transcribe_chunks(audio_path: Path, speech_segments: list[tuple[float, float]], prompt: str,
                        prompt_for: Optional[Callable[[float, float], str]] = None) -> list[dict[str, Any]]:
     segments: list[dict[str, Any]] = []
@@ -174,7 +183,7 @@ def _transcribe_chunks(audio_path: Path, speech_segments: list[tuple[float, floa
     for start, end in chunks:
         clip = extract_clip(audio_path, start, end)
         try:
-            result = transcribe_local_mlx(clip, prompt=prompt_for(start, end) if prompt_for else prompt)
+            result = _transcribe_clip(clip, prompt_for(start, end) if prompt_for else prompt)
         finally:
             clip.unlink(missing_ok=True)
         for seg in result.get("segments", []):
@@ -202,8 +211,11 @@ def transcribe_with_silence_removal(audio_path: Path, prompt: str, folder: Optio
     anti-repetition setting is meant to prevent, but which a 70-minute
     uninterrupted pass could still trigger during long true-silence stretches.
     """
+    from . import cloud_asr
     model_id = resolve_whisper_model()
     model_label = Path(model_id).name if os.path.isabs(model_id) else model_id
+    if cloud_asr.engine() != "local":
+        model_label = f"cloud:{cloud_asr.engine()}"
     duration = probe_duration(audio_path)
     mixed_audio_path = ensure_mixed_audio(audio_path)
     speech_segments = find_speech_segments(mixed_audio_path)

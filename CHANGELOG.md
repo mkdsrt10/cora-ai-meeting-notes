@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Notifications & logs panel, pause/resume and "Continue this meeting" now show live progress on the original meeting (and let you listen before it merges), floating widget lost its Screen button.
+- Optional hosted transcription: Settings > On-Device Models > Transcription engine can now use Google Gemini instead of the local model (off by default, disabled under enterprise lockdown).
+- `tools/asr_bench.py` + `docs/ASR_BENCHMARK.md`: score candidate speech models on your own meeting.
+
 ## 0.2.2 — 2026-10-05
 
 - Added higher-end model options for people with more RAM to spare: `mlx-community/whisper-large-v3-mlx`

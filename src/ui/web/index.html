@@ -405,6 +405,14 @@
           <div class="settings-panel" data-settings-content="models" hidden>
             <h1 class="settings-title">On-Device Models</h1>
             <p class="settings-sub">Pick a local model for each job. Everything downloads once and runs on-device — swap any of these anytime without losing past notes.</p>
+            <div class="settings-field" style="margin-bottom:16px">
+              <label for="settingsAsrEngine">Transcription engine</label>
+              <select id="settingsAsrEngine" class="recording-select">
+                <option value="local">On this Mac (private — default)</option>
+                <option value="gemini">Google Gemini (cloud — audio leaves your Mac)</option>
+              </select>
+              <small class="muted" id="settingsAsrEngineNote">Cloud transcription uses the Google credentials from "Cloud LLMs &amp; APIs" and is unavailable under enterprise lockdown.</small>
+            </div>
             <div id="settingsModelRows" class="settings-model-rows"></div>
           </div>
 

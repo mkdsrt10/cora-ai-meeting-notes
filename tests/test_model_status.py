@@ -72,4 +72,5 @@ def test_resolve_whisper_model_honors_explicit_hf_repo_choice(monkeypatch):
 def test_whisper_model_status_reports_readiness(monkeypatch):
     monkeypatch.setattr(pcfg, "resolve_whisper_model", lambda: pcfg.PUBLIC_WHISPER_FALLBACK)
     monkeypatch.setattr(pcfg, "model_ready", lambda model_id: model_id == pcfg.PUBLIC_WHISPER_FALLBACK)
-    assert pcfg.whisper_model_status() == {"model_id": pcfg.PUBLIC_WHISPER_FALLBACK, "ready": True}
+    status = pcfg.whisper_model_status()
+    assert (status["model_id"], status["ready"]) == (pcfg.PUBLIC_WHISPER_FALLBACK, True)

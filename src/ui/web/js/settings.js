@@ -53,7 +53,29 @@ async function loadSettingsView(){
   } catch (e) {}
 }
 
+async function renderAsrEngine(){
+  const select = $('#settingsAsrEngine');
+  if(!select) return;
+  try{
+    const status = await api('/api/models/status');
+    select.value = status.whisper?.engine || 'local';
+    const locked = !!status.whisper?.lockdown;
+    select.disabled = locked;
+    $('#settingsAsrEngineNote').textContent = locked
+      ? 'Enterprise lockdown is on — transcription always runs on this Mac.'
+      : 'Cloud transcription uses the Google credentials from "Cloud LLMs & APIs"; each speech chunk is uploaded to Google.';
+  }catch{}
+}
+
+$('#settingsAsrEngine')?.addEventListener('change', async (e) => {
+  try{
+    await saveSetting('transcription_engine', e.target.value);
+    toast(e.target.value === 'local' ? 'Transcribing on this Mac.' : 'Cloud transcription on — audio is sent to Google.');
+  }catch(error){ toast(error.message, true); }
+});
+
 async function renderSettingsModels(){
+  renderAsrEngine();
   const host = $('#settingsModelRows');
   if(!host) return;
   try{
