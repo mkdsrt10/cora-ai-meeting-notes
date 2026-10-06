@@ -121,12 +121,6 @@ document.getElementById('btnOpen')?.addEventListener('click', async () => {
   }
 });
 
-document.getElementById('btnDisplay')?.addEventListener('click', async () => {
-  if (window.electronAPI?.switchFloaterDisplay) {
-    await window.electronAPI.switchFloaterDisplay();
-  }
-});
-
 // Quick Note Drawer Toggle
 const noteDrawer = document.getElementById('noteDrawer');
 const noteInput = document.getElementById('noteInput');

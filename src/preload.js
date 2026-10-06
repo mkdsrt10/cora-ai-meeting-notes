@@ -17,7 +17,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openMainWindow: () => ipcRenderer.invoke('open-main-window'),
     appendNote: (text) => ipcRenderer.invoke('append-note', text),
     expandFloater: (height) => ipcRenderer.invoke('expand-floater', height),
-    switchFloaterDisplay: () => ipcRenderer.invoke('switch-floater-display'),
     toggleMuteMic: (state) => ipcRenderer.invoke('toggle-mute-mic', state),
     onMicMuteState: (callback) => ipcRenderer.on('mic-mute-state', (_event, isMuted) => callback(isMuted)),
 });

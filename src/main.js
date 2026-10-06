@@ -224,21 +224,6 @@ handleTrusted('expand-floater', (_event, height) => {
   }
 });
 
-handleTrusted('switch-floater-display', () => {
-  if (!floaterWindow || floaterWindow.isDestroyed()) return;
-  const { screen } = require('electron');
-  const displays = screen.getAllDisplays();
-  if (displays.length < 2) return;
-  const currentBounds = floaterWindow.getBounds();
-  const currentCenter = { x: currentBounds.x + currentBounds.width / 2, y: currentBounds.y + currentBounds.height / 2 };
-  const currentDisplay = screen.getDisplayNearestPoint(currentCenter);
-  const otherDisplay = displays.find(d => d.id !== currentDisplay.id) || displays[0];
-
-  const newX = Math.round(otherDisplay.bounds.x + (otherDisplay.bounds.width - currentBounds.width) / 2);
-  const newY = otherDisplay.bounds.y + 32;
-  floaterWindow.setPosition(newX, newY);
-});
-
 handleTrusted('toggle-mute-mic', (_event, muteState) => {
   isMicMuted = muteState !== undefined ? muteState : !isMicMuted;
   if (captureProcess && captureProcess.stdin && !captureProcess.stdin.destroyed) {
