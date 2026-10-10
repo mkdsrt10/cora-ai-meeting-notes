@@ -20,7 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Cloud diarization / coaching via Gemini (opt-in; blocked under enterprise lockdown).
-cloud = ["google-genai>=2.20"]
+cloud = ["google-genai>=2.28.0"]
 # Langfuse tracing (opt-in, bring your own project keys).
 tracing = ["langfuse>=4.15"]
 # Model conversion and dataset tools in tools/.
