@@ -268,16 +268,13 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         for s in sorted(assigned_speakers)
     ]
 
+    asr_model, privacy_note = _provenance()
     diarization_payload = {
         "summary": notes["overview"],
-        "model": "local-whisper-hinglish-mlx",
+        "model": asr_model,
         "analyzed_at": now_iso,
         "audio_file": audio_file.name,
-        "privacy_note": (
-            "Processed locally on Apple Silicon (MLX). Summary metadata was sent to your Langfuse project (tracing opt-in)."
-            if __import__("tracing").tracing_opted_in()
-            else "100% processed locally on Apple Silicon (MLX). Zero audio or text left this device."
-        ),
+        "privacy_note": privacy_note,
         "speakers": speaker_profiles,
         "segments": aligned_segments,
         "slides_indexed": len(slides_data),
@@ -433,6 +430,25 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         "call_summary": call_summary_payload,
         "speaker_profiles": speaker_profiles,
     }
+
+
+def _provenance() -> tuple[str, str]:
+    """What actually transcribed this recording, and an honest statement of
+    what left the device — never a blanket "100% local" when it wasn't."""
+    from . import cloud_asr
+    import tracing
+    engine = cloud_asr.engine()
+    if engine == "local":
+        model_id = resolve_whisper_model()
+        model = f"local-mlx:{Path(model_id).name if os.path.isabs(model_id) else model_id}"
+        note = "Transcribed and summarized locally on Apple Silicon (MLX). No audio or text left this device."
+    else:
+        model = f"cloud-asr:{engine}:{db.get_setting('cloud_asr_model') or 'default'}"
+        note = ("Speech audio was sent to Google Gemini for transcription (Settings > Transcription engine). "
+                "Notes were generated locally on Apple Silicon (MLX).")
+    if tracing.tracing_opted_in():
+        note += " Summary metadata was also sent to your Langfuse project (tracing opt-in)."
+    return model, note
 
 
 def main() -> None:

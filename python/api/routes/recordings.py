@@ -216,15 +216,15 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
     # exists now).
     folder = safe_folder(body.get("id", ""))
     engine = str(body.get("engine", "")).lower()
-    # Local-first by default: an explicit request for the cloud path
-    # (either endpoint or engine param) is the only way to opt into
-    # sending audio to Gemini. transcription_engine unset == local.
-    wants_cloud = path in {"/api/process-recording", "/api/gemini-diarize"} and engine in {"cloud", "gemini", "vertex"}
-    is_local = not wants_cloud and (
-        path == "/api/local-process"
-        or engine in {"local", "local_mlx", "mlx"}
-        or db.get_setting("transcription_engine", "local_mlx") == "local_mlx"
-    )
+    # The legacy whole-file Gemini diarization runs only on an explicit,
+    # per-request ask. The Settings "Transcription engine" choice is handled
+    # inside the pipeline (pipeline/cloud_asr.py), so "On this Mac" never
+    # uploads anything and "Google Gemini" uses the chunked cloud engine.
+    # (Previously this compared the setting to "local_mlx" while Settings
+    # saves "local"/"gemini", so choosing the private option sent the whole
+    # recording to Gemini.)
+    wants_cloud = path != "/api/local-process" and engine in {"cloud", "gemini", "vertex"}
+    is_local = not wants_cloud
     if is_local:
         try:
             import local_meeting_pipeline
