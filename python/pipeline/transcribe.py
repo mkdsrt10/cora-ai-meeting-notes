@@ -168,11 +168,6 @@ def plan_chunks(speech_segments: list[tuple[float, float]], target: float = CHUN
 
 
 def _transcribe_clip(clip: Path, prompt: str) -> dict[str, Any]:
-    """One chunk through the selected engine (local MLX unless the user
-    opted into a hosted one in Settings — see cloud_asr)."""
-    from . import cloud_asr
-    if cloud_asr.engine() != "local":
-        return cloud_asr.transcribe_clip(clip, prompt)
     return transcribe_local_mlx(clip, prompt=prompt)
 
 
@@ -194,7 +189,8 @@ def _transcribe_chunks(audio_path: Path, speech_segments: list[tuple[float, floa
 
 
 def transcribe_with_silence_removal(audio_path: Path, prompt: str, folder: Optional[Path] = None,
-                                    prompt_for: Optional[Callable[[float, float], str]] = None) -> tuple[list[dict[str, Any]], float, float]:
+                                    prompt_for: Optional[Callable[[float, float], str]] = None,
+                                    context: Any = None, time_offset: float = 0.0) -> tuple[list[dict[str, Any]], float, float]:
     """Detect and drop dead air, transcribe the remaining speech in a single
     Whisper pass, then shift segment timestamps back onto the original
     recording's timeline. Returns (segments, audio_duration, speech_duration).
@@ -221,7 +217,7 @@ def transcribe_with_silence_removal(audio_path: Path, prompt: str, folder: Optio
     speech_segments = find_speech_segments(mixed_audio_path)
     speech_duration = sum(end - start for start, end in speech_segments)
     print(
-        f"[Local MLX] {model_label}: {len(speech_segments)} speech stretch(es), "
+        f"[ASR] {model_label}: {len(speech_segments)} speech stretch(es), "
         f"{speech_duration:.0f}s of {duration:.0f}s kept "
         f"({100 * speech_duration / duration:.0f}% — {duration - speech_duration:.0f}s of silence skipped)",
         flush=True,
@@ -236,11 +232,19 @@ def transcribe_with_silence_removal(audio_path: Path, prompt: str, folder: Optio
         # speakers into one "turn". Transcribing each stretch between
         # natural pauses gives turn-sized segments that speaker attribution
         # can label individually. Falls back to the single spliced pass.
-        try:
-            chunked = _transcribe_chunks(mixed_audio_path, speech_segments, prompt, prompt_for)
-        except Exception as exc:
-            print(f"[Local MLX] Chunked transcription failed, using single pass: {exc}", flush=True)
-            result = transcribe_local_mlx(trimmed_path, prompt=prompt)
+        if cloud_asr.engine() != "local":
+            # Hosted engine: multi-minute windows. A failure fails the run with a
+            # clear error; it never silently switches to the local model.
+            from .context import MeetingContext
+            from .windowed import transcribe_windows
+            chunked = transcribe_windows(mixed_audio_path, speech_segments, context or MeetingContext(),
+                                         offset=time_offset)
+        else:
+            try:
+                chunked = _transcribe_chunks(mixed_audio_path, speech_segments, prompt, prompt_for)
+            except Exception as exc:
+                print(f"[Local MLX] Chunked transcription failed, using single pass: {exc}", flush=True)
+                result = transcribe_local_mlx(trimmed_path, prompt=prompt)
     finally:
         if mixed_audio_path != audio_path:
             mixed_audio_path.unlink(missing_ok=True)
@@ -257,7 +261,7 @@ def transcribe_with_silence_removal(audio_path: Path, prompt: str, folder: Optio
             except Exception as exc:
                 print(f"[Local MLX] Failed to save post-processed transcription audio: {exc}", flush=True)
         trimmed_path.unlink(missing_ok=True)
-    print(f"[Local MLX] STT completed in {time.time() - t0:.1f}s over {speech_duration:.0f}s of speech"
+    print(f"[ASR] STT completed in {time.time() - t0:.1f}s over {speech_duration:.0f}s of speech"
           f" ({'pause-bounded chunks' if chunked is not None else 'single pass'})", flush=True)
 
     if chunked is not None:

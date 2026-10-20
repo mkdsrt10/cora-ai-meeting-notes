@@ -1,0 +1,237 @@
+{
+ "summary": "The claim that no meeting tool has a real extensible plugin system is roughly right for the closed, mainstream AI notetakers, but it is wrong in its strong form.\n\n**Mainstream notetakers (Granola, Otter, Fireflies, tl;dv, Fathom, Circleback, Read.ai, Jamie, Bluedot, Krisp)** let you configure them but not extend them with code.\n- They offer prompt templates and recipes, plus 'custom AI skills' that are prompts with triggers.\n- They also offer mostly read-only REST APIs, webhooks and, by now almost everywhere, an MCP server.\n- None lets third parties ship code plugins with their own UI and actions inside the app, and none has a third-party marketplace.\n- The closest to an app store is Fireflies 'AI Skills' (formerly AI Apps): 200+ prebuilt prompt apps, user-built skills that run per meeting or on a daily/weekly/monthly schedule, results pushed to integrations, shared within a team. Granola Recipes are shareable static prompts, with a Discover section that includes community recipes.\n\n**Three counterexamples break the 'nobody does this' claim:**\n1. **Screenpipe** (YC S26, about 22k GitHub stars, source-available under a commercial license) is a genuine plugin platform. Its 'pipes' are scheduled AI agents defined in markdown files, and its store, relaunched in March 2026, lets anyone publish, browse and install pipes. It also captures meeting audio and ships a meeting-summary pipe.\n2. **Anarlog** (formerly Hyprnote, MIT licence, about 9.5k stars) has an early third-party plugin runtime: a plugin.json manifest, a plugin-sdk package, and an install folder. Its founders have since moved on to Char, an agent-driven to-do notepad.\n3. **The platform giants have real but locked-in extensibility:**\n   - Zoom: App Marketplace, generally available real-time audio/transcript streams (RTMS) for any developer, and a no-code custom agent add-on that supports MCP.\n   - Microsoft Teams: Graph transcript APIs and third-party Teams agents, with admin enablement expected to reach general availability in October 2026. Letting Copilot Studio agents join meetings was shelved in August 2026.\n   - Notion: Custom Agents that run automatically when a meeting note is summarized (July 2026).\n\n**Roleplay and coaching:**\n- Practice-based tools (Yoodli, Hyperbound, Second Nature) are well funded.\n- Gong AI Trainer (February 2026) already builds roleplays from real calls, but only for enterprise sales teams.\n- Nobody offers private, individual roleplay grounded in your own meetings for non-sales conversations: 1:1s, feedback, storytelling.\n\n**Where the whitespace really is:** not 'the only extensible meeting tool'. It is 'the open, local-first, code-level plugin platform built specifically around structured meeting data (speakers, people, transcript, notes, action items), where plugins can read, write and run across many meetings with your own model'. The most distinctive first-party plugins would be:\n- personal roleplay of a real conversation;\n- communication and storytelling coaching;\n- longitudinal plugins that track a roadmap or keep a team to-do ledger over many meetings.\n\n**Main threats:**\n- MCP access is now standard everywhere, so users can already build 'plugins' as Claude/ChatGPT skills on top of Granola, Otter or Zoom MCP.\n- Screenpipe owns the 'pipes store' story.\n- Making Gemini cloud transcription the default weakens the local-first difference from Meetily (31.8k stars), Anarlog and Humla.\n- Cora's repo has 0 stars, so a plugin platform faces a hard cold start.",
+ "findings": [
+  {
+   "claim": "Granola Recipes are saved, shareable prompt templates (single- or multi-meeting) with My/Workspace/Discover sections that include recipes from the Granola team and community. They are static prompts with no variables and no tool calls or external actions.",
+   "evidence": "Granola help doc on recipes: create via '/' or the Recipes tab; share to the workspace or by link (Private / Workspace / Anyone with link); recipients can run a copy on their own notes. Discover = 'recommended recipes from the Granola team and community'. Prompts are sent as written each time. Business and Enterprise can pick the model.",
+   "confidence": "verified",
+   "source_url": "https://docs.granola.ai/article/recipes"
+  },
+  {
+   "claim": "Granola's API is read-only and gated to Business ($14/user/mo) and Enterprise ($35/user/mo). It has no webhooks and no plugin or app-store framework. Extensibility is the read API, MCP, Zapier and a few native integrations.",
+   "evidence": "Changelog: v1.0.0 (Feb 2026) List/Get Notes \u2192 v1.6.0 (Oct 2026) List Spaces. Every endpoint is List/Get, and webhooks are not mentioned. The pricing page lists API access on Business and Enterprise; MCP on Basic covers personal notes from the last 30 days. The integrations page lists MCP, Zapier, Notion, Slack, CRMs and the API, with no marketplace.",
+   "confidence": "verified",
+   "source_url": "https://docs.granola.ai/api-reference/changelog"
+  },
+  {
+   "claim": "Granola raised a $125M Series C at a $1.5B valuation (March 25, 2026). It positions itself as a 'context layer' for other AI systems rather than a plugin host.",
+   "evidence": "TNW: $125M led by Index, $192M total, sixfold up from $250M in May 2025. MCP server plus personal and enterprise APIs; Spaces. No user counts disclosed.",
+   "confidence": "verified",
+   "source_url": "https://thenextweb.com/news/granola-series-c-meeting-ai-enterprise-context"
+  },
+  {
+   "claim": "Granola offers built-in and user-created note templates on desktop. This is direct competition for Cora's planned editable notes templates.",
+   "evidence": "Granola help: templates are applied via '/' during a meeting and used when generating enhanced notes; you can create your own under 'All Templates\u2026' or 'Manage templates'.",
+   "confidence": "verified",
+   "source_url": "https://docs.granola.ai/help-center/taking-notes/customise-notes-with-templates"
+  },
+  {
+   "claim": "Fireflies has the most app-store-like system among the notetakers. 'AI Skills' (formerly AI Apps) are user-written prompt apps that run per meeting or on a daily/weekly/monthly multi-meeting schedule, can push results to Slack/HubSpot/Notion, and can be shared with teammates or user groups. There is no third-party marketplace.",
+   "evidence": "Fireflies guide: instructions, triggers (Per Meeting; Daily/Weekly/Monthly), scope filters, text or chart output, integrations, skill visibility (Only me / Teammates / User groups), billed in AI credits; a Discover tab of prebuilt skills. TechCrunch (Apr 23, 2025): 200+ mini apps at launch, users can build their own.",
+   "confidence": "verified",
+   "source_url": "https://guide.fireflies.ai/articles/4941026890-how-to-create-an-ai-app-from-scratch"
+  },
+  {
+   "claim": "Fireflies reached a $1B+ valuation (June 2025, via a tender offer). It says it serves 20M people across 500k+ organizations and has been profitable since 2023.",
+   "evidence": "Company press release syndicated on Yahoo Finance and others; the figures are company-reported.",
+   "confidence": "likely",
+   "source_url": "https://finance.yahoo.com/news/fireflies-reaches-1-billion-valuation-150000434.html"
+  },
+  {
+   "claim": "Screenpipe is a genuine extensible plugin platform that includes meeting capture, which directly contradicts the 'no extensible plugin system exists' claim. Its 'pipes' are scheduled AI agents defined as markdown files (pipe.md: prompt plus schedule plus YAML permission frontmatter), run by a coding agent. Its pipe store lets anyone publish, browse and install.",
+   "evidence": "GitHub README: 'Pipes are scheduled AI agents defined as markdown files', placed in ~/.screenpipe/pipes/, with built-ins including meeting-summary and standup-update; Whisper/Deepgram transcription with diarization. Blog post (2026-03-18, v2.2.176): the pipe store is 'a registry where anyone can publish, browse, and install pipes', with API-key redaction before publishing; meeting detection across 35+ apps.",
+   "confidence": "verified",
+   "source_url": "https://screenpipe.com/blog/screenpipe-v2-06-pipe-store-memories-meeting-detection"
+  },
+  {
+   "claim": "Screenpipe traction and model: about 22.0k GitHub stars, YC S26, source-available Screenpipe Commercial License (commercial use needs a license). Paid app from $25/mo; Business $50/seat; Enterprise $150/seat.",
+   "evidence": "gh api repos/screenpipe/screenpipe: stars=21958, description begins 'YC (S26)', license NOASSERTION (commercial). The about page lists the pricing tiers and says the desktop app requires sign-in.",
+   "confidence": "verified",
+   "source_url": "https://github.com/screenpipe/screenpipe"
+  },
+  {
+   "claim": "Screenpipe once supported paid pipes, with daily payouts to developers via Stripe. Whether that still runs in 2026, and on what revenue share, is unclear.",
+   "evidence": "Older docs and 2024 newsletters describe paid pipe registration and Stripe payouts. The March 2026 store post does not mention monetization.",
+   "confidence": "unverified",
+   "source_url": "https://docs.screenpi.pe/plugins"
+  },
+  {
+   "claim": "Anarlog (formerly Hyprnote; MIT, about 9.5k stars, actively maintained) has an early third-party plugin runtime. Plugins are renderer-injected JS bundles with a plugin.json manifest and a plugin-sdk package. There is no public plugin store or stable public API docs.",
+   "evidence": "gh api: fastrepl/anarlog, stars=9520, pushed 2026-10-16, MIT. examples/plugins/hello-world/plugin.json has id/name/version/main. AGENTS.md says plugins load from ~/Library/Application Support/com.hyprnote.dev/plugins, are injected into the main renderer thread, and a bad plugin can freeze the app. packages/ includes plugin-sdk.",
+   "confidence": "verified",
+   "source_url": "https://github.com/fastrepl/anarlog/tree/main/examples/plugins"
+  },
+  {
+   "claim": "Hyprnote's founders moved on to Char, a YC S25 'AI notepad that turns notes into follow-through' where checkboxes become agent-drafted actions pending your approval. Char is no longer marketed as a meeting recorder; the open-source meeting app continues separately as Anarlog.",
+   "evidence": "YC page: 'Type a checkbox, and an agent picks it up', team of 3. char.com: private beta, no meeting transcription in the copy. Anarlog README: began as Hyprnote, briefly used the Char name, now continues alongside the separate Char app.",
+   "confidence": "verified",
+   "source_url": "https://www.ycombinator.com/companies/char"
+  },
+  {
+   "claim": "Meetily is the open-source traction leader for local meeting notes, with about 31.8k stars (MIT). It has no plugin marketplace: its extension points (signed webhooks, CLI, local API, MCP) are paywalled in Meetily Pro at $10/user/mo, and users write their own glue scripts.",
+   "evidence": "gh api: Zackriya-Solutions/meetily, stars=31804, MIT, pushed 2026-09-15. meetily.ai/workflows: 'no built-in connectors\u2026 your script or assistant handles the final step'; Pro $10/user/mo annual.",
+   "confidence": "verified",
+   "source_url": "https://meetily.ai/workflows"
+  },
+  {
+   "claim": "Other open-source or local meeting apps also treat extensibility as templates, personas or MCP only: OpenOats (about 2.6k stars, real-time suggestions from a knowledge base), Natively (personal-use source license; 9 built-in 'modes', each with a system prompt and note template), Humla (MIT; read-only local MCP, Keychain keys).",
+   "evidence": "gh search plus README scans. Natively: 'Modes Manager (9 Built-in Personas)\u2026 each with its own system prompt and meeting-note template. Build your own on top.' Humla: MCP server off by default and read-only.",
+   "confidence": "verified",
+   "source_url": "https://github.com/Natively-AI-assistant/natively-cluely-ai-assistant"
+  },
+  {
+   "claim": "Otter offers MCP on all plans, custom meeting templates (5/15/30/unlimited by tier), 'AI workflows' (custom on Business, unlimited custom on Enterprise), and API plus webhooks only on Enterprise. Its agents (Meeting Agent, Sales Agent, SDR Agent) are built by Otter, not third parties.",
+   "evidence": "Otter pricing page: Pro $8.33/mo annual, Business $19.99/mo annual, API & webhooks on Enterprise, MCP inherited across tiers. No Jitter (Oct 7, 2025): public API for enterprises plus MCP server. ATDb/MarTech (Apr 28, 2026): 'Conversational Knowledge Engine', expanded MCP server, Otter for Desktop.",
+   "confidence": "verified",
+   "source_url": "https://otter.ai/pricing"
+  },
+  {
+   "claim": "Otter passed $100M ARR (announced March 25, 2025).",
+   "evidence": "Business Wire press-release title: 'Otter.ai Breaks $100M ARR Barrier\u2026 Launching Industry First AI Meeting Agent Suite'. The page itself returned 403, so only the title was seen.",
+   "confidence": "likely",
+   "source_url": "https://www.businesswire.com/news/home/20250325249430/en/Otter.ai-Breaks-$100M-ARR-Barrier-and-Transforms-Business-Meetings-Launching-Industry-First-AI-Meeting-Agent-Suite"
+  },
+  {
+   "claim": "Fathom has a real external developer platform: REST API, signed webhooks, TypeScript and Python SDKs, and public OAuth apps that other users can install. That covers external integrations, not in-app plugins, and there is no marketplace.",
+   "evidence": "developers.fathom.ai: Quickstart, Webhooks, SDKs (TS/Python), OAuth ('Build a Fathom integration that other users can install'), an Examples showcase. A third-party guide (Truto) says the API is read-only at 60 calls/min per user.",
+   "confidence": "verified",
+   "source_url": "https://developers.fathom.ai"
+  },
+  {
+   "claim": "tl;dv offers an alpha REST API (v1alpha1: import, list, transcripts, notes) and webhooks (MeetingReady, TranscriptReady) on Pro/Business. There is no plugin or app platform.",
+   "evidence": "tl;dv help center: 'API access is available on the Pro or Business plans only'. The webhooks article lists two events scoped to user, team or org.",
+   "confidence": "verified",
+   "source_url": "https://intercom.help/tldv/en/articles/11583137-api-and-webhooks"
+  },
+  {
+   "claim": "Circleback offers user-built 'automations' (AI insights routed to Slack, CRM or Linear) plus API, MCP and CLI access included on its Free plan (as of March 2026). There is no third-party marketplace.",
+   "evidence": "Circleback blog, March 11, 2026: 'The Free plan includes API, MCP, and CLI access'; MCP for Claude, ChatGPT, Cursor, Claude Code, Raycast, Codex.",
+   "confidence": "verified",
+   "source_url": "https://circleback.ai/blog/how-to-connect-circleback-mcp"
+  },
+  {
+   "claim": "Read.ai launched an MCP server and API (open beta, February 2026). It reports 5M+ MAU, adds 1M users a month, and has a Speaker Coach that gives cross-meeting communication metrics (clarity, inclusion, impact, pace, filler words, talk/listen ratio). It has no developer marketplace.",
+   "evidence": "Read.ai post, May 12, 2026: MCP at api.read.ai/mcp/, ChatGPT connector, '5M+ monthly active users'. read.ai/coaching describes the Speaker Coach methodology.",
+   "confidence": "verified",
+   "source_url": "https://www.read.ai/post/read-ai-mcp-adoption-surges-in-launch-phase"
+  },
+  {
+   "claim": "Jamie (bot-free, EU) caps custom templates by plan (1 Free / 3 Plus / unlimited Pro \u20ac39/mo). API, webhooks and MCP are Pro and above. Shared templates need the Team plan. No plugins.",
+   "evidence": "Official Jamie pricing page comparison table.",
+   "confidence": "verified",
+   "source_url": "https://www.meetjamie.ai/en/pricing"
+  },
+  {
+   "claim": "Bluedot supports custom note templates with your own prompts and questions, can re-apply a template to past meetings, and reportedly offers MCP and org-wide webhooks. There is no plugin system.",
+   "evidence": "Only third-party listings (GetApp, aiproductivity.ai); no official API docs were found.",
+   "confidence": "unverified",
+   "source_url": "https://www.getapp.com/software/2219252/bluedot-2"
+  },
+  {
+   "claim": "Krisp's meeting assistant has a user-built summary template editor, Zapier/webhook outbound triggers, and an MCP server. Its SDK covers noise cancellation, not meeting-notes extensibility.",
+   "evidence": "A competitor comparison (MeetGeek, Aug 2026) and a Deepgram app listing; no official Krisp developer docs were found.",
+   "confidence": "unverified",
+   "source_url": "https://meetgeek.ai/comparison/krisp-vs-fellow"
+  },
+  {
+   "claim": "Notion AI Meeting Notes now supports custom instructions (March 18, 2026) and can trigger Custom Agents when a note finishes ('Meeting note summarized' trigger, July 31, 2026). Example uses: update project trackers, post recaps, turn feedback into tickets. This overlaps Cora's 'todos/knowledge base/roadmap' plugin ideas for teams already on Notion.",
+   "evidence": "notion.com release 2026-07-31: 'Custom Agents can now run right after an AI Meeting Note is finished.' The 2026-03-18 release covers summary format, sections, tone and length via Instructions. Custom Agents GA (May 4, 2026), the Business plan requirement and the credit pricing come from third-party guides.",
+   "confidence": "verified",
+   "source_url": "https://www.notion.com/releases/2026-07-31"
+  },
+  {
+   "claim": "Zoom has the most developer-open meeting platform, but it is cloud-only and Zoom-only.\n- App Marketplace apps can get real-time audio, video and transcripts via RTMS (generally available).\n- Custom AI Companion add-on (Sept 2025): IT/admin-built agents in AI Studio with MCP tools and A2A (first partner: ServiceNow).\n- March 2026: no-code custom agents from templates, plus Zoom AI Services APIs.\n- April 9, 2026: an MCP connector for Claude.",
+   "evidence": "Zoom RTMS changelog: 'general availability of Realtime Media Streams', any developer can build via a general Marketplace app. Reworked (Sept 17, 2025) on the Custom AI Companion add-on. Zoom press release (Mar 10\u201311, 2026): no-code custom agents, AI Companion MAU 'more than tripled' YoY in Q4 FY26. UC Today: Claude MCP connector live April 9, 2026.",
+   "confidence": "verified",
+   "source_url": "https://developers.zoom.us/changelog/rtms/june-25-2025/"
+  },
+  {
+   "claim": "The Custom AI Companion add-on costs $12/user/month.",
+   "evidence": "Appears only in search-result snippets of press coverage; the primary press release did not state a price.",
+   "confidence": "unverified",
+   "source_url": "https://www.reworked.co/digital-workplace/zoom-ai-companion-gets-custom-agent-powers-and-collaboration-upgrades/"
+  },
+  {
+   "claim": "Microsoft Teams: Facilitator is the built-in meeting agent (its web-search feature needs M365 Copilot Premium). Admins can enable third-party Teams agents (GA expected October 2026). Letting Copilot Studio custom agents join meetings was shelved in August 2026. Extensibility is enterprise/IT-centric and locked to M365.",
+   "evidence": "UC Today, 'Teams & Copilot: what's new in September 2026' (Sept 14, 2026). Microsoft Learn samples show bots reading transcripts via Graph; third-party commentary describes a tenant-level Transcript API Access switch.",
+   "confidence": "verified",
+   "source_url": "https://uctoday.com/unified-communications/microsoft-teams-copilot-whats-new-in-september-2026/"
+  },
+  {
+   "claim": "Yoodli (communication coaching and roleplay) raised a $40M Series B (Dec 2, 2025; nearly $60M total) and was reported at a valuation above $300M. Individual plans: Starter (5 lifetime roleplays), Pro $8/mo, Advanced $20/mo (annual billing). It is practice-session based and can give feedback on uploaded recordings; its pricing page lists no live Zoom/Meet/Teams meeting integration.",
+   "evidence": "Yoodli blog (Series B). Yoodli pricing page. The TechCrunch headline on the $300M valuation (page returned 403).",
+   "confidence": "verified",
+   "source_url": "https://yoodli.ai/blog/yoodli-raises-40-million-series-b-to-lead-the-future-of-experiential-learning"
+  },
+  {
+   "claim": "Hyperbound (AI sales roleplay plus real-call scoring, YC) raised a $15M Series A (Sept 15, 2025; $18.3M total) and claimed two straight months of $1M+ new ARR. In September 2026, Richardson Sales Performance began selling Hyperbound-based AI roleplay.",
+   "evidence": "Hyperbound Series A blog; the Richardson partnership is from search coverage.",
+   "confidence": "verified",
+   "source_url": "https://www.hyperbound.ai/blog/series-a"
+  },
+  {
+   "claim": "Second Nature (enterprise AI sales and service roleplay built from company playbooks and recorded calls) raised a $22M Series B (October 2025, Zoom participating). Pricing is quote-only, estimated at about $30\u201340/seat/mo with about a $20k annual minimum.",
+   "evidence": "Pulse2 and VCA coverage of the Series B. The pricing estimate comes from a competitor review (Outdoo).",
+   "confidence": "likely",
+   "source_url": "https://pulse2.com/second-nature-22-million-series-b-raised-for-expanding-ai-based-sales-and-service-training"
+  },
+  {
+   "claim": "Roleplay generated from your own real meetings already exists for enterprise sales. Gong Enable's AI Trainer (Mission Andromeda, February 2026) builds practice scenarios from real customer calls and scores them with live-call scorecards. Outdoo imports Gong calls to build roleplays.",
+   "evidence": "Gong Mission Andromeda page: Gong Enable 'uses real customer conversations to power AI-driven coaching, role-play, and measurement'. Outdoo help docs describe the import-and-create-roleplay flow.",
+   "confidence": "verified",
+   "source_url": "https://www.gong.io/platform/mission-andromeda"
+  },
+  {
+   "claim": "Gong added no-code Custom Agents under a 'Revenue Harness' (June 24, 2026), aimed at RevOps and managers, not third-party developers.",
+   "evidence": "Search coverage and Gong marketing pages; the sources conflict on what Agent Studio is.",
+   "confidence": "likely",
+   "source_url": "https://www.gong.io/de/platform/ai-agents-for-revenue-teams"
+  },
+  {
+   "claim": "Recall.ai (meeting bot API plus Desktop Recording SDK) raised $38M at a $250M valuation (September 2025) and says it serves 2,000+ companies. That lowers the barrier for anyone to build meeting apps; it sponsors open-source tools such as OpenOats and Natively.",
+   "evidence": "Pulse2 and Business Wire coverage; sponsorship banners in the OpenOats and Natively READMEs.",
+   "confidence": "verified",
+   "source_url": "https://www.recall.ai/blog/recall-ai-series-b-the-api-for-meeting-recording"
+  },
+  {
+   "claim": "Obsidian's plugin ecosystem shows demand for extensible, bring-your-own-key meeting capture, but no winner: about a dozen meeting-transcription plugins, each with roughly 10\u2013900 downloads.",
+   "evidence": "Obsidian community listings: LexVoice about 897, VoxNote about 150, Meeting Copilot about 93, and so on.",
+   "confidence": "likely",
+   "source_url": "https://community.obsidian.md/plugins/meeting-copilot"
+  },
+  {
+   "claim": "Cora's current plugin system is a hard-wired single-plugin loader, not yet a platform, and its public repo has no traction yet.",
+   "evidence": "python/plugin_registry.py (59 lines) has defaults for 'coaching' only, plus get_coaching_plugin() importing plugins.coaching.engine. gh api: mkdsrt10/cora-ai-meeting-notes stars=0, forks=0.",
+   "confidence": "verified",
+   "source_url": "https://github.com/mkdsrt10/cora-ai-meeting-notes"
+  }
+ ],
+ "implications_for_cora": [
+  "Drop 'no one has an extensible plugin system' from the launch copy: Screenpipe's pipe store (YC S26, about 22k stars, meeting-summary pipe) and Anarlog's plugin SDK would get it called out on Product Hunt or Hacker News within minutes. Use a claim that holds up instead, such as 'the open, local-first plugin platform built around meetings: plugins get structured speakers, people, transcript, notes and action items, can write back (notes, todos, practice sessions), and run on your own model'.",
+  "MCP access is now standard (Granola, Otter, Read, Circleback (even on its Free plan), Jamie, Meetily Pro, Zoom\u2192Claude, Humla). Cora's mcp_server.py is parity, not a selling point. The selling point has to be what plugins can do inside Cora that a Claude skill sitting on Granola's MCP can't: live and in-meeting hooks, local execution, a UI surface, write access, and cross-meeting state.",
+  "The biggest threat to the platform idea is that the extensibility layer is moving into the AI assistants. Users can already ask Claude or ChatGPT to 'roleplay my last 1:1' through a vendor's MCP server. Reduce the risk by making Cora plugins portable: a manifest plus a prompt plus optional code, close to Claude Skills or Screenpipe's pipe.md. Also expose Cora plugins as MCP tools, so Cora becomes the meeting runtime, not just another silo.",
+  "Copy what works for the lowest tier: Granola Recipes and Fireflies AI Skills show users will write and share prompt-plus-trigger apps, including per-meeting and scheduled multi-meeting runs. Cora's 'templates for notes' should be that low tier (shareable files), with code plugins as the higher tier. Markdown, git-shareable templates could set Cora apart from cloud-locked recipes.",
+  "The clearest unclaimed niche is private, individual practice built from your own real meetings, outside sales: replay a hard 1:1, rehearse the feedback talk, storytelling and communication coaching. Gong AI Trainer does this only for enterprise sales reps, at enterprise prices. Yoodli ($8\u201320/mo) and Read.ai Speaker Coach coach generically, not from your specific conversation with a specific person. Make the roleplay plugin the flagship demo.",
+  "Ideas for longitudinal plugins (roadmap tracking, a team todo ledger, a company knowledge base) overlap Notion Custom Agents (meeting-note trigger since July 2026), Fireflies scheduled skills, Otter's 'Conversational Knowledge Engine' and Char. Cora's edge would be local, user-owned data and rule sets the user writes as files. Shared team todos need sync infrastructure, which pulls against local-first, so scope that as a later plugin.",
+  "Tension on accuracy versus privacy: Gemini cloud transcription as the default for 'top-notch accuracy' removes the local-first difference from Meetily (31.8k stars), Anarlog and Humla. Keep it an explicit per-meeting or per-profile opt-in, say clearly what leaves the device, and keep it blocked by policy.enterprise_lockdown. The HIPAA and DoD-contractor customer context makes cloud transcription by default a compliance risk.",
+  "Plugin security: Anarlog's own docs warn that a bad plugin can freeze the whole app because plugins are injected into the renderer. Cora has a strict CSP, a sandboxed renderer and a token-protected loopback API. Run plugins in a separate process or sandbox, with per-plugin data scopes (Screenpipe uses frontmatter permissions) and a signed or reviewed registry. This doubles as a selling point and as a SOC 2 control story.",
+  "Cold start: with 0 stars, a marketplace won't fill itself. Launch with 5\u20138 first-party plugins that show the range: roleplay, communication coach, storyteller, todo export with rule sets, roadmap tracker, decision log. Add a 'build a plugin in 10 minutes' template, and position on Product Hunt as 'plugins for your meetings', not 'another Granola alternative'. The Granola-alternative category is crowded (Meetily, Hyprnote/Anarlog, Humla, OpenOats).",
+  "Revenue model: competitors charge for the extensibility tier (Meetily Pro $10, Granola Business $14 for the API, Jamie Pro \u20ac39 for API/MCP, Otter API on Enterprise only). Screenpipe once offered paid pipes. Keep core plus plugins free and open, and consider paid hosted features later (sync, a team plugin registry)."
+ ],
+ "unverified_or_unknown": [
+  "Whether Screenpipe's paid-pipe payouts still operate in 2026, the revenue share, and how many pipes or installs the store currently has.",
+  "How Granola's 'community' recipes get into Discover (open submission or curated), and current Granola user counts (last public figure: about 5k weekly users in October 2024).",
+  "Fireflies' current plan prices and which tiers include AI Skills, API, webhooks and MCP: the pricing page showed no prices to the fetcher.",
+  "Whether the Fathom API is strictly read-only (third-party claim), and whether an official Fathom MCP server exists (only community servers found).",
+  "Bluedot's and Krisp's API, webhook and MCP details: only third-party or competitor sources were found.",
+  "Whether Yoodli currently has any live Zoom/Meet/Teams meeting integration (its pricing page lists none); the TechCrunch '$300M valuation' article returned 403.",
+  "Price of Zoom's Custom AI Companion add-on ($12/user/mo appears only in snippets), and Zoom App Marketplace review terms for agent or RTMS apps.",
+  "Microsoft 365 Copilot pricing and the final GA status of third-party Teams agents (expected October 2026).",
+  "Notion Custom Agents GA date (May 4, 2026) and credit pricing ($10 per 1,000): third-party guides only.",
+  "Stability and documentation of Anarlog's plugin SDK, and whether any third-party Anarlog plugins exist in the wild.",
+  "Second Nature's total funding (sources conflict: $37.5M vs $80M) and its pricing (estimate only).",
+  "Gong Custom Agents and Agent Studio details (sources conflict), and AI Trainer pricing.",
+  "Otter's $100M ARR comes from a Business Wire headline only (page returned 403); Otter's 2026 user counts.",
+  "No independent accuracy benchmarks were found for any vendor's transcription. Cora's 'top-notch accuracy' should be backed by its own benchmark tool (the recent commit adds one) rather than competitor claims."
+ ]
+}

@@ -3,7 +3,9 @@
 ## Unreleased
 
 - Notifications & logs panel, pause/resume and "Continue this meeting" now show live progress on the original meeting (and let you listen before it merges), floating widget lost its Screen button.
-- Optional hosted transcription: Settings > On-Device Models > Transcription engine can now use Google Gemini instead of the local model (off by default, disabled under enterprise lockdown).
+- Optional hosted transcription: Settings > On-Device Models > Transcription engine can use Google Gemini instead of the local model (off by default, disabled under enterprise lockdown). It transcribes in ~4-minute windows (15-17 requests per meeting-hour instead of ~200 short clips), validates every window, snaps timestamps to the local speech detector, retries then splits a bad window, and fails loudly rather than silently switching engines. See docs/transcription.md.
+- Fix: choosing "On this Mac" no longer uploads the recording; transcripts now record which engine really ran.
+- One-line installer (`scripts/install.sh`) so the unsigned app opens without the macOS warning; INSTALL docs explain why the app isn't notarized.
 - `tools/asr_bench.py` + `docs/ASR_BENCHMARK.md`: score candidate speech models on your own meeting.
 
 ## 0.2.2 — 2026-10-05

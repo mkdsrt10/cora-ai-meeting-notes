@@ -1,0 +1,250 @@
+{
+ "summary": "The market is real, well funded and getting crowded. Granola raised at $1.5B (Mar 2026), Otter reports $100M ARR, Fireflies claims a $1B+ valuation and profitability, and Wispr ($2B, Aug 2026) is moving into meeting notes. Privacy and consent pain is well documented. There are class actions against Otter (Aug 2025), Fireflies (BIPA voiceprints, Dec 2025) and Granola (Jul 2026). Universities including UW-Madison, CUNY and Waterloo block Otter, Read and Fireflies bots. A Jul 2026 survey (n=500, sponsored by a law firm) found 65% of workers exposed to notetakers were not consistently asked for consent. Bot-free capture has largely won (Granola's growth).\n\nTwo claims in the brief don't hold up:\n- \"No extensible meeting plugin exists\" is false. Fireflies has 200+ AI Apps including custom ones, Granola has Recipes plus MCP and APIs, and screenpipe (22k stars, YC S26) runs a paid plugin store over local capture.\n- \"Local-first open source\" alone is not a gap. Meetily (31.8k stars, $10/user/mo Pro) and Anarlog/Hyprnote (9.5k stars, YC S25, explicitly aimed at law/finance/healthcare) already hold it. Cora has 0 stars.\n\nRecommended beachheads, strongest first:\n\n**(1) Builder-operators.** Technical founders, engineering managers and PMs on Mac who run many 1:1s, want to own and extend their meeting data, and would use a real-meeting-grounded AI roleplay/coaching plugin.\n- Funding for the roleplay category is strong: Yoodli $40M Series B (Dec 2025, ~$60M total), Second Nature $22M, Hyperbound ~$17.5M, plus several manager difficult-conversation roleplay tools launched in 2026. Granola itself launched Recipes with a CEO-coaching recipe.\n- None of the roleplay tools found build the practice session from the user's own recorded meetings. That is the wedge.\n- This group is also the Product Hunt and HN audience. Distribution is backed by OSS star counts (Meetily, screenpipe, OpenWhispr) and large local-AI/self-hosting communities (~750k r/LocalLLaMA and ~800k r/selfhosted, per third-party trackers).\n- Willingness to pay is anchored around $8\u201315/mo (Granola Business $14, Otter Pro $8.33\u201316.99, Meetily Pro $10).\n- Evidence quality: good for funding and comparables, weak for direct demand for a meeting-specific plugin SDK.\n\n**(2) Hinglish / Indian-English professionals.** Founders, PMs and consultants in India and the diaspora.\n- Accuracy is a clear, demo-able gap. Otter does not support Hindi (several secondary sources agree). A Feb 2026 Zoom forum thread documents dropped and mis-transcribed Hindi in code-switched meetings, and a community MVP said Zoom has no code-switching handling. Vendor-reported Hinglish WER ranges from 27\u201370% depending on model.\n- Gemini, Google Chirp 3 (hi-IN GA, ~$0.016/min) and Sarvam Saaras (codemix mode, \u20b930/hr) are plausible engines. The founder fits this market well.\n- Two risks: Indian willingness to pay is low (OpenAI made ChatGPT Go free for a year in India), and the US-centric Product Hunt audience won't care much about this segment.\n- Evidence quality: pain is moderate and largely anecdotal or vendor-sourced. Market size and willingness to pay are unverified.\n\n**Regulated professionals** (lawyers, therapists, DoD contractors) have the strongest pain evidence: the NYC Bar Formal Opinion 2025-6 on privilege, CMMC's FedRAMP-Moderate bar for cloud tools, and AI scribe adoption by therapists. They should not be the beachhead now:\n- The Gemini cloud-transcription branch contradicts the local-only promise.\n- Selling to them needs BAAs, compliance attestations and EHR/practice integrations.\n- Meetily and Anarlog already position there.\n\nKeep a strict local mode (enterprise_lockdown) as a messaging pillar and a later expansion path. Sales call coaching (Gong at ~$1.3\u20131.6k/user/yr) and shared team todos (Fellow, Granola Spaces) are expansion plays, not beachheads. Both need multi-user backends and CRM or task-tool integrations.",
+ "findings": [
+  {
+   "claim": "Granola, the leading bot-free (local audio capture) meeting notes app, raised a $125M Series C at a $1.5B valuation in Mar 2026. That is 6x its $250M valuation in May 2025, with $192M raised in total. It had 5,000 weekly users at its Oct 2024 Series A and reported ~10% week-over-week growth in May 2025. No current user count or revenue is disclosed.",
+   "evidence": "TNW coverage of the Series C (customers named: Vanta, Gusto, Asana, Cursor, Mistral). TechCrunch on the Series B ($43M led by NFDG). Growth figures come from the co-founder.",
+   "confidence": "verified",
+   "source_url": "https://thenextweb.com/news/granola-series-c-meeting-ai-enterprise-context"
+  },
+  {
+   "claim": "Granola now pitches itself as a context layer for other AI tools, with an MCP server, personal and enterprise APIs, Spaces, and Recipes (reusable, shareable prompt workflows, launched with a CEO-coaching recipe modelled on Matt Mochary's approach). Overlap with Cora's plugin, MCP and templates plans is direct.",
+   "evidence": "TNW Series C article (MCP/APIs). Granola help-center Recipes article and launch coverage. The Recipes Product Hunt launch (Oct 1, 2025) placed #8 with 197 upvotes.",
+   "confidence": "likely",
+   "source_url": "https://help.granola.ai/article/recipes"
+  },
+  {
+   "claim": "Granola pricing: Basic free; Business $14/user/mo with MCP access and a manual, per-user AI-training opt-out; Enterprise from $35/user/mo with an org-wide training opt-out enforced, SSO and API. No HIPAA BAA is mentioned.",
+   "evidence": "Granola's own pricing blog post.",
+   "confidence": "verified",
+   "source_url": "https://www.granola.ai/blog/granola-pricing-teams-per-user-enterprise"
+  },
+  {
+   "claim": "Granola faces a proposed class action, Chamberlain v. Granola (N.D. Cal. 3:26-cv-07926, filed Jul 30, 2026). It alleges recording without participants' knowledge, model training on by default for Free and Business plans, optional participant notice, and public link sharing.",
+   "evidence": "PPC Land summary of the complaint, corroborated by a Layer3Labs guide. Neither source is primary and the docket was not checked.",
+   "confidence": "likely",
+   "source_url": "https://ppc.land/granola-sued-for-recording-meetings-without-consent-to-train-ai-models/"
+  },
+  {
+   "claim": "Otter.ai faces a consolidated federal class action (Brewer, N.D. Cal. 5:25-cv-06911, filed Aug 15, 2025). It alleges OtterPilot recorded non-users on Zoom, Meet and Teams without all-party consent and used the recordings for training. A separate Walker v. Otter BIPA suit was filed Aug 26, 2025.",
+   "evidence": "NPR affiliate coverage, the OECD AI incident entry and several legal summaries agree on the case details.",
+   "confidence": "verified",
+   "source_url": "https://www.boisestatepublicradio.org/2025-08-15/class-action-suit-claims-otter-ai-secretly-records-private-work-conversations"
+  },
+  {
+   "claim": "Fireflies faces a BIPA class action (Cruz v. Fireflies.AI, C.D. Ill. 3:25-cv-03399, filed Dec 18, 2025). It alleges speaker identification created voiceprints of unregistered participants without written consent. Statutory damages are $1k\u2013$5k per violation.",
+   "evidence": "Data Privacy & Security Insider (law-firm blog); the complaint PDF is hosted by Workplace Privacy Report.",
+   "confidence": "likely",
+   "source_url": "https://www.dataprivacyandsecurityinsider.com/2025/12/lawsuit-alleges-fireflies-ai-corp-illegally-collects-biometric-data-from-virtual-meetings/"
+  },
+  {
+   "claim": "Universities are blocking cloud notetaker bots. UW-Madison blocked otter.ai, read.ai, fireflies.ai, sembly and others from Zoom (Oct 2024). CUNY blocks Read.ai and Otter.ai user agents. Waterloo bans third-party AI bots. Johns Hopkins and EWU disabled them. The common reasons are no data-sharing agreement, unvetted servers, and missing consent.",
+   "evidence": "UW-Madison IT news post (fetched). University of Waterloo guidelines and CUNY and EWU IT notices (from search results).",
+   "confidence": "verified",
+   "source_url": "https://it.wisc.edu/news/uw-madison-blocks-3rd-party-ai-services-for-enhanced-security"
+  },
+  {
+   "claim": "Consent gap: 33.4% of US workers have had an AI notetaker in their meetings. Among those exposed, only 34.7% were always asked first and 25.1% saw the bot appear unasked. 18.8% of all workers found out a meeting was recorded without their knowledge.",
+   "evidence": "Kolmogorov Law-commissioned Pollfish survey, n=500, fielded Jul 8, 2026, \u00b14.4% overall and \u00b17.6% for the subsample. The sponsor is a law firm, which is a possible bias.",
+   "confidence": "verified",
+   "source_url": "https://krdo.com/stacker-business-economy/2026/07/16/ai-notetakers-have-sat-in-on-1-in-3-us-workers-meetings-but-only-a-third-say-they-were-asked-first/"
+  },
+  {
+   "claim": "58% of professionals report feeling uncomfortable when an AI bot joins a meeting uninvited, and 41% change what they say when one is recording (Calendly 2024 data).",
+   "evidence": "Cited only via a vendor roundup; the primary Calendly report was not found.",
+   "confidence": "unverified",
+   "source_url": "https://www.fast.io/resources/best-ai-meeting-assistants-2026.md"
+  },
+  {
+   "claim": "Otter reports crossing $100M ARR in Mar 2025 (Sacra estimates ~$81M at end of 2024). It reports 25M users in Mar 2025 and 35M in Dec 2025, with fewer than 200 employees.",
+   "evidence": "Otter's BusinessWire press releases and the Sacra analysis. All figures are company-reported.",
+   "confidence": "likely",
+   "source_url": "https://sacra.com/research/otter-at-100m-arr/"
+  },
+  {
+   "claim": "Fireflies claims a $1B+ valuation after a tender offer (Jun 12, 2025), profitability since 2023, 20M+ users at 500k+ organizations, and 8x user growth over 18 months.",
+   "evidence": "Company press release on Yahoo Finance. Figures are self-reported; third-party revenue estimates range from $10.9M to $10\u201350M.",
+   "confidence": "likely",
+   "source_url": "https://finance.yahoo.com/news/fireflies-reaches-1-billion-valuation-150000434.html"
+  },
+  {
+   "claim": "Extensible meeting-AI platforms already exist. Fireflies launched 200+ department-specific agentic AI Apps plus custom apps (Apr 2025), with outputs pushed to CRMs, Jira and Asana. This undercuts the claim that nothing similar exists.",
+   "evidence": "Fireflies blog and BusinessWire release; TechCrunch coverage (BANT sales app, agent performance coaching app).",
+   "confidence": "likely",
+   "source_url": "https://fireflies.ai/blog/introducing-fireflies-ai-apps"
+  },
+  {
+   "claim": "screenpipe, an open-source local screen and audio capture tool (YC S26), runs a plugin ecosystem called pipes: sandboxed TypeScript/Deno plugins, a localhost REST API, and a reviewed paid store with daily Stripe payouts. It is the closest open-source analogue to Cora's plugin vision.",
+   "evidence": "GitHub API: screenpipe/screenpipe has 21,958 stars as of 2026-10-16. Official plugin docs.",
+   "confidence": "likely",
+   "source_url": "https://docs.screenpi.pe/plugins"
+  },
+  {
+   "claim": "The open-source local-first meeting-notes niche is already occupied with real traction. Meetily (Zackriya-Solutions) has 31,804 stars and 3,530 forks (MIT) and sells a Pro tier at $10/user/mo ($120/yr) plus custom-priced self-hosted enterprise. Anarlog (formerly Hyprnote/Char, YC S25) has 9,520 stars (MIT). Cora has 0 stars.",
+   "evidence": "GitHub REST API queried 2026-10-16. The Meetily pricing page appeared in search results.",
+   "confidence": "verified",
+   "source_url": "https://github.com/Zackriya-Solutions/meetily"
+  },
+  {
+   "claim": "Anarlog/Hyprnote's maker says it was built for law, finance and healthcare teams whose IT departments block cloud note-takers. Its Product Hunt tagline is 'AI Notepad for Private Meetings \u2014 fully on your device.' Regulated professionals are already targeted by an open-source competitor.",
+   "evidence": "Anarlog Product Hunt page (fetched; maker comments). Upvote count is ambiguous (79 or 437).",
+   "confidence": "likely",
+   "source_url": "https://www.producthunt.com/p/hyprnote/anarlog"
+  },
+  {
+   "claim": "The NYC City Bar's Formal Opinion 2025-6 (Dec 22, 2025) requires client disclosure and consent for AI-recorded calls. It tells lawyers to assess vendor retention, training use, and third-party access as a possible privilege-waiver risk. A local, no-vendor tool directly addresses the third-party-access concern.",
+   "evidence": "Secondary legal commentary (Implicator, 2Civility, Columbia CLS Blue Sky). The opinion's full text was not read.",
+   "confidence": "likely",
+   "source_url": "https://www.implicator.ai/ai-note-takers-face-privilege-warnings-after-new-york-bar-opinion/"
+  },
+  {
+   "claim": "Under DFARS 252.204-7012, cloud services that touch CUI must be FedRAMP Moderate or equivalent; SOC 2 alone is not enough. Commercial cloud notetaker bots generally fail this, while on-device or air-gapped transcription avoids the external data flow.",
+   "evidence": "Compliance vendor guides (Secureframe, Coalfire Federal); the DoD CIO equivalency memo is cited secondhand.",
+   "confidence": "likely",
+   "source_url": "https://secureframe.com/blog/cmmc-level-2-ai-governance"
+  },
+  {
+   "claim": "Therapists are adopting AI session recording and notes (NPR, May 2026), and APA 2025 guidance requires informed consent covering data flows and vendors. Niche therapy scribes charge about $15\u201369/mo: Upheal from $19 with a $69 cap, Mentalyc from $14.99. Upheal reportedly raised a ~$10M Series A (Jan 2025).",
+   "evidence": "NPR affiliate story; Capterra and vendor pricing pages; funding from aggregators.",
+   "confidence": "likely",
+   "source_url": "https://www.hppr.org/2026-05-18/a-growing-number-of-therapists-are-using-ai-to-record-sessions-and-make-notes"
+  },
+  {
+   "claim": "AMA's 2026 survey reportedly finds 81% of physicians use AI, up from 38% in 2023. UCSF reports 70% of its physicians using AI scribes (2026).",
+   "evidence": "Secondary write-ups only; the AMA primary report was not accessed. The definition of 'AI use' varies.",
+   "confidence": "unverified",
+   "source_url": "https://textbookofdigitalhealth.com/news/2026-05-22-ama-physician-ai-survey.html"
+  },
+  {
+   "claim": "AI roleplay and communication coaching is a well-funded category. Yoodli raised a $40M Series B (Dec 2, 2025; ~$60M total; customers Google, Snowflake, Databricks, RingCentral, Sandler) covering sales calls, interviews, feedback sessions and high-stakes conversations. Second Nature raised a $22M Series B (Oct 2025). Hyperbound has ~$17.5M total.",
+   "evidence": "Yoodli's own announcement (fetched); BuiltIn NYC for Second Nature; CB Insights for Hyperbound.",
+   "confidence": "verified",
+   "source_url": "https://yoodli.ai/blog/yoodli-raises-40-million-series-b-to-lead-the-future-of-experiential-learning"
+  },
+  {
+   "claim": "Several manager-focused tools for rehearsing difficult conversations launched in 2026: ELB Learning AI Roleplay (Feb 2026), Peopling (voice roleplay for avoided feedback and 1:1s), Mindtools AI Conversations, ForeverLearning. All use synthetic scenarios. None found builds the rehearsal from the user's own past meeting transcripts.",
+   "evidence": "Training Industry press release and Product Hunt listings. The 'none uses real meetings' conclusion comes from this search only.",
+   "confidence": "likely",
+   "source_url": "https://trainingindustry.com/press-release/artificial-intelligence/elb-learning-launches-ai-role-play-an-advanced-ai-simulation-tool-to-prepare-teams-for-high-stakes-conversations/"
+  },
+  {
+   "claim": "Communication and storytelling self-improvement audience: Toastmasters has ~265k members in 13,800+ clubs (2024\u201325). Analyst estimates put soft-skills training at ~$34\u201337B (2025), communication as its largest segment, and public-speaking training at ~$3.6\u20136.8B. Consumer speaking-coach apps price around $8/mo (SpeakUp $7.99); Speeko claims 300k users.",
+   "evidence": "Toastmasters 2025 fact sheet and CEO report. Grand View and IMARC estimates are paywalled with inconsistent scope. App figures are self-reported.",
+   "confidence": "likely",
+   "source_url": "https://mediacenter.toastmasters.org/download/TFS100-toastmasters-international-fact-sheet-2025.pdf"
+  },
+  {
+   "claim": "Sales call coaching has high willingness to pay but is crowded and enterprise-heavy. Gong is estimated at ~$1,300\u20131,600/user/yr plus $5k\u201350k platform fees and ~$7.5k onboarding, on annual contracts.",
+   "evidence": "Third-party pricing estimates only (tl;dv, Raftlabs, Outdoo); Gong does not publish prices.",
+   "confidence": "unverified",
+   "source_url": "https://tldv.io/blog/gong-pricing/"
+  },
+  {
+   "claim": "Mainstream tools fail Hinglish. Otter supports only about 3\u20136 languages, none of them Hindi. A Feb 2026 Zoom developer-forum thread documents dropped Hindi words ('matlab', 'thoda sa') and phonetic errors in code-switched meetings, and a community MVP replied that Zoom has 'no real system' for code-switched audio.",
+   "evidence": "Zoom devforum thread (fetched; a single anecdote with no Zoom staff reply). Otter language support comes from several secondary and competitor sources; Otter's help center was not reached.",
+   "confidence": "likely",
+   "source_url": "https://devforum.zoom.us/t/zoom-cloud-recording-transcription-behavior-with-hindi-code-switched-audio/141709"
+  },
+  {
+   "claim": "Hinglish ASR accuracy varies widely by model: vendor-reported WER of 26.97\u201369.53% on the same audio. On Hindi FLEURS, a competitor's table shows Gemini Flash 2 at 5.2% WER vs Whisper large-v3 at 33.3%. An independent arXiv benchmark on agricultural Hindi found Google STT at 16.2%, Gemini 2.5 Pro at 18.5%.",
+   "evidence": "Deepgram blog (vendor), ElevenLabs page (competitor), arXiv 2602.03868 (independent, domain-specific). The figures are not comparable with each other.",
+   "confidence": "unverified",
+   "source_url": "https://deepgram.com/learn/hinglish-voice-ai-speech-recognition"
+  },
+  {
+   "claim": "Candidate Hinglish engines: Google Chirp 3 has hi-IN GA (diarization only in Recognize/BatchRecognize; asia-south1 region in Preview), ~$0.016/min. Sarvam's Saaras v3 has a 'codemix' mode at \u20b930/hr (\u20b945/hr with diarization); Saarika is being deprecated.",
+   "evidence": "Google Cloud Chirp 3 docs and Sarvam docs (from search). The Chirp price comes via OpenRouter and third parties.",
+   "confidence": "likely",
+   "source_url": "https://docs.cloud.google.com/speech-to-text/docs/models/chirp-3"
+  },
+  {
+   "claim": "Indian consumers are highly price sensitive for AI subscriptions. OpenAI launched ChatGPT Go at \u20b9399/mo (Aug 2025) and then made it free for 12 months in India (Nov 2025), with Airtel/Perplexity and Google offering similar free promotions.",
+   "evidence": "Storyboard18 and Smartprix coverage. No conversion or willingness-to-pay data was published.",
+   "confidence": "likely",
+   "source_url": "https://www.storyboard18.com/brand-marketing/openai-offers-free-access-to-chatgpt-go-in-india-to-boost-user-growth-83251.htm"
+  },
+  {
+   "claim": "Builder and extension communities are large: r/LocalLLaMA ~750k and r/selfhosted ~790\u2013812k members (third-party trackers); Obsidian reports 8,000+ plugins and themes (Oct 2026); Raycast has 20k+ extension developers (date unclear). MCP reportedly passed 97M monthly SDK downloads (Mar 2026) with 10k+ public servers.",
+   "evidence": "GummySearch and Hive Index (unofficial), Obsidian blog, TechCrunch (undated), and an MCP stats aggregator citing Anthropic.",
+   "confidence": "unverified",
+   "source_url": "https://digitalapplied.com/blog/mcp-adoption-statistics-2026"
+  },
+  {
+   "claim": "There is open-source demand for local voice and transcription tooling: OpenWhispr 9,480 stars, Vibe 7,805, Scriberr 3,102 (all MIT). Indie local transcription apps sell: MacWhisper is estimated at ~$100k revenue and ~57k downloads.",
+   "evidence": "GitHub API, 2026-10-16. The MacWhisper figure is a third-party Substack estimate.",
+   "confidence": "likely",
+   "source_url": "https://github.com/OpenWhispr/openwhispr"
+  },
+  {
+   "claim": "Wispr raised $280M at a $2B valuation (Aug 17, 2026) and said it will expand from dictation into meeting notes and enterprise. Another well-funded entrant is coming into bot-free capture.",
+   "evidence": "TechCrunch article title and summary via search results.",
+   "confidence": "likely",
+   "source_url": "https://techcrunch.com/2026/08/17/wispr-raises-280m-at-2b-valuation-as-it-looks-beyond-dictation/"
+  },
+  {
+   "claim": "The Gemini API free tier ('Unpaid Services') may use prompts, files and responses to improve Google products, with human review. The paid tier and Vertex AI do not train on customer data.",
+   "evidence": "Gemini API terms page and Simon Willison's summary (Oct 2024; current terms not re-read).",
+   "confidence": "likely",
+   "source_url": "https://ai.google.dev/gemini-api/terms_preview"
+  },
+  {
+   "claim": "The AI meeting assistant market is estimated at ~$3.1\u20133.5B in 2025 with 24\u201328% CAGR (TBRC, MRFR, Research&Markets, Technavio, Market.us). MRFR projects >$34B by 2035.",
+   "evidence": "Aggregated in a Plaud (vendor) blog and cited by TNW. Scope differs between reports (software vs hardware vs services).",
+   "confidence": "unverified",
+   "source_url": "https://www.plaud.ai/blogs/articles/ai-meeting-assistant-market-estimate"
+  },
+  {
+   "claim": "Shared action-item tracking is a real but unquantified pain. Figures cited include 44% of meeting action items never completed (attributed to Fellow), 54% of knowledge workers leaving meetings without clear next steps (attributed to Atlassian), and TeamRetro product data showing ~90% completion when an item has an owner and a due date. Fellow (1:1 and agenda tool) charges ~$6\u20139/user/mo.",
+   "evidence": "Only secondary blog summaries; primary studies were not located.",
+   "confidence": "unverified",
+   "source_url": "https://speakwiseapp.com/blog/meeting-follow-up-statistics"
+  },
+  {
+   "claim": "Regular manager 1:1s are linked to ~3x higher engagement, and Gallup recommends one meaningful conversation per week per report.",
+   "evidence": "Repeated across HR blogs citing a 2015 Gallup study; the primary source was not found.",
+   "confidence": "unverified",
+   "source_url": "https://blog.neogov.com/this-one-simple-change-will-increase-employee-engagement-one-on-one-meetings"
+  },
+  {
+   "claim": "Product Hunt benchmarks for comparable launches: Granola for iOS #5 (454 upvotes, May 2025), Granola for Windows #5 (276), Granola Recipes #8 (197), HyNote AI #4 (344, Aug 2025). Strong incumbents land in the top 5\u201310 with roughly 200\u2013450 upvotes, not #1.",
+   "evidence": "Hunted.space tracker pages (third-party).",
+   "confidence": "likely",
+   "source_url": "https://www.hunted.space/dashboard/granola/launches/granola-for-ios"
+  },
+  {
+   "claim": "Bot-free capture is the main stated reason users switch from Otter to Granola. The visible bot feels intrusive or unprofessional, and users complain Otter's transcripts are verbose and unstructured.",
+   "evidence": "Blogger comparisons and Reddit-sentiment roundups; anecdotal.",
+   "confidence": "unverified",
+   "source_url": "https://zackproser.com/blog/granola-vs-otter"
+  }
+ ],
+ "implications_for_cora": [
+  "Reposition the plugin story. Don't claim 'no extensible meeting plugin exists': Fireflies AI Apps, Granola Recipes/MCP/API and screenpipe's paid plugin store all contradict it. A defensible claim: an open-source, local data store with a typed plugin SDK over structured meeting objects (speakers, people, action items, coaching metrics). Plugins act on the data (roleplay sessions, todo sync by rule set, roadmap tracking) rather than being prompt templates. Plus first-class MCP.",
+  "Make plugin #1 the flagship wedge: 'Rehearse your next hard conversation with an AI playing the other person, built from your last real meeting with them.' No funded roleplay competitor found (Yoodli, Second Nature, Hyperbound, Peopling, Mindtools) grounds practice in the user's own meetings. It builds on the existing plugins/coaching and the people/person data in the MCP server.",
+  "Beachhead 1, builder-operators (founders, engineering managers, PMs on Mac). Launch audience is HN/GitHub/Product Hunt. Value: own your meetings, extend them, practice 1:1s. Price anchor: free OSS plus BYO key; an optional Pro around $8\u201312/mo undercuts Granola Business ($14) and matches Meetily Pro ($10).",
+  "Beachhead 2, Hinglish professionals. Use the existing model benchmark tool (commit 6424d28) to publish a reproducible Hinglish meeting WER comparison as launch proof: Gemini vs Chirp 3 vs Sarvam Saaras codemix vs local Whisper/Tara, under the same normalization. Accuracy on code-switched audio is the most demo-able gap found (Otter has no Hindi; Zoom drops Hindi words). Gemini/Chirp/Sarvam costs of ~$0.016/min or \u20b930/hr make BYO key viable for price-sensitive users.",
+  "Privacy messaging must be precise on the Gemini production branch. Cloud ASR breaks 'nothing leaves your Mac'. Default to paid-tier Gemini API or Vertex only: the free tier may train on audio with human review, which is a data-handling risk to flag. Keep enterprise_lockdown and a clearly labelled local-only mode. Don't market to lawyers, therapists or DoD until there is a local-only path plus documentation, and no HIPAA or CMMC claims.",
+  "Compliance flag (SOC 2/HIPAA context). The 2025\u201326 lawsuits against Otter, Fireflies and Granola target four things: missing participant consent, training on recordings by default, public link sharing, and voiceprint creation (BIPA). Cora should ship four matching defaults: participant-notice tooling (e.g., a consent message template or auto-insertable chat notice), never train on user data, no public share links by default, and documentation of whether speakers.py creates voice embeddings, with retention and deletion controls. Plugins must not exfiltrate audio or transcripts without explicit per-plugin permission scopes.",
+  "Plugin security is a control gap to design before third-party plugins exist. The registry needs permission manifests (network, transcript read, people read, write-back), sandboxing, and a policy hook so enterprise_lockdown blocks plugin outbound calls. screenpipe's sandboxed Deno pipes are a reference design.",
+  "Templates for notes are table stakes, not differentiation. Granola, Fireflies and Meetily Pro all offer custom templates. Ship them, but lead launch messaging with the plugin and roleplay story plus Hinglish accuracy.",
+  "Shared team todos and a company knowledge base need a multi-user sync backend. That conflicts with local-first and competes with Granola Spaces, Fellow and Fireflies' Jira/Asana sync. Defer to a later 'Teams' phase; for now ship a single-user 'meeting output \u2192 todo app via rule set' plugin (Linear/Todoist/Notion/Things) as an example plugin.",
+  "Product Hunt plan: Cora has 0 GitHub stars versus Meetily 31.8k and Anarlog 9.5k. Build a seed audience first (Show HN, r/LocalLLaMA, r/selfhosted, Indian founder communities, 5\u201310 example plugins, a plugin-author guide) and launch with a demo video of the real-meeting roleplay. A realistic target is top 5 with ~300\u2013450 upvotes, which is where Granola's own launches landed. Measure success by installs, plugin authors and GitHub stars, not rank.",
+  "Expect competition to intensify. Wispr ($280M raised) is entering meeting notes and Granola is moving into enterprise context. Cora's defensible ground is open source plus extensibility plus multilingual and code-switching accuracy, not core note-taking."
+ ],
+ "unverified_or_unknown": [
+  "No primary evidence found of demand specifically for a meeting-data plugin SDK, i.e. how many developers would write Cora plugins. This must be validated with interviews or a waitlist.",
+  "Granola's current user count, revenue and retention are undisclosed. Fireflies and Otter user and ARR figures are company-reported.",
+  "Meetily's actual user count (third parties claim 28k+) and Pro conversion; Anarlog/Hyprnote's revenue and exact Product Hunt results.",
+  "Actual Gemini, Chirp 3 and Sarvam WER on real Hinglish meeting audio. All public figures are vendor-reported or domain-mismatched, so Cora's own benchmark is needed.",
+  "Size of the Hinglish professional market and willingness to pay for meeting tools in India. No reliable India knowledge-worker count or meeting-tool willingness-to-pay study was found.",
+  "Status and outcomes of the Otter, Fireflies and Granola lawsuits. Dockets were not checked; all three are allegations only.",
+  "Market-size reports ($3.1\u20133.5B for 2025) have inconsistent scope and were accessed only through a vendor summary.",
+  "The Gallup '3x engagement from 1:1s' figure and the Fellow '44% of action items never completed' figure lack located primary sources.",
+  "Calendly's 58% bot-discomfort figure (2024) comes via a vendor blog only.",
+  "Microsoft Teams' reported 'Unverified' labelling and tenant-level blocking of external bots (2026) is confirmed only by a secondary article.",
+  "Subreddit member counts (r/LocalLLaMA, r/selfhosted) come from third-party trackers, not Reddit.",
+  "AMA 81% physician AI-use figure and UCSF 70% scribe use come from secondary sources.",
+  "Whether Cora's speakers.py attribution creates biometric voiceprints under BIPA's definition. This needs code review and legal input; it was not assessed here because the task was web research only.",
+  "Current Gemini API terms were not re-read; the free vs paid training distinction is based on Oct 2024 commentary plus the current terms URL."
+ ]
+}

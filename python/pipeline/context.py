@@ -139,6 +139,31 @@ class MeetingContext:
             text = " ".join(words)
         return text
 
+    def glossary(self, start: Optional[float] = None, end: Optional[float] = None, limit: int = 60) -> list[str]:
+        """Ranked names/terms for a hosted model: no token budget (unlike the
+        Whisper prompt), plus screenshot text shown near this time span."""
+        nearby: dict[str, Term] = {}
+        if start is not None:
+            mid = (start + (end if end is not None else start)) / 2
+            for term in self.timed:
+                if term.at is not None and abs(term.at - mid) <= NEARBY_OCR_WINDOW_S:
+                    nearby.setdefault(term.text.lower(), term)
+        ranked = sorted(
+            [Term(t.text, WEIGHTS["nearby_ocr"] + (0.1 if k in self.terms else 0), {"nearby_ocr"}) for k, t in nearby.items()]
+            + list(self.terms.values()),
+            key=lambda t: -t.score,
+        )
+        out: list[str] = []
+        seen = {a.lower() for a in self.attendees} | {self.title.lower()}
+        for term in ranked:
+            if term.text.lower() in seen:
+                continue
+            seen.add(term.text.lower())
+            out.append(term.text)
+            if len(out) >= limit:
+                break
+        return out
+
     def record(self, start: float, end: float, prompt: str) -> None:
         self.prompts.append({"start": round(start, 2), "end": round(end, 2), "prompt": prompt})
 

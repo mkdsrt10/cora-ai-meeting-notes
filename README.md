@@ -58,9 +58,14 @@ one — is written up in [docs/RESEARCH.md](docs/RESEARCH.md). More is coming as
 
 ## Install
 
-Download the `.dmg` from the [latest release](https://github.com/mkdsrt10/cora-ai-meeting-notes/releases/latest)
-and follow [docs/INSTALL.md](docs/INSTALL.md) (the build is not notarized yet, so first launch needs one
-extra step). Or build from source:
+```bash
+curl -fsSL https://raw.githubusercontent.com/mkdsrt10/cora-ai-meeting-notes/main/scripts/install.sh | bash
+```
+
+Downloads the latest release, verifies its checksum, and installs the app (Apple Silicon, macOS 14+).
+Cora is open source and **not notarized** (that needs a paid Apple Developer ID), which is why a browser-downloaded
+DMG shows a "can't verify" warning; the script avoids it. Details, the manual DMG route, and why:
+[docs/INSTALL.md](docs/INSTALL.md). Or build from source:
 
 ## Quickstart (from source)
 
