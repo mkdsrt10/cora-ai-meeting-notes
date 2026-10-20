@@ -95,6 +95,23 @@ def extract_clip(audio_path: Path, start: float, end: float) -> Path:
     return tmp_path
 
 
+def extract_clip_flac(audio_path: Path, start: float, end: float) -> Path:
+    """A window as 16 kHz mono FLAC (lossless; ~5-8 MB for 4-6 minutes, small
+    enough to send inline). The caller deletes the file."""
+    ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+    tmp = tempfile.NamedTemporaryFile(suffix=".flac", delete=False)
+    tmp_path = Path(tmp.name)
+    tmp.close()
+    cmd = [ffmpeg, "-y", "-ss", str(start), "-i", str(audio_path), "-t", str(max(0.05, end - start)),
+           "-ac", "1", "-ar", "16000", "-c:a", "flac", str(tmp_path)]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    return tmp_path
+
+
 def track_mean_volume(audio_path: Path, track_index: int, start_sec: float, end_sec: float) -> float:
     """Mean volume in dB (more negative = quieter) of one audio track over a
     time range, via ffmpeg's volumedetect filter. -100 (effectively silent)

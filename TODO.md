@@ -7,7 +7,8 @@ Generated 2026-10-20 from the design docs in [docs/planning/](docs/planning/). B
 - [x] One-line installer + unsigned-app explanation in README/INSTALL (`scripts/install.sh`)
 - [x] Privacy hotfix: "On this Mac" no longer uploads; honest provenance labels (e80bf9e)
 - [x] Demo-data seeder `tools/seed_demo_data.py` (PR #15)
-- [ ] **Next: Gemini transcription slice** (`TX:*`), then security prerequisites (`SDK:WP-0`), then look-and-feel P0 (`UI:*`)
+- [x] Gemini transcription core (windows, structured call, validation, retry/split ladder): `TX:T-G2`, `TX:T-G3` and the orchestrator part of `TX:T-G4`, verified against the real API on synthetic audio. See [docs/transcription.md](docs/transcription.md)
+- [ ] **Next: security prerequisites (`SDK:WP-0`), look-and-feel P0 (`UI:*`), then the rest of `TX:*` (compliance guard T-G1, UI-lite T-G6, bench T-G5) before any regulated customer uses Gemini**
 - [ ] Plugin catalog design is a draft only: [plugin-catalog.draft.md](docs/planning/plugin-catalog.draft.md) (reviews not run)
 
 ## Ground rules for parallel agents
@@ -144,14 +145,16 @@ Rev 2 replaces per-clip Gemini with windowed structured transcription: about 240
   - depends on: TX:T-G0
   - files: `python/api/routes/recordings.py`, `python/api/routes/settings.py`, `python/api/routes/transcription.py`, `python/credentials.py`, `python/pipeline/asr_engines.py`, `python/pipeline/cloud_asr.py`, `python/pipeline/transcribe.py`, `tests/test_asr_guard.py`, `tests/test_lockdown_asr.py`
   - done when: Socket-blocked lockdown and guard tests green for every call site; no cloud branch remains in transcribe.py; forged settings ack has no effect; local_only honoured
-- [ ] **TX:T-G2** Window planner, FLAC extraction, strict VAD, temp-file sweep  _(1.5d)_
+- [x] **TX:T-G2** Window planner, FLAC extraction, strict VAD, temp-file sweep  _(1.5d)_
   - files: `python/pipeline/audio.py`, `python/pipeline/windows.py`, `tests/test_asr_temp_files.py`, `tests/test_windows.py`
+  - _built without the strict-VAD false-fail measurement and temp-dir sweep (still open)._
   - done when: Planner tests pass; FLAC under 12 MB per window; strict-VAD false-fail rate measured on a noisy excerpt; temp dirs 0700 and swept at startup
-- [ ] **TX:T-G3** Gemini window call, meeting-only context, parse, validate, snap, asr_span  _(2d)_
+- [x] **TX:T-G3** Gemini window call, meeting-only context, parse, validate, snap, asr_span  _(2d)_
   - depends on: TX:T-G0
   - files: `python/pipeline/asr_validate.py`, `python/pipeline/context.py`, `python/pipeline/gemini_asr.py`, `tests/test_asr_trace_minimization.py`, `tests/test_asr_validate.py`, `tests/test_gemini_asr.py`
+  - _built; differences from the design: uses the configured Gemini client (not Vertex-only), full glossary kept, trace stores sizes/counts only._
   - done when: Fake-client tests green; no temperature key; one real window validates; sentinel trace-minimization test green; Langfuse bridge exclusion verified
-- [ ] **TX:T-G4** Orchestrator, minimal ladder, runner integration, provenance, windows report, cleanup order  _(2d)_
+- [~] **TX:T-G4** (orchestrator, retry/split ladder, runner wiring and honest provenance done; windows report, cleanup ordering and soak test open) Orchestrator, minimal ladder, runner integration, provenance, windows report, cleanup order  _(2d)_
   - depends on: TX:T-G1, TX:T-G2, TX:T-G3
   - files: `python/pipeline/runner.py`, `python/pipeline/windowed.py`, `tests/test_provenance.py`, `tests/test_windowed_ladder.py`
   - done when: 60-min recording end-to-end; failed run leaves previous transcript intact; provenance honest in all outcomes (location from resolved client); soak test passes

@@ -150,7 +150,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
             return chunk_prompt
 
         p_segs, p_dur, p_speech = transcribe_with_silence_removal(pfile, prompt, folder=(folder if idx == 0 else None),
-                                                                  prompt_for=prompt_for)
+                                                                  prompt_for=prompt_for, context=context,
+                                                                  time_offset=current_time_offset)
         for s in p_segs:
             raw_segments.append({
                 **s,
