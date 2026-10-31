@@ -1,18 +1,20 @@
 """Transcribe a recording as multi-minute windows through a hosted model.
 
 Each window goes through: extract FLAC -> model -> validate -> absolute
-times. A failing window is retried, then split at its longest pause and each
-half retried; if that still fails the whole run fails with a clear error —
+times. A failing window is retried, then split at a pause or midpoint with up to two
+levels of smaller-clip retries; if that still fails the whole run fails with a clear error —
 it never quietly substitutes a different engine, and it never half-saves.
 """
 from __future__ import annotations
 
 import time
+from contextvars import copy_context
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 import db
+import ai_trace
 from .asr_validate import WindowInvalid, validate_turns
 from .audio import extract_clip_flac, find_speech_segments
 from .gemini_asr import AsrCallError, context_block, transcribe_window
@@ -21,6 +23,7 @@ from .windows import Window, plan_windows, split_window
 ATTEMPTS = 3
 BACKOFF_S = (2.0, 6.0)
 WORKERS = 3
+MAX_SPLIT_DEPTH = 2  # At most 21 requests per original window, including retries.
 STRICT_NOISE_DB = "-35dB"  # louder than the main detector: real speech only, for coverage checks
 
 _sleep: Callable[[float], None] = time.sleep
@@ -57,15 +60,21 @@ def transcribe_windows(audio_path: Path, speech: list[tuple[float, float]], cont
         for attempt in range(ATTEMPTS):
             clip = None
             try:
-                clip = extract_clip_flac(audio_path, window.start, window.end)
-                glossary = context.glossary(window.start + offset, window.end + offset)
-                block = context_block(context.title, context.attendees, self_name, glossary, window.duration)
-                context.record(window.start + offset, window.end + offset, "[cloud window] " + ", ".join(glossary))
-                raw = call(clip, window.duration, block)
-                turns = validate_turns(raw, window.duration,
-                                       _relative(strict, window.start, window.end),
-                                       _relative(window.stretches, window.start, window.end))
-                return [{"start": window.start + t["start"], "end": window.start + t["end"], "text": t["text"]} for t in turns]
+                with ai_trace.span('asr_attempt',
+                                   f'asr.window.{window.start:.1f}-{window.end:.1f}.attempt{attempt + 1}',
+                                   provider='local', params={'window_start_s': window.start,
+                                                            'window_end_s': window.end,
+                                                            'attempt': attempt + 1, 'split_depth': depth}) as trace:
+                    clip = extract_clip_flac(audio_path, window.start, window.end)
+                    glossary = context.glossary(window.start + offset, window.end + offset)
+                    block = context_block(context.title, context.attendees, self_name, glossary, window.duration)
+                    context.record(window.start + offset, window.end + offset, "[cloud window] " + ", ".join(glossary))
+                    raw = call(clip, window.duration, block)
+                    turns = validate_turns(raw, window.duration,
+                                           _relative(strict, window.start, window.end),
+                                           _relative(window.stretches, window.start, window.end))
+                    trace.set_output({"validated_turns": len(turns)})
+                    return [{"start": window.start + t["start"], "end": window.start + t["end"], "text": t["text"]} for t in turns]
             except (WindowInvalid, AsrCallError) as exc:
                 last = exc
                 print(f"[Cloud ASR] window {window.start:.0f}-{window.end:.0f}s attempt {attempt + 1}/{ATTEMPTS}: {exc}", flush=True)
@@ -74,14 +83,18 @@ def transcribe_windows(audio_path: Path, speech: list[tuple[float, float]], cont
             finally:
                 if clip is not None:
                     clip.unlink(missing_ok=True)
-        halves = split_window(window) if depth == 0 else None
+        halves = split_window(window) if depth < MAX_SPLIT_DEPTH else None
         if halves:
-            print(f"[Cloud ASR] splitting window {window.start:.0f}-{window.end:.0f}s and retrying each half", flush=True)
+            print(f"[Cloud ASR] splitting window {window.start:.0f}-{window.end:.0f}s (level {depth + 1}/{MAX_SPLIT_DEPTH}) and retrying each half", flush=True)
             return [seg for half in halves for seg in run(half, depth + 1)]
         raise WindowedASRError(f"Cloud transcription failed for {window.start:.0f}-{window.end:.0f}s of the recording: {last}")
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        results = list(pool.map(run, windows))
+        # Executor workers do not inherit ContextVars. Give every task a
+        # separate copy (a Context cannot be entered concurrently), preserving
+        # the recording/run IDs and per-run processing options.
+        futures = [pool.submit(copy_context().run, run, window) for window in windows]
+        results = [future.result() for future in futures]
     segments = [seg for part in results for seg in part]
     segments.sort(key=lambda s: s["start"])
     return segments

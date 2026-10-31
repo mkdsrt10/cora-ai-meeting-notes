@@ -62,6 +62,7 @@ function renderOnboardingPeopleList(){
 
 async function loadOnboardingModels(){
   try{
+    await loadProcessingControls("#onboardingProcessing");
     const res = await api('/api/onboarding/models');
     if(!onboardingSelectedWhisperModel) onboardingSelectedWhisperModel = (res.whisper_options || [])[0]?.id;
     if(!onboardingSelectedLiquidModel) onboardingSelectedLiquidModel = res.selected_liquid_model;
@@ -204,6 +205,7 @@ $('#onboardingFinish')?.addEventListener('click', async () => {
     if(onboardingSelectedWhisperModel) await saveSetting('whisper_model_choice', onboardingSelectedWhisperModel);
     if(onboardingSelectedLiquidModel) await saveSetting('liquid_model', onboardingSelectedLiquidModel);
     await saveSetting('retain_audio', $('#onboardingRetainAudio').checked);
+    await saveProcessingControls("#onboardingProcessing");
     await api('/api/onboarding/complete', { method: 'POST', body: '{}' });
     closeOnboarding();
   }catch(error){ toast(error.message, true); }

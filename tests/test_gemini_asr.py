@@ -134,3 +134,94 @@ def test_temp_clips_are_deleted(audio, tmp_path, monkeypatch):
     transcribe_windows(audio, SPEECH, CONTEXT, caller=good_caller, strict=SPEECH)
     assert made and not any(p.exists() for p in made)
     assert tempfile.gettempdir()
+
+
+def test_timestamp_overrun_in_continuous_speech_recovers_by_recursive_split(tmp_path, monkeypatch):
+    # Regression for 720–1004s: model returns 302.6s for a 284s clip.
+    monkeypatch.setattr(windowed, '_sleep', lambda _: None)
+    clips, durations = [], []
+    def extract(_, start, end):
+        path = tmp_path / f'clip-{len(clips)}.flac'
+        path.touch()
+        clips.append(path)
+        return path
+    monkeypatch.setattr(windowed, 'extract_clip_flac', extract)
+    def caller(clip, duration, block):
+        durations.append(duration)
+        if duration > 90:
+            return [{'start':0,'end':duration/2,'text':'beginning'},
+                    {'start':duration+18.6,'end':duration+20,'text':'invalid late turn'}]
+        return [{'start':0,'end':duration,'text':'real speech throughout the smaller clip'}]
+    speech = [(720.0,1004.0)]
+    segments = transcribe_windows(tmp_path/'unused.wav', speech, CONTEXT, caller=caller, strict=speech, workers=1)
+    assert [(s['start'],s['end']) for s in segments] == [(720,791),(791,862),(862,933),(933,1004)]
+    assert durations.count(284) == 3 and durations.count(142) == 6 and durations.count(71) == 4
+    assert not any(p.exists() for p in clips)
+
+
+def test_continuous_invalid_windows_still_fail_with_bounded_requests(tmp_path, monkeypatch):
+    monkeypatch.setattr(windowed, '_sleep', lambda _: None)
+    calls = []
+    def extract(*args):
+        path = tmp_path/'retry.flac'
+        path.touch()
+        return path
+    monkeypatch.setattr(windowed, 'extract_clip_flac', extract)
+    def invalid(clip, duration, block):
+        calls.append(duration)
+        return [{'start':duration+18.6,'end':duration+20,'text':'invalid turn'}]
+    with pytest.raises(WindowedASRError, match='failed for'):
+        transcribe_windows(tmp_path/'unused.wav',[(720,1004)],CONTEXT,caller=invalid,strict=[(720,1004)],workers=1)
+    assert calls == [284]*3 + [142]*3 + [71]*3
+
+
+def test_parallel_asr_keeps_meeting_context_and_failed_attempt_history(audio, tmp_path, monkeypatch):
+    import sqlite3
+    import ai_trace
+    import processing
+    trace_db = tmp_path / 'parallel-traces.db'
+    monkeypatch.setattr(ai_trace, 'TRACE_DB', trace_db)
+    monkeypatch.setattr(ai_trace, '_schema_ready', False)
+    monkeypatch.setattr(ai_trace, 'enabled', lambda: True)
+    monkeypatch.setattr(windowed, '_sleep', lambda _: None)
+    seen = []
+    def caller(clip, duration, block):
+        assert processing.CURRENT.get()['mode'] == 'cloud'
+        with ai_trace.span('transcription','gemini.window',provider='gemini',model='fake-cloud') as span:
+            span.set(input_tokens=100,output_tokens=20)
+            seen.append(duration)
+            # One window fails validation after a successful provider request.
+            if duration == 30 and seen.count(30) == 1:
+                return [{'start':0,'end':duration+18.6,'text':'timestamp overrun'}]
+            return good_caller(clip,duration,block)
+    token = processing.CURRENT.set(processing.validate({'mode':'cloud'}))
+    try:
+        with ai_trace.run('parallel-asr',recording_id='meeting-with-retries') as run_id:
+            segments = transcribe_windows(audio,[(0,30),(60,100)],CONTEXT,caller=caller,
+                                          strict=[(0,30),(60,100)],workers=2)
+    finally:
+        processing.CURRENT.reset(token)
+    assert len(segments) == 2
+    with sqlite3.connect(trace_db) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute('SELECT * FROM spans').fetchall()
+    assert rows and all(row['recording_id'] == 'meeting-with-retries' and row['run_id'] == run_id for row in rows)
+    attempts = [row for row in rows if row['kind'] == 'asr_attempt']
+    assert len(attempts) == 3 and sum(row['status']=='error' for row in attempts) == 1
+    failed = next(row for row in attempts if row['status']=='error')
+    assert 'outside' in failed['error'] and '0.0-30.0' in failed['name']
+    attempt_ids = {row['id'] for row in attempts}
+    model_calls = [row for row in rows if row['name']=='gemini.window']
+    assert len(model_calls) == 3
+    assert all(row['parent_id'] in attempt_ids and row['input_tokens'] == 100 for row in model_calls)
+
+
+def test_empty_response_reports_candidate_and_block_diagnostics(tmp_path):
+    client = FakeClient('')
+    def empty(**kwargs):
+        return SimpleNamespace(text=None,candidates=[],prompt_feedback=SimpleNamespace(block_reason='SAFETY'),
+                               usage_metadata=SimpleNamespace(prompt_token_count=10,candidates_token_count=0,
+                                                              thoughts_token_count=20,total_token_count=30))
+    client.models.generate_content = empty
+    with pytest.raises(gemini_asr.AsrCallError,match='candidates=0, block_reason=SAFETY'):
+        gemini_asr.transcribe_window(clip(tmp_path),3,'context',client=client,model='test-model')

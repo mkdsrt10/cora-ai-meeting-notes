@@ -50,3 +50,20 @@ def test_split_window_cuts_at_longest_pause_and_refuses_short_ones():
     assert (a.end, b.start) == (100, 106)
     short = plan_windows(stretches((0, 20), (24, 40)))[0]
     assert split_window(short) is None
+
+
+def test_continuous_284_second_window_splits_without_a_pause():
+    from pipeline.windows import Window
+    original = Window(720, 1004, [(720, 1004)])
+    halves = split_window(original)
+    assert [(w.start, w.end) for w in halves] == [(720, 862), (862, 1004)]
+    assert [s for w in halves for s in w.stretches] == [(720, 862), (862, 1004)]
+    assert sum(b-a for w in halves for a,b in w.stretches) == 284
+
+
+def test_tiny_edge_pause_does_not_prevent_balanced_splitting():
+    from pipeline.windows import Window
+    halves = split_window(Window(0, 284, [(0, 2), (3, 284)]))
+    assert [(w.start, w.end) for w in halves] == [(0, 142), (142, 284)]
+    assert halves[0].stretches == [(0, 2), (3, 142)]
+    assert halves[1].stretches == [(142, 284)]

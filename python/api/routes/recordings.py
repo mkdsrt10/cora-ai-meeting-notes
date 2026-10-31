@@ -16,7 +16,7 @@ import json
 import re
 import time
 from api.core import ARCHETYPES, RECORDINGS, current_self_name, safe_folder
-from api.views import PENDING_TITLES, dashboard_payload, key_phrases_payload, live_transcript_payload, participants_payload, pending_recording_item, recording_item
+from api.views import participant_capture_payload, PENDING_TITLES, dashboard_payload, key_phrases_payload, live_transcript_payload, participants_payload, pending_recording_item, recording_item
 
 
 @route("GET", '/api/recording/summary-formats')
@@ -59,12 +59,14 @@ def get_api_recording(req, path: str, query: dict) -> None:
         item["available_summary_formats"] = []
         item["live_transcript"] = live_transcript_payload(rec_id)
         item["participants"] = participants_payload(rec_id, None)
+        item["participant_capture"] = participant_capture_payload(rec_id, None)
         item["key_phrases"] = key_phrases_payload(rec_id)
         return req.send_json(item)
     folder = safe_folder(rec_id)
     detailed_item = recording_item(folder, detailed=True)
     detailed_item["live_transcript"] = live_transcript_payload(rec_id)
     detailed_item["participants"] = participants_payload(rec_id, folder)
+    detailed_item["participant_capture"] = participant_capture_payload(rec_id, folder)
     detailed_item["key_phrases"] = key_phrases_payload(rec_id)
     return req.send_json(detailed_item)
 
@@ -228,7 +230,10 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
     if is_local:
         try:
             import local_meeting_pipeline
-            res = local_meeting_pipeline.process_recording_local(folder)
+            if 'processing' in body:
+                res = local_meeting_pipeline.process_recording_local(folder, options=body['processing'])
+            else:
+                res = local_meeting_pipeline.process_recording_local(folder)
         except ImportError as exc:
             return req.send_json({
                 "error": (
@@ -316,73 +321,69 @@ def post_api_recording_summary(req, path: str, body: dict) -> None:
     transcript_text = (folder / "transcript_diarized.md").read_text(errors="replace") if (folder / "transcript_diarized.md").exists() else ""
     notes_text = db.get_notes(folder.name)
     slides_data = local_meeting_pipeline.load_slides_ocr(folder)
-    result = local_meeting_pipeline.generate_summary_variant(transcript_text, notes_text, slides_data, format_name)
+    import ai_trace
+    with ai_trace.run('summary_variant', recording_id=folder.name, format=format_name):
+        result = local_meeting_pipeline.generate_summary_variant(transcript_text, notes_text, slides_data, format_name)
     db.update_summary(folder.name, format_name, result)
     return req.send_json({"ok": True, "summary": result})
 
 
 @route("POST", '/api/recording/re-summarize')
 def post_api_recording_re_summarize(req, path: str, body: dict) -> None:
-    folder = safe_folder(body.get("id", ""))
-    provider = str(body.get("provider", "")).strip().lower() or None
-    model = str(body.get("model", "")).strip() or None
+    import processing
+    overrides = body.get('processing')
+    if overrides is None and body.get('provider'):
+        overrides = dict(provider=body['provider'], model=body.get('model', ''))
+    folder = safe_folder(body.get('id', ''))
+    import ai_trace
+    with processing.scope(processing.resolve(overrides)):
+        with ai_trace.run('notes_regeneration', recording_id=folder.name):
+            return _re_summarize(req, path, body)
 
+
+def _re_summarize(req, path: str, body: dict) -> None:
+    folder = safe_folder(body.get("id", ""))
+    from pipeline.processing_notes import generate_notes, render, privacy_note
+    import processing
+    options = processing.CURRENT.get()
     import local_meeting_pipeline
-    t_path = folder / "transcript_diarized.md"
-    if not t_path.exists():
-        raise FileNotFoundError("Transcript not found for this recording")
-    transcript_text = t_path.read_text(encoding="utf-8")
     user_notes = db.get_notes(folder.name) or ""
     slides_data = local_meeting_pipeline.load_slides_ocr(folder)
     diar_data = db.get_recording_data(folder.name, "diarization") or {}
     aligned_segments = diar_data.get("segments", [])
-
-    if provider and provider != "local_mlx":
-        notes = local_meeting_pipeline.generate_enhanced_notes_frontier(
-            transcript_text=transcript_text,
-            slides_data=slides_data,
-            aligned_segments=aligned_segments,
-            user_notes=user_notes,
-            provider=provider,
-            model=model,
-        )
-        used_model = f"{provider}:{model or 'default'}"
-    else:
-        notes = local_meeting_pipeline.generate_enhanced_notes(
-            transcript_text=transcript_text,
-            slides_data=slides_data,
-            aligned_segments=aligned_segments,
-            folder=folder,
-        )
-        used_model = db.get_setting("liquid_model", local_meeting_pipeline.LOCAL_LLM_MODEL_DEFAULT)
+    if not aligned_segments:
+        raise ValueError("Canonical transcript segments are unavailable; retranscribe this recording first")
+    transcript_text = "\n".join(f"[{s.get('start', '')} - {s.get('end', '')}] {s.get('speaker_name', 'Speaker')}: {s.get('text', '')}" for s in aligned_segments)
+    metadata = db.get_recording_data(folder.name, "metadata") or {}
+    notes = generate_notes(transcript_text, slides_data, aligned_segments, folder=folder,
+                           user_notes=user_notes, context=processing.meeting_context(metadata, aligned_segments), options=options)
+    used_model = notes['processing']['model']
 
     now_iso = dt.datetime.now().astimezone().isoformat()
     call_summary_payload = {
+        "title": notes.get("title", ""),
         "overview": notes["overview"],
         "decisions": local_meeting_pipeline._markdown_bullets(notes["decisions_md"]),
         "action_items": local_meeting_pipeline._markdown_bullets(notes["action_items_md"]),
         "unresolved_questions": local_meeting_pipeline._markdown_bullets(notes["open_questions_md"]),
         "keywords": notes["keywords"],
         "model": used_model,
+        "processing": notes["processing"],
         "generated_at": now_iso,
         "schema_version": "2.0",
         "source_recording": "audio.mov",
     }
 
-    enhanced_notes_md = "\n\n".join([
-        "## Overview", notes["overview"],
-        "## Action Items", notes["action_items_md"],
-        "## Key Discussion & Decisions", notes["decisions_md"],
-        "## Timeline", notes["timeline_md"],
-        "## Open Questions", notes["open_questions_md"],
-        "## Key Entities", notes["key_entities_md"],
-    ])
+    enhanced_notes_md = render(notes)
 
     local_meeting_pipeline._archive_previous_outputs(folder)
     (folder / "enhanced_notes.md").write_text(enhanced_notes_md + "\n", encoding="utf-8")
     (folder / "call_summary.json").write_text(json.dumps(call_summary_payload, indent=2, ensure_ascii=False) + "\n")
     if diar_data:
         diar_data["summary"] = notes["overview"]
+        diar_data['processing'] = notes['processing']
+        diar_data['privacy_note'] = privacy_note(None, options)
+        (folder / "diarization.json").write_text(json.dumps(diar_data, indent=2, ensure_ascii=False) + "\n")
         (folder / "gemini_diarization.json").write_text(json.dumps(diar_data, indent=2, ensure_ascii=False) + "\n")
         db.update_recording_data(folder.name, "diarization", diar_data)
 
@@ -405,3 +406,11 @@ def post_api_recording_transcript_edit(req, path: str, body: dict) -> None:
     if not isinstance(edits, list) or not edits or len(edits) > 2000:
         raise ValueError("edits must be a non-empty list")
     return req.send_json(transcript_edit.apply_edits(folder.name, folder, edits, self_name=current_self_name()))
+
+
+@route('GET', '/api/recording/processing')
+def get_api_recording_processing(req, path: str, query: dict) -> None:
+    from processing_history import history
+    folder = safe_folder(query.get('id', [''])[0])
+    metadata = db.get_recording_data(folder.name, 'metadata') or {}
+    return req.send_json(history(folder.name, aliases=[metadata.get('live_recording_id')]))

@@ -30,7 +30,7 @@ Nothing is sent when `enterprise_lockdown` is on: the engine is forced back to l
 model for structured turns (`start`, `end`, `text` relative to the window) with no speaker labels; speaker
 attribution is unchanged (Accessibility timeline, then mic/system loudness). `pipeline/asr_validate.py` rejects
 answers that drop speech, run away, echo the prompt or have broken timestamps, and snaps times to the local
-speech detector. A rejected window is retried, then split in two and retried; if it still fails the
+speech detector. A rejected window is retried, then split at a balanced pause or at the midpoint for continuous speech. Up to two levels of smaller-clip retries are allowed (at most 21 requests per original window); if it still fails the
 transcription **fails with an error** (the previous transcript is kept). It never silently falls back to
 another engine.
 

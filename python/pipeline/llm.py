@@ -26,6 +26,7 @@ def traced_generate(model, tokenizer, prompt: str, *, max_tokens: int, model_id:
         for last in mlx_lm.stream_generate(model, tokenizer, prompt, max_tokens=max_tokens):
             text += last.text
         if last is not None:
+            _last_llm_stats["finish_reason"] = last.finish_reason
             trace.set(input_tokens=last.prompt_tokens, output_tokens=last.generation_tokens,
                       prompt_tps=round(last.prompt_tps, 2), generation_tps=round(last.generation_tps, 2),
                       peak_memory_mb=round(last.peak_memory * 1000, 1), finish_reason=last.finish_reason)
@@ -96,11 +97,15 @@ class LazyLLM:
         self._model = None
         self._tokenizer = None
 
+    def load(self) -> None:
+        if self._model is None:
+            import mlx_lm
+            with ai_trace.span('model_load', 'model.load', provider='mlx', model=self.model_id):
+                self._model, self._tokenizer = mlx_lm.load(self.model_id)
+
     def generate(self, prompt: str, *, name: str, max_tokens: int = 1500,
                  prompt_template: str | None = None, input_payload: Any = None) -> str:
-        import mlx_lm
-        if self._model is None:
-            self._model, self._tokenizer = mlx_lm.load(self.model_id)
+        self.load()
         try:
             chat = self._tokenizer.apply_chat_template([{"role": "user", "content": prompt}], tokenize=False,
                                                        add_generation_prompt=True)

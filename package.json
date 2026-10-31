@@ -1,7 +1,7 @@
 {
   "name": "cora",
   "productName": "Cora AI Meeting Notes",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Cora AI Meeting Notes \u2014 local-first meeting capture, transcription and notes for macOS",
   "main": "src/main.js",
   "scripts": {
@@ -39,6 +39,7 @@
       "!python/**/*.pyc"
     ],
     "asarUnpack": [
+      "config.example.json",
       "python/**",
       "capture/**",
       "bin/**",
@@ -52,6 +53,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "build/ffmpeg/bin",
+        "to": "ffmpeg/bin"
       }
     ]
   },

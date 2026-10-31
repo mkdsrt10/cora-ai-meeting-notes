@@ -72,7 +72,7 @@ async function renderPeople(){
       <span>${p.recordings_count || 0} recording${p.recordings_count === 1 ? '' : 's'}</span>
       <span>›</span>
     </div>
-  `).join('') : '<p class="muted">No one identified yet — names appear here the first time you confirm a speaker on a recording.</p>';
+  `).join('') : '<p class="muted">No people yet. Add someone above, or confirm a speaker on a recording.</p>';
 }
 
 async function openPerson(id){
@@ -139,3 +139,23 @@ async function jumpToLiveRecording(){
   const live = (data?.recordings || []).find(r => r.analysis_stage === 'recording');
   if (live) openInRecordings(live.id);
 }
+
+
+$('#createPersonForm')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const name = $('#createPersonName').value.trim();
+  const feedback = $('#createPersonFeedback');
+  if(!name){ feedback.textContent = 'Enter a name.'; return; }
+  const button = $('#createPersonBtn');
+  button.disabled = true;
+  feedback.textContent = 'Saving…';
+  try{
+    const result = await api('/api/people/create', {method:'POST', body:JSON.stringify({
+      name, role:$('#createPersonRole').value.trim(), organization:$('#createPersonOrganization').value.trim()
+    })});
+    $('#createPersonForm').reset();
+    feedback.textContent = `Added ${result.person.name}.`;
+    await renderPeople();
+  }catch(error){ feedback.textContent = error.message; }
+  finally{ button.disabled = false; }
+});

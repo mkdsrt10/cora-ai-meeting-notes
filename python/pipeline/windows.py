@@ -88,10 +88,26 @@ def _best_cut(stretches: list[tuple[float, float]], target: float) -> int | None
 
 
 def split_window(window: Window) -> list[Window] | None:
-    """Split a window in two at its longest internal pause (for the retry
-    ladder). None if it is too short or has no pause to cut at."""
-    if window.duration < MIN_SPLIT_S or len(window.stretches) < 2:
+    """Prefer a balanced pause; otherwise bisect continuous speech.
+
+    Clip every speech stretch to its child window so retry coverage checks
+    retain the whole source, even when a stretch crosses the midpoint.
+    """
+    if window.duration < MIN_SPLIT_S:
         return None
-    gaps = [(window.stretches[i + 1][0] - window.stretches[i][1], i) for i in range(len(window.stretches) - 1)]
-    cut = max(gaps)[1]
-    return [_make(window.stretches[:cut + 1]), _make(window.stretches[cut + 1:])]
+    margin = window.duration * 0.25
+    gaps = [(window.stretches[i + 1][0] - window.stretches[i][1], i)
+            for i in range(len(window.stretches) - 1)
+            if window.stretches[i][1] - window.start >= margin
+            and window.end - window.stretches[i + 1][0] >= margin]
+    if gaps:
+        _, cut = max(gaps)
+        return [_make(window.stretches[:cut + 1]), _make(window.stretches[cut + 1:])]
+    midpoint = window.start + window.duration / 2
+    halves = []
+    for start, end in ((window.start, midpoint), (midpoint, window.end)):
+        stretches = [(max(a, start), min(b, end)) for a, b in window.stretches if b > start and a < end]
+        if not stretches:
+            return None
+        halves.append(Window(start, end, stretches))
+    return halves

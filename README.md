@@ -59,7 +59,7 @@ one — is written up in [docs/RESEARCH.md](docs/RESEARCH.md). More is coming as
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mkdsrt10/cora-ai-meeting-notes/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mkdsrt10/cora-ai-meeting-notes/production/scripts/install.sh | bash
 ```
 
 Downloads the latest release, verifies its checksum, and installs the app (Apple Silicon, macOS 14+).

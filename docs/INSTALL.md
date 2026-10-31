@@ -4,14 +4,15 @@
 
 - A Mac with Apple Silicon (M1 or later), macOS 14 Sonoma or newer
 - ~2 GB free for the app, plus ~1–3 GB for models downloaded on first use
-- [ffmpeg](https://ffmpeg.org): `brew install ffmpeg` (onboarding tells you if it's missing)
+
+Nothing else: the app bundles its own Python runtime and ffmpeg.
 
 ## Quick install (recommended)
 
 Paste this in Terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mkdsrt10/cora-ai-meeting-notes/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mkdsrt10/cora-ai-meeting-notes/production/scripts/install.sh | bash
 ```
 
 It downloads the latest release over HTTPS, checks it against the release's published SHA-256, copies
@@ -31,8 +32,28 @@ app in place; your recordings and settings are kept.
 > [build the same app yourself](#building-it-yourself). The quick-install script above avoids the
 > warning because files downloaded with `curl` aren't quarantined by macOS.
 >
-> Because the app is ad-hoc signed, macOS may ask again for Microphone / Screen Recording / Accessibility
-> access after an update. We'll notarize once the project can fund it.
+> Releases are signed with one persistent (self-signed) certificate, so Microphone / Screen Recording /
+> Accessibility grants survive updates. We'll notarize once the project can fund it.
+
+## Participant names in browser meetings
+
+Google Meet, Zoom (web client) and Slack huddles running in Chrome, Brave, Edge or Arc need two
+one-time switches so Cora can read who is in the call:
+
+1. In the browser: **View › Developer › Allow JavaScript from Apple Events**.
+2. When macOS asks whether Cora may control the browser, click **Allow** (or later: System Settings ›
+   Privacy & Security › Automation › Cora AI Meeting Notes).
+
+Without them, recordings still work and speaker turns are kept, but names show as "Participant". A
+recording's detail page tells you if this is what went wrong. Safari and the native Zoom/Teams/Slack
+apps use Accessibility only.
+
+## Team builds
+
+`./scripts/build-app.sh --team` builds the same app with Gemini as the default for transcription and
+notes on new installs (`"default_processing_mode": "cloud"`), so nothing heavy runs or downloads
+locally; each user pastes the Gemini key on first launch. Existing installs keep their `config.json`. Release signing needs a one-time `./scripts/signing-setup.sh` on the build machine;
+back up `~/.cora-signing` (losing it means everyone re-grants permissions once).
 
 ## Install the DMG by hand
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install Cora AI Meeting Notes from a GitHub release.
 #
-#   curl -fsSL https://raw.githubusercontent.com/mkdsrt10/cora-ai-meeting-notes/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/mkdsrt10/cora-ai-meeting-notes/production/scripts/install.sh | bash
 #
 # Why this exists: the app is ad-hoc signed, not notarized (no paid Apple
 # Developer ID yet). A DMG downloaded in a browser carries macOS's quarantine
@@ -111,16 +111,18 @@ ditto "$mnt/$APP_NAME.app" "$TARGET" || die "copy failed (disk full?)"
 xattr -dr com.apple.quarantine "$TARGET" 2>/dev/null || true
 
 say "Installed $APP_NAME $VERSION"
-if ! command -v ffmpeg >/dev/null 2>&1 && [[ ! -x /opt/homebrew/bin/ffmpeg ]]; then
-  warn "ffmpeg is not installed (Cora needs it). Install it with:  brew install ffmpeg"
+if [[ ! -x "$TARGET/Contents/Resources/ffmpeg/bin/ffmpeg" ]] && ! command -v ffmpeg >/dev/null 2>&1; then
+  warn "this release predates bundled ffmpeg; install it with:  brew install ffmpeg"
 fi
 cat <<EOF
 
 Next:
   1. Open the app (it will not show the "can't verify" warning).
   2. Allow Microphone, Screen Recording (to hear the other side of calls; no video is recorded)
-     and Accessibility (live speaker names) when asked.
-  3. After an update, macOS may ask for those permissions again: this build is ad-hoc signed.
+     and Accessibility (live speaker names) when asked. Updates keep these grants.
+  3. Meetings in Chrome/Brave/Edge/Arc: turn on View > Developer > Allow JavaScript from
+     Apple Events, and allow Cora when macOS asks to control the browser. This is how Cora
+     reads participant names in Google Meet, Zoom web and Slack huddles.
 
 EOF
 if [[ $OPEN -eq 1 ]]; then open "$TARGET"; fi

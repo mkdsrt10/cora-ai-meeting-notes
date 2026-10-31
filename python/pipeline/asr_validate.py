@@ -9,6 +9,7 @@ Times are seconds relative to the window start unless stated otherwise.
 from __future__ import annotations
 
 from typing import Any
+import math
 
 from .transcribe import collapse_repetition_loops
 
@@ -61,6 +62,12 @@ def validate_turns(raw: Any, duration: float, strict: list[tuple[float, float]],
             start, end = float(item["start"]), float(item["end"])
         except (KeyError, TypeError, ValueError):
             raise WindowInvalid("turn has no numeric start/end")
+        if not math.isfinite(start) or not math.isfinite(end):
+            raise WindowInvalid("turn timestamps must be finite")
+        if end <= start:
+            raise WindowInvalid("turn end must be after its start")
+        if end > duration + 1.0:
+            raise WindowInvalid(f"turn ends at {end:.1f}s outside a {duration:.0f}s window")
         if start < -1.0 or start > duration + 1.0:
             raise WindowInvalid(f"turn starts at {start:.1f}s outside a {duration:.0f}s window")
         start = min(max(start, 0.0), duration)
@@ -91,5 +98,6 @@ def validate_turns(raw: Any, duration: float, strict: list[tuple[float, float]],
     ends = [e for _, e in vad]
     for t in turns:
         t["start"] = _snap(t["start"], starts)
-        t["end"] = max(_snap(t["end"], ends), t["start"] + 0.2)
+        t["start"] = min(max(t["start"], 0.0), max(0.0, duration - 0.2))
+        t["end"] = min(duration, max(_snap(t["end"], ends), t["start"] + 0.2))
     return turns

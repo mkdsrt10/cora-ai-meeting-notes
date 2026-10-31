@@ -575,7 +575,7 @@ function startRecording(meetingTool = null, continuesRecordingId = null) {
   const speakersOut = path.join(INBOX_DIR, `${recordingId}_speakers.json`);
   if (fs.existsSync(SPEAKER_WATCH_BIN)) {
     speakerWatchProcess = spawn(SPEAKER_WATCH_BIN, [speakersOut], {
-      env: { ...process.env, DEBUG: '1' },
+      env: { ...process.env, DEBUG: '1', CORA_SELF_NAME: selfName || '' },
     });
     console.log(`[Cora AX] Started accessibility speaker watcher -> ${speakersOut} (log: ${speakerLogPath})`);
 

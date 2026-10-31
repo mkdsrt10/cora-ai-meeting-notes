@@ -934,3 +934,23 @@ mark.search-match.active {
 .turn-text-input{font:inherit;font-size:13px;line-height:1.6;width:100%;min-height:3.2em;box-sizing:border-box;padding:8px 10px;border-radius:8px;border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);resize:vertical}
 .turn-rename-all{font-size:11px;color:var(--text2);display:inline-flex;gap:4px;align-items:center}
 .timeline-speaker .speaker-source{font-weight:500;color:var(--text2);margin-left:6px;font-size:11px}
+
+.processing-controls { display: grid; gap: 10px; margin: 12px 0 20px; }
+.processing-controls label, #summarizeModelList label { display: grid; gap: 6px; margin: 8px 0; }
+.processing-controls details { margin: 8px 0; }
+
+.processing-history-header { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin-bottom: 18px; }
+.processing-history-header h3 { margin: 0 0 6px; }
+.processing-run { border: 1px solid var(--border); border-radius: 8px; margin: 12px 0; padding: 14px; }
+.processing-run summary { cursor: pointer; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.processing-run-metrics { display: flex; flex-wrap: wrap; gap: 10px 22px; font-size: 12px; margin: 16px 0; }
+.processing-table-scroll { overflow-x: auto; }
+.processing-table { width: 100%; min-width: 960px; border-collapse: collapse; text-align: left; font-size: 12px; font-variant-numeric: tabular-nums; }
+.processing-table th, .processing-table td { padding: 12px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.processing-table th { color: var(--muted); font-weight: 500; }
+.processing-table td small { display: block; color: var(--muted); margin-top: 5px; max-width: 270px; overflow-wrap: anywhere; }
+.processing-table td strong { overflow-wrap: anywhere; }
+.processing-call-track { width: 100px; background: var(--border); height: 4px; margin-top: 8px; }
+.processing-call-track span { display: block; background: var(--accent, #7266cf); height: 4px; }
+.processing-error, .processing-table td small.processing-error { color: #b44232; overflow-wrap: anywhere; }
+.processing-history-footnote { font-size: 11px; line-height: 1.7; margin-top: 18px; }

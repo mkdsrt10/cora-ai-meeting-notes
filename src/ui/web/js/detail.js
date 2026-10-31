@@ -17,23 +17,57 @@ function stopLiveFeedPolling(){
 // tells those two apart (actively running vs genuinely just queued).
 const activeReprocess = new Set();
 const reprocessStartTimes = {};
+const activeSummaries = new Set();
+let processingStatusRequest = 0;
+
+function isSelectedMeeting(id){
+  return selectedRecordingId === id && selectedRecording()?.id === id;
+}
+
+function resetProcessingStatus(){
+  processingStatusRequest++;
+  const host = $('#notepadProcessingStatus');
+  if(host){
+    host.style.display = 'none';
+    host.innerHTML = '';
+    host.classList.remove('stalled');
+  }
+  const record = selectedRecording()?.id === selectedRecordingId ? selectedRecording() : null;
+  const reprocess = $('#notepadReprocessBtn');
+  if(reprocess){
+    reprocess.disabled = !!record && activeReprocess.has(record.id);
+    reprocess.textContent = reprocess.disabled ? '🔁 Initializing pipeline…' : '🔁 Retranscribe & Re-summarize';
+  }
+  const summarize = $('#notepadAiSummarizeBtn');
+  if(summarize){
+    summarize.disabled = !!record && activeSummaries.has(record.id);
+    summarize.textContent = summarize.disabled ? '✨ Summarizing…' : '✨ Re-summarize with LLM';
+  }
+}
 
 function isLiveOrProcessing(record){
-  return !!record && (PENDING_STAGES.has(record.analysis_stage) || record.analysis_stage === 'needs_diarization' || activeReprocess.has(record.id));
+  return !!record && (PENDING_STAGES.has(record.analysis_stage) || record.analysis_stage === 'needs_diarization' || activeReprocess.has(record.id) || activeSummaries.has(record.id));
 }
 
 async function renderProcessingStatus(record){
   const host = $('#notepadProcessingStatus');
-  if(!host || !record) return;
+  if(!host || !record || !isSelectedMeeting(record.id)) return;
+  if(activeSummaries.has(record.id)){
+    host.innerHTML = '<span>Generating notes for this meeting…</span>';
+    host.style.display = 'flex';
+    return true;
+  }
   if(PENDING_STAGES.has(record.analysis_stage) && record.analysis_stage !== 'processing'){
     host.style.display = 'none';
     return;
   }
+  const request = ++processingStatusRequest;
   try{
     const progress = await api(`/api/recording/progress?id=${encodeURIComponent(record.id)}`);
+    if(!isSelectedMeeting(record.id) || request !== processingStatusRequest) return;
     if(!progress || !progress.active){
       if(!activeReprocess.has(record.id)){
-        host.style.display = 'none';
+        resetProcessingStatus();
       }
       return;
     }
@@ -71,25 +105,33 @@ async function renderProcessingStatus(record){
 
     const btn = $('#notepadReprocessBtn');
     if(btn && document.body.contains(btn)){
-      btn.disabled = true;
-      btn.textContent = `🔁 ${progress.detail || stageText} (${percent}%)`;
+      btn.disabled = progress.stage !== 'error';
+      btn.textContent = progress.stage === 'error' ? '🔁 Retranscribe & Re-summarize' : `🔁 ${progress.detail || stageText} (${percent}%)`;
     }
+    return progress.stage !== 'error';
   }catch{
+    if(!isSelectedMeeting(record.id) || request !== processingStatusRequest) return;
     if(!activeReprocess.has(record.id)){
-      host.style.display = 'none';
+      resetProcessingStatus();
     }
   }
 }
 
-function pollLiveFeedIfRecording(){
+async function pollLiveFeedIfRecording(){
   stopLiveFeedPolling();
   const record = selectedRecording();
-  if(!isLiveOrProcessing(record)) return;
-  renderProcessingStatus(record);
+  if(!record){ resetProcessingStatus(); return; }
+  if(!isLiveOrProcessing(record)) resetProcessingStatus();
+  // Check this meeting's server progress even when it already has notes:
+  // a reprocess started elsewhere may not be in this window's local Set.
+  const active = await renderProcessingStatus(record);
+  if(!isSelectedMeeting(record.id)) return;
+  if(!active && !isLiveOrProcessing(record)) return;
   liveFeedPollTimer = setTimeout(async () => {
     if(!selectedRecording() || selectedRecording().id !== record.id) return;
     try{
       const fresh = await api(`/api/recording?id=${encodeURIComponent(record.id)}`);
+      if(!isSelectedMeeting(record.id)) return;
       const stageChanged = fresh.analysis_stage !== record.analysis_stage;
       selectedDetail = fresh;
       if(stageChanged){
@@ -112,7 +154,7 @@ function pollLiveFeedIfRecording(){
       // Only re-render participants when the roster actually changed —
       // re-rendering on every 2s tick would blow away an in-progress
       // rename edit (lost cursor/focus) for no reason most ticks.
-      const participantsKey = JSON.stringify(selectedDetail.participants || []);
+      const participantsKey = JSON.stringify([selectedDetail.participants || [], selectedDetail.participant_capture]);
       if(participantsKey !== lastPolledParticipantsKey){
         lastPolledParticipantsKey = participantsKey;
         renderParticipants(selectedDetail);
@@ -155,7 +197,7 @@ function loadNotepad(){
   }
 
   renderMeetingTimeline(record);
-  lastPolledParticipantsKey = JSON.stringify(record?.participants || []);
+  lastPolledParticipantsKey = JSON.stringify([record?.participants || [], record?.participant_capture]);
   renderParticipants(record);
   lastPolledKeyPhrasesKey = JSON.stringify(record?.key_phrases || []);
   renderKeyPhrases(record);
@@ -254,6 +296,10 @@ function loadNotepad(){
   const reprocessBtn = $('#notepadReprocessBtn');
   if(reprocessBtn && record){
     reprocessBtn.style.display = !PENDING_STAGES.has(record.analysis_stage) ? '' : 'none';
+    if(!activeReprocess.has(record.id) && !isLiveOrProcessing(record)){
+      reprocessBtn.disabled = false;
+      reprocessBtn.textContent = '🔁 Retranscribe & Re-summarize';
+    }
   }
   const aiSummarizeBtn = $('#notepadAiSummarizeBtn');
   if(aiSummarizeBtn && record){
@@ -341,7 +387,9 @@ function renderMarkdownSubset(markdown){
 function renderEnhancedNotes(record){
   const host = $('#notepadEnhancedNotes');
   if(!host) return;
-  host.innerHTML = renderMarkdownSubset(record?.enhanced_notes) || '<p class="muted">No notes generated yet.</p>';
+  const info = record?.call_summary?.processing;
+  host.innerHTML = (info ? `<p class="muted">Template: ${esc(info.template)} (${esc(info.template_selection)}) · ${esc(info.mode)} · ${esc(info.provider)} · ${esc(info.model)} <button type="button" class="button secondary small" data-change-template>Change template / regenerate</button></p>` : '') + (renderMarkdownSubset(record?.enhanced_notes) || '<p class="muted">No notes generated yet.</p>');
+  host.querySelector('[data-change-template]')?.addEventListener('click', () => openSummarizeModal());
 }
 
 // versions/ stamps are time.strftime("%Y%m%dT%H%M%S") from the Python side.

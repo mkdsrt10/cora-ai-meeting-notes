@@ -6,13 +6,20 @@ function selectedRecording(){
 }
 async function loadSelectedRecording(id){
   selectedRecordingId = id;
-  selectedDetail=id ? await api(`/api/recording?id=${encodeURIComponent(id)}`) : null;
+  stopLiveFeedPolling();
+  resetProcessingStatus();
+  const detail = id ? await api(`/api/recording?id=${encodeURIComponent(id)}`) : null;
+  if(selectedRecordingId !== id) return;
+  selectedDetail = detail;
+  selectedRecordingId = detail?.id || id;
+  resetProcessingStatus();
   if(selectedDetail) {
     $('#detailTitle').textContent = selectedDetail.title;
     const input = $('#editTitleInput');
     if (input) input.value = selectedDetail.title || '';
   }
   loadNotepad();
+  if ($('[data-notepad-tab="processing"]')?.classList.contains('active')) loadProcessingHistory();
 }
 
 // --- Notepad: Notes / Participants / Timeline / Transcript ---
@@ -21,6 +28,7 @@ let notepadSaveTimer = null;
 $$('.notepad-tab').forEach(tab => tab.addEventListener('click', () => {
   $$('.notepad-tab').forEach(t => t.classList.toggle('active', t === tab));
   $$('.notepad-panel').forEach(p => p.hidden = p.dataset.notepadPanel !== tab.dataset.notepadTab);
+  if (tab.dataset.notepadTab === 'processing') loadProcessingHistory();
 }));
 
 function renderMeetingTimeline(record){
@@ -52,13 +60,17 @@ async function renderParticipants(record){
   const host = $('#notepadParticipants');
   if(!host || !record) return;
   const participants = record.participants || [];
+  const capture = record.participant_capture;
+  const warnings = (capture?.warnings || []).map(w=>`<p class="processing-error">${esc(w)}</p>`).join('');
+  const turnNotice = capture && !capture.live && capture.speaker_events === 0
+    ? '<p class="muted">No live speaker-name events were captured. Participant names alone cannot identify each remote voice. Keeping the Meet tab visible can help Accessibility capture; browser capture status is shown above when available.</p>' : '';
   if(!participants.length){
-    host.innerHTML = '<p class="muted">Participants appear here as soon as Cora detects who\'s in the meeting.</p>';
+    host.innerHTML = warnings + turnNotice + '<p class="muted">No participant names captured yet. For Google Meet, Cora needs access to the meeting page through Accessibility or browser capture.</p>';
     return;
   }
   let people = [];
   try{ people = (await api('/api/people')).people; }catch{}
-  host.innerHTML = participants.map(p => `
+  host.innerHTML = warnings + turnNotice + participants.map(p => `
     <div class="participant-row" data-raw-name="${esc(p.raw_name)}">
       <input class="participant-name-input" value="${esc(p.display_name)}" data-participant-rename>
       <select class="participant-map-select" data-participant-map>

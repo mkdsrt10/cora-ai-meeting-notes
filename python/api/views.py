@@ -80,6 +80,19 @@ def fuzzy_match_person(raw_name: str, people: list[dict[str, Any]]) -> dict[str,
 
 
 
+def participant_capture_payload(recording_id: str, folder: Path | None) -> dict:
+    def read(path, default):
+        try:
+            return json.loads(path.read_text())
+        except (OSError, ValueError):
+            return default
+    status = folder / 'capture_status.json' if folder else INBOX / f'{recording_id}_capture_status.json'
+    warnings = read(status, [])
+    timeline = read(folder / 'speakers_timeline.json', []) if folder else []
+    return dict(warnings=[str(w) for w in warnings if isinstance(w, str)] if isinstance(warnings, list) else [],
+                live=folder is None, speaker_events=len(timeline) if isinstance(timeline, list) else 0)
+
+
 def participants_payload(recording_id: str, folder: Path | None) -> list[dict[str, Any]]:
     """The AX-discovered roster (participants.json — live in inbox/ while
     recording, archived alongside the audio after), merged with any user

@@ -7,14 +7,15 @@ privacy note says so (runner._provenance).
 """
 from __future__ import annotations
 
-import db
 
 ENGINES = ("local", "gemini")
 
 
 def engine() -> str:
     import policy
-    value = db.get_setting("transcription_engine", "local")
+    import processing
+    options = processing.CURRENT.get()
+    value = options["transcription"] if options else processing.resolve()["transcription"]
     if value not in ENGINES or policy.lockdown_enabled():
         return "local"  # lockdown overrides whatever Settings says
     return value

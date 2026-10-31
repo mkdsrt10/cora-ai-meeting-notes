@@ -3,6 +3,7 @@
 const { app } = require('electron');
 const crypto = require('crypto');
 const http = require('http');
+const path = require('path');
 const { APP_NAME, DATA_DIR } = require('./paths');
 
 const DASHBOARD_PORT = Number(process.env.VOICECOACH_PORT) || 8765;
@@ -15,7 +16,13 @@ const DASHBOARD_URL = `http://127.0.0.1:${DASHBOARD_PORT}`;
 // main-process requests. A page in the user's browser can't obtain it.
 const API_TOKEN = crypto.randomBytes(32).toString('hex');
 
-const PYTHON_ENV = { ...process.env, PYTHONUNBUFFERED: '1', VOICECOACH_API_TOKEN: API_TOKEN, VOICECOACH_DATA_DIR: DATA_DIR };
+// The release app bundles ffmpeg/ffprobe (scripts/build-ffmpeg.sh); putting
+// them first on PATH means no Homebrew install is needed, and covers bare
+// "ffmpeg" calls inside libraries (mlx_whisper) as well as our own.
+const BUNDLED_FFMPEG_DIR = app.isPackaged ? path.join(process.resourcesPath, 'ffmpeg', 'bin') : null;
+const CHILD_PATH = [BUNDLED_FFMPEG_DIR, process.env.PATH].filter(Boolean).join(path.delimiter);
+
+const PYTHON_ENV = { ...process.env, PATH: CHILD_PATH, PYTHONUNBUFFERED: '1', VOICECOACH_API_TOKEN: API_TOKEN, VOICECOACH_DATA_DIR: DATA_DIR };
 
 function postJson(pathName, body) {
   return new Promise((resolve, reject) => {

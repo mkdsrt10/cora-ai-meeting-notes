@@ -22,7 +22,7 @@ from pathlib import Path
 # fail on the exact same bare "ffmpeg" lookup for the exact same reason).
 for _brew_bin in ("/opt/homebrew/bin", "/usr/local/bin"):
     if _brew_bin not in os.environ.get("PATH", "").split(os.pathsep):
-        os.environ["PATH"] = _brew_bin + os.pathsep + os.environ.get("PATH", "")
+        os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + _brew_bin
 
 import sys
 

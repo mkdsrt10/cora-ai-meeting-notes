@@ -46,6 +46,8 @@ def clean_and_validate_participant(raw_name: str) -> Optional[str]:
     s = re.sub(r"\s*\((?:is )?speaking\)$", "", s, flags=re.I).strip()
     s = re.sub(r"^More options for\s+", "", s, flags=re.I).strip()
     s = re.sub(r"^View\s+(.+?)'s\s+profile$", r"\1", s, flags=re.I).strip()
+    if s.casefold() in {"participant", "unknown", "someone", "you", "everyone"}:
+        return None
     if len(s) < 3 or len(s) > 35:
         return None
     s_lower = s.lower()
@@ -56,8 +58,8 @@ def clean_and_validate_participant(raw_name: str) -> Optional[str]:
         return None
     if re.search(r"\d", s):
         return None
-    if "." in s:
+    if any('.' in token and not re.fullmatch(r'(?:[^\W\d_]\.)+', token) for token in s.split()):
         return None
-    if not re.search(r"[a-zA-Z]", s):
+    if not any(char.isalpha() for char in s):
         return None
     return s.strip()

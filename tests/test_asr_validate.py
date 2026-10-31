@@ -75,3 +75,14 @@ def test_one_long_speech_stretch_covered_by_several_turns_passes():
     # regression: coverage must be the union of turns, not the best single turn
     ok(turns((0, 10, "first part of it"), (10, 20, "the middle part"), (20, 30, "and the last part")),
        strict=[(0.0, 30.0)])
+
+
+@pytest.mark.parametrize('start,end', [(float('nan'),10),(0,float('inf')),(10,5),(5,5),(0,48)])
+def test_invalid_end_and_nonfinite_timestamps_are_retried(start,end):
+    with pytest.raises(WindowInvalid):
+        ok(turns((start,end,'real speech')))
+
+
+def test_boundary_tolerance_and_snap_never_exceed_clip():
+    result = ok(turns((0,30.5,'real speech')), vad=[(0,30.5)])
+    assert result[0]['end'] <= 30
