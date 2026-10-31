@@ -1,0 +1,141 @@
+{
+ "summary": "The transcription path runs runner._process_recording_local_inner (python/pipeline/runner.py:116-169) \u2192 transcribe_with_silence_removal (transcribe.py:196-274). That function mixes the two-track audio.mov (track 0 is the mic, track 1 is system audio, both 48 kHz stereo AAC; see capture/DualCapture.swift:23-26 and voice_memo_pipeline.py:130-187) into one mono stream, with the mic ducked under system audio (audio.py:168-233). It then finds speech with ffmpeg silencedetect at -50 dB with a 1.2 s minimum gap (audio.py:22-82), groups the speech into chunks of up to 12 s, splitting anything over 25 s (plan_chunks, transcribe.py:150-167), and sends each 16 kHz mono WAV chunk through _transcribe_clip (transcribe.py:170-176). That call goes to local MLX Whisper (Tara) or, when transcription_engine==\"gemini\", to cloud_asr.transcribe_gemini (cloud_asr.py:47-74). The Gemini call happens once per chunk, one after another, with temperature 0 and no thinking or response settings. It sends a free-text instruction plus the 200-token prompt built for Whisper (context.py:40, 102-140) and turns the reply into one segment covering the whole chunk (cloud_asr.py:77-85). Downstream, the alignment loop (runner.py:178-210) needs float start/end seconds on the original recording's timeline at roughly turn size. For each segment it uses, in order: the Accessibility active-speaker timeline (speakers.py:120-141, which needs overlap of at least min(0.8 s, 25% of the segment)), then mic-vs-system loudness (speakers.py:144-157, two ffmpeg runs per segment), then the self name. Romanization (romanize.py) and the LLM speaker-naming pass (speaker_guess.py) follow, and timestamps are then stored as whole-second MM:SS strings (common.py:12-18). The biggest finding: the production route never reaches this per-chunk Gemini engine. recordings.py:226 compares the setting to \"local_mlx\", but the UI saves \"local\" or \"gemini\" (index.html:411-412). So any user who has touched the dropdown, including choosing \"On this Mac\", is sent to the older whole-file Gemini path, diarization.diarize (diarization.py:592-693). That path cuts long recordings at fixed 15-minute marks mid-word, downmixes only the mic track because it never passes -map, ignores audio_part2+, gives each chunk its own speaker IDs, and returns MM:SS strings that break for meetings over an hour. The 12-25 s granularity also suits Whisper's 30 s window but not Gemini. It strips conversational context, cuts words at the 25 s splits, collapses each chunk into one segment that can hold several speakers, makes 150-250 sequential calls per hour, and discards every good chunk if one call fails (transcribe.py:241-243). The better design for Gemini: about 4-minute windows cut at silences, each returning structured JSON {start,end,speaker,text} relative to the window. Pass the full meeting context, run windows in parallel, snap timestamps to the voice-detection boundaries, validate each window, and fall back per window. Google Chirp 3 (Speech-to-Text v2) is reachable with the existing service-account/ADC credentials over plain REST. However, it only runs in the us and eu regions, a sync Recognize call takes under 1 minute of audio, and BatchRecognize reads its input from Cloud Storage (gs:// URIs). Its Hindi output is likely Devanagari, which romanize.py already converts. That makes it a candidate for benchmarking, not the first engine to build. Tests today: test_cloud_asr.py covers engine selection, lockdown, the runaway guard and dispatch with mocks. test_chunking.py covers only plan_chunks. Nothing tests the Gemini request itself, the route's engine choice, retries/fallback, or timestamp validation.",
+ "key_files": [
+  {
+   "path": "python/pipeline/transcribe.py",
+   "role": "Chunk planner (plan_chunks :150-167, CHUNK_TARGET_S=12 :144, CHUNK_MAX_S=25 :147), engine dispatch (_transcribe_clip :170-176), chunk loop and offset mapping (_transcribe_chunks :179-193), orchestration with all-or-nothing fallback to local single pass (:196-274), Whisper-oriented cleanup (collapse_repetition_loops :17-33, clean_whisper_segments :111-141)"
+  },
+  {
+   "path": "python/pipeline/cloud_asr.py",
+   "role": "Opt-in Gemini engine: engine() with lockdown override :32-37; per-clip generate_content with temperature 0, no thinking/JSON settings :47-74; one segment per chunk plus 8 words/s runaway guard :77-85"
+  },
+  {
+   "path": "python/pipeline/audio.py",
+   "role": "silencedetect speech finder with original-timeline stretches :22-82; 16 kHz mono clip extraction :85-95; per-track mean volume :98-116; trimmed/spliced audio and time mapping :119-165; two-track mix with sidechain ducking :168-233"
+  },
+  {
+   "path": "python/pipeline/context.py",
+   "role": "MeetingContext: ranked terms from attendees, nearby OCR, title, notes, OCR, past meetings, curated and learned vocabulary :44-48,310-339; prompt() packs into a 200-token Whisper budget measured with the Whisper tokenizer :40,102-140,171-175; records per-chunk prompts to transcription_context.json :142-157"
+  },
+  {
+   "path": "python/pipeline/runner.py",
+   "role": "Orchestration: multi-part offsets :125-165; per-chunk prompt_for closure :147-150; speaker alignment (AX timeline > track loudness > self default) :178-210; romanize and speaker guess :216-228; hardcoded model label and 'Zero audio left this device' privacy note :271-281"
+  },
+  {
+   "path": "python/pipeline/speakers.py",
+   "role": "AX timeline load and overlap match :42-51,120-141; mic-vs-system attribution :144-157; continuation parent merge using _parse_ts :14-39"
+  },
+  {
+   "path": "python/speaker_guess.py",
+   "role": "Rules then local-LLM naming of 'Participant' turns, validated against the roster and verbatim evidence"
+  },
+  {
+   "path": "python/pipeline/romanize.py",
+   "role": "Devanagari to Roman Hinglish (LLM with validation, rules fallback); ROMAN_PRIMER :178 is injected into every ASR prompt via context.py:315"
+  },
+  {
+   "path": "python/api/routes/recordings.py",
+   "role": "POST /api/process-recording engine routing :208-251; compares the setting to 'local_mlx' at :226 and so misroutes to the older gemini_diarize"
+  },
+  {
+   "path": "python/diarization.py",
+   "role": "Older whole-file / 15-minute-chunk Gemini diarization that actually runs when the setting is not 'local_mlx': prepare_audio_for_gemini :352-386, interact_with_audio (JSON schema, thinking_budget=0) :421-448, diarize_chunked :458-552, diarize :592-693"
+  },
+  {
+   "path": "python/credentials.py",
+   "role": "Vertex/AI Studio client builder: service account / ADC / API key, location defaults to 'global', 600 s timeout :670-765; default models :31-41; call_configured_llm :403-516"
+  },
+  {
+   "path": "python/policy.py",
+   "role": "enterprise_lockdown and require_outbound_allowed / provider_allowed :24-49"
+  },
+  {
+   "path": "python/pipeline/common.py",
+   "role": "format_ts truncates to whole-second MM:SS :12-18; _parse_ts handles only MM:SS :21-29"
+  },
+  {
+   "path": "python/pipeline/config.py",
+   "role": "whisper_model_status reports a cloud engine as ready with no local weights :78-86; resolve_whisper_model falls back to whisper-small :110-133"
+  },
+  {
+   "path": "tools/asr_bench.py",
+   "role": "WER/CER benchmark on fixed 25 s chunks (CHUNK_S :39); gemini backend persists cloud_asr_model into the DB :166-170"
+  },
+  {
+   "path": "tests/test_cloud_asr.py",
+   "role": "Engine default, lockdown override, runaway drop, repetition collapse, one-segment shape, dispatch (all mocked; no request or validation tests)"
+  },
+  {
+   "path": "tests/test_chunking.py",
+   "role": "plan_chunks only, via the local_meeting_pipeline shim; confirms hard 25 s mid-stretch splits"
+  },
+  {
+   "path": "src/ui/web/js/settings.js",
+   "role": "Engine dropdown saves transcription_engine = 'local' | 'gemini' :56-76 (index.html:409-414)"
+  },
+  {
+   "path": "python/transcript_edit.py",
+   "role": "User text and speaker corrections stored with original_text plus ai_trace.record_correction; ready-made reference data for windowed WER and speaker-attribution evals"
+  }
+ ],
+ "extension_points": [
+  "python/api/routes/recordings.py:222-227: make is_local use pipeline.cloud_asr.engine() (values 'local'/'gemini') so every UI and auto-process run (src/main.js:626, src/ui/web/js/detail-actions.js:84) goes through process_recording_local; reach the older gemini_diarize only through an explicit engine='legacy_gemini' body param.",
+  "python/pipeline/transcribe.py:150-167: add plan_windows(speech_segments, target=240, max_len=360, break_gap=8.0) beside plan_chunks. Cut at the largest silence gap inside [target-60, max_len]; start a new window at any gap over break_gap; if speech runs past max_len with no gap, cut at the lowest-energy 200 ms point with about 2 s of overlap and dedupe.",
+  "python/pipeline/transcribe.py:179-193 and :238-243: add _transcribe_windows(mixed_audio_path, windows, context_for) used when the engine is windowed. Run windows in a ThreadPoolExecutor with 4-6 workers (diarization.py:491-497 already uses 3). Replace the whole-run fallback at :241-243 with a per-window fallback ladder.",
+  "python/pipeline/cloud_asr.py:18 (ENGINES), :40-44 (dispatch), :47-74 (transcribe_gemini): add transcribe_window(audio_bytes, mime, window_dur, ctx) -> {segments:[{start,end,speaker,text}], report}. Use system_instruction, response_mime_type='application/json', response_schema, thinking_level='low' or 'minimal', temperature left at its default, max_output_tokens about 16k, and a finish_reason check. Add retry/backoff on 429/5xx/timeout.",
+  "python/pipeline/cloud_asr.py:77-85 (_clip_result): grow into validate_window(segments, window_dur, vad_stretches). Check monotonic starts, bounds of 0..window_dur+1 s, coverage against VAD speech, words per second between about 0.5 and 7, repetition, echoes of the prompt or glossary, and finish_reason.",
+  "python/pipeline/context.py:102-140: add MeetingContext.llm_context(start, end) -> dict: title, attendees, self name, a full ranked glossary (around 300 terms, no 200-Whisper-token budget), raw nearby slide OCR text (\u00b1120 s, NEARBY_OCR_WINDOW_S :41, capped about 2k chars), and an excerpt of the user's notes. Keep prompt() for Whisper.",
+  "python/pipeline/runner.py:147-153: next to prompt_for, pass a context_for(start,end) closure (offset-aware like the existing one) into transcribe_with_silence_removal; record per-window context and validation reports via context.record/save (context.py:142-157).",
+  "python/pipeline/runner.py:178-210: use the segment's Gemini 'speaker' hint as a fallback after AX and track loudness. Accept it only if it is on the roster and never let it override a mic-dominant 'You'. Write start_s/end_s floats alongside the MM:SS strings at :205-206.",
+  "python/pipeline/runner.py:271-281: set diarization_payload.model and privacy_note from the engine actually used (for example cloud:gemini/<model>, with 'audio sent to Google Vertex AI <location>').",
+  "python/pipeline/audio.py:85-95: add extract_window(audio, start, end, codec='libopus' at 32-48 kbps, or flac) for inline windows of 1-2 MB per 4 minutes, and extract_track_window(audio, track_index, ...) using -map 0:a:N for the dual-track experiment.",
+  "python/pipeline/audio.py:168-233: optionally weaken the sidechain ducking for the cloud path (the ratio=20 duck suppresses your own interjections and backchannels while the remote side talks), or bypass it in split-track mode.",
+  "python/credentials.py:670-751: factor out get_google_auth(scopes) -> (google.auth credentials, project) from the vertex service-account/ADC branch, so a Chirp 3 engine can call Speech v2 REST through google.auth.transport.requests.AuthorizedSession with no new dependency; add a separate speech_location setting (us or eu).",
+  "tools/asr_bench.py:39 and :166-170: add a windowed-Gemini backend (not just 25 s chunks) and timestamp-error and speaker-turn-accuracy metrics; stop the backend writing cloud_asr_model into the real DB.",
+  "src/ui/web/index.html:409-414 and src/ui/web/js/settings.js:56-76: engine options (local / gemini windowed / chirp3), a model picker for cloud_asr_model, and an honest data-flow note including region."
+ ],
+ "constraints": [
+  "Enterprise lockdown must force local: cloud_asr.engine() returns 'local' under lockdown (cloud_asr.py:35) and every new engine must call policy.require_outbound_allowed before any network I/O (policy.py:33-35). Note get_client already enforces this (credentials.py:671).",
+  "Gemini audio limits: about 32 tokens per second of audio, inline request at most 20 MB total, multi-channel downmixed to mono (so sending stereo with mic L and system R gives no separation). Files API is AI Studio only; Vertex uses inline or gs://. Use compressed windows (Opus or FLAC), not 16-bit PCM WAV (10 min of PCM is about 19 MB).",
+  "Gemini 3 guidance: keep temperature at the default 1.0 (Google warns values below 1.0 can cause looping); control latency with thinking_level, which defaults to high; thinking_level and thinking_budget cannot be combined. cloud_asr.py:69 sets temperature=0.0 and diarization.py:432 sets thinking_budget=0. Benchmark before changing.",
+  "Chirp 3 (Speech v2): only the us and eu multi-regions; Recognize handles under 1 minute (inline); BatchRecognize handles about 1 hour (20 minutes with word timestamps) and takes gs:// input, which needs a bucket, upload, deletion and extra IAM. Diarization is supported for hi-IN and en-IN; code-switching is not documented; phrase-set adaptation allows up to 1,000 phrases. Works only with the vertex service-account/ADC credentials, not the AI Studio key; the Speech API must be enabled with roles/speech.client.",
+  "Downstream contract: segments need float start/end on the original recording timeline (runner.py:155-159 adds the part offset), at turn size, so AX overlap (speakers.py:138-141) and per-track loudness (speakers.py:144-157) can attribute them. The persisted shape is MM:SS strings (common.py:12-18) parsed by people_matcher.py:22-39, speakers.py:38, transcript_edit.py and the MCP/UI. Add fields; do not change the meaning of the existing ones.",
+  "Speaker labels from the model must be global (roster names or 'Me'), not per-window anonymous IDs. diarization.py:507-510 shows the failure mode: speaker_1 in each 15-minute chunk is a different person.",
+  "The renderer is sandboxed under a strict CSP and the API is token-protected. Every cloud call happens in Python; no audio or credentials go through the renderer.",
+  "Compliance (SOC 2, HIPAA, DoD customers): cloud ASR must use Vertex (no-training terms, BAA-eligible), not the AI Studio key path, for regulated data. Location defaults to 'global' (credentials.py:31), so data residency is unspecified. Windows sent inline leave no audio stored in the cloud, which is preferable to BatchRecognize/GCS.",
+  "AI trace stores prompts (attendee names) and full transcript outputs locally for 180 days by default (ai_trace.py:128); the new per-window traces will make this larger.",
+  "Owner preference (memory): their ASR is Tara at ~/tara-mlx with no timestamps, so word_timestamps stays off for local; the local fallback must keep plan_chunks at \u226425 s."
+ ],
+ "gaps_and_bugs": [
+  "CRITICAL routing/privacy bug, python/api/routes/recordings.py:226: `db.get_setting(\"transcription_engine\", \"local_mlx\") == \"local_mlx\"`, but the UI saves 'local' or 'gemini' (src/ui/web/index.html:411-412, settings.js:72). Selecting 'gemini' runs the older diarization.diarize, not cloud_asr. Selecting 'On this Mac (private)' after any change ALSO runs diarization.diarize and uploads audio to Google. Under lockdown that path raises LockdownError and processing fails outright. The new per-chunk engine is effectively unreachable from the UI. No test covers this.",
+  "Compliance bug, python/pipeline/runner.py:273-280: model is hardcoded to 'local-whisper-hinglish-mlx' and privacy_note says '100% processed locally ... Zero audio or text left this device' even when cloud_asr sent every chunk to Gemini.",
+  "Older Gemini path drops remote speakers, python/diarization.py:374-378 and :481-483: ffmpeg `-ac 1` without `-map` on the two-track audio.mov keeps only stream 0 (mic). This is the same bug audio.py:168-189 documents and fixed for the local path.",
+  "Older Gemini path, python/diarization.py:458-489: fixed 900 s cuts with `-ss int(c_start) -t int(c_dur)` split words and turns at boundaries, with no overlap and the fractional tail dropped. Per-chunk speaker_N IDs are merged as if global (:507-510). Decisions, action items and questions are emptied in chunked mode (:543-547). find_audio (:58-62) takes only audio.mov, so audio_part2+.mov after a pause/resume is never transcribed.",
+  "Older Gemini path, python/diarization.py:366-370: bitrate ladder `if size_mb > 60 ... elif size_mb > 100` means the 18k branch is unreachable. :616 privacy_note claims the 'Files API copy was deleted' but inline bytes are sent. :520-521 writes HH:MM:SS past 1 hour, which common.py:_parse_ts (:21-29) turns into 0.0 (breaking continuation offsets, speakers.py:38) and people_matcher.py:24-27 misreads.",
+  "All-or-nothing fallback, python/pipeline/transcribe.py:239-243: any exception in any chunk (one 429 or timeout out of about 200 Gemini calls) discards every good chunk and re-runs the whole part with local Whisper. With engine=gemini the user was never asked to download Tara (config.py:81-83), so this silently becomes whisper-small via an HF download (config.py:133) with language='en'.",
+  "No retry, backoff, concurrency or finish_reason handling in cloud_asr.transcribe_gemini (cloud_asr.py:65-71): calls run one after another (about 150-250 per hour of meeting), a safety/recitation block or empty reply silently drops a chunk, and AI Studio clients get the 600 s timeout but the Vertex api_key branch has none (credentials.py:719-725).",
+  "Wrong granularity for an LLM recognizer, transcribe.py:144-167: 12 s merged chunks become ONE segment per chunk (cloud_asr.py:84), so several speakers inside 12 s share one label. plan_chunks hard-splits continuous speech at exactly 25 s (:156-158), mid-word. Each clip has no conversational context (names, topic, code-switching cues).",
+  "Prompt mismatch, cloud_asr.py:56-58 and context.py:315: the 200-token Whisper prompt (budget measured with the Whisper tokenizer, context.py:40,171-175) includes ROMAN_PRIMER 'Haan, theek hai, main kal tak bhej dunga...' and is labelled 'Names and terms ... (spell them like this)'. Near-silent clips can echo this primer as fake speech. There is no echo filter, and the rich context (full glossary, slide OCR text, notes) is truncated for no reason.",
+  "Gemini 3 settings, cloud_asr.py:69: temperature=0.0 is against Google's Gemini 3 guidance (looping risk), and no thinking_level means the default high (latency and cost on every clip). diarization.py:432 thinking_budget=0 may be rejected on Gemini 3 Pro-class models (verify).",
+  "Multi-part attribution bug, python/pipeline/runner.py:195: guess_speaker_from_tracks always reads audio_file (part 1) while segments from audio_part2+ carry offset timestamps (:155-159). Their loudness is measured past the end of part 1 (-100 dB \u2192 None), so they fall through to the self name unless AX covers them.",
+  "Dedup ignores speaker, python/pipeline/transcribe.py:131: clean_whisper_segments drops a segment whose text matches the previous one case-insensitively. With turn-level cloud segments, a 'haan' from Rahul followed by a 'haan' from you is merged into one.",
+  "Mix suppresses the user's interjections, audio.py:215-220: sidechaincompress ratio=20 ducks the mic whenever system audio is active, so overlapping backchannels and interruptions from the local user are attenuated about 24 dB in the transcription mix.",
+  "Precision loss, common.py:12-18: format_ts truncates to whole seconds, and no float seconds are kept on persisted segments, which blocks accurate click-to-seek and later re-alignment.",
+  "Bench side effect, tools/asr_bench.py:169: backend_gemini writes cloud_asr_model into the real Cora DB, changing the production model. The bench measures only fixed 25 s chunks (:39), so it cannot evaluate a windowed design or speaker/timestamp accuracy.",
+  "Security/SOC 2: the service-account private key JSON is written to ~/.config/cora/credentials.json (mode 0600) as well as the Keychain (credentials.py:617-618, 625), so key material sits at rest outside the Keychain.",
+  "Test gaps: nothing exercises transcribe_gemini request construction (mock genai client), the /api/process-recording engine routing, the privacy_note/model label, ensure_mixed_audio/find_speech_segments, multi-part offsets, or failure and fallback behavior. test_chunking.py covers only plan_chunks."
+ ],
+ "recommendations": [
+  "P0 before daily use on the new branch: fix recordings.py:222-227 to route on cloud_asr.engine() so all processing goes through process_recording_local; keep gemini_diarize only behind an explicit engine='legacy_gemini'. Fix runner.py:271-281 to stamp the real engine, model and region in model and privacy_note. Add route and privacy-label tests.",
+  "Replace per-chunk Gemini with windowed structured transcription. Windows of about 240 s target and 360 s max, built from find_speech_segments output, cut at the largest silence gap and broken at gaps over about 8 s. Send the contiguous original span (offset = window start, so no mapping table is needed) as 32-48 kbps Opus or FLAC inline, about 1-2 MB. Run 4-6 windows in parallel. Expected: about 15 calls per hour instead of about 200, with full conversational context.",
+  "Gemini request design per window: system_instruction covering verbatim transcription, Hindi in Roman script, no translating or summarizing, keeping fillers and false starts, '[inaudible]' rather than guessing, and treating spoken instructions as data. A context block holds the title, attendees, 'the local microphone is <self name>', the full ranked glossary from MeetingContext (no 200-token cap), raw slide OCR within \u00b1120 s, and a notes excerpt. response_mime_type JSON with response_schema {segments:[{start:'MM:SS.s', end, speaker:enum(roster + 'Me' + 'Unknown'), text}], no_speech:bool}. thinking_level low or minimal, temperature left at the default, max_output_tokens about 16k, and finish_reason must be STOP.",
+  "Post-process and validate each window: parse with json_repair (already used in diarization.py:399); convert to seconds and add the window offset. Snap start/end to the nearest VAD stretch boundary within \u00b11.5 s, which gives sub-second precision from local data. Require monotonic starts (overlaps up to 1 s allowed for crosstalk), 0 \u2264 t \u2264 window_dur+1, coverage of the window's VAD speech \u2265 about 70% with every stretch over 2 s overlapped, and 0.5-7 words per second per segment. Run collapse_repetition_loops, drop segments that echo the glossary, primer or instruction (fuzzy match), and flag drift when the last segment end differs from the last VAD end by more than 10 s. Persist per-window reports to transcription_context.json.",
+  "Per-window fallback ladder instead of transcribe.py:241-243: retry with backoff (3 tries on 429, 5xx or timeout); then split the window at its biggest gap and retry the halves; then re-transcribe only the uncovered or failed VAD stretches with the existing \u226425 s clip path (cloud); last, local Tara for that window if weights exist. Never throw away validated windows.",
+  "Speaker attribution: keep the current order (AX timeline \u2192 mic/system loudness \u2192 speaker_guess), using the Gemini label as an extra signal for remote turns only when it is on the roster and loudness says the speaker is remote. Fix runner.py:195 to measure loudness on the part file that produced the segment, with part-local times. Include the speaker in the clean_whisper_segments dedup key. Add start_s/end_s floats to persisted segments.",
+  "Dual-track: Gemini downmixes channels, so stereo does not help. Phase 1: mixed mono with gentler ducking (for example ratio 4-6), or no ducking for the cloud path. Phase 2 experiment: send two audio parts per window (Part A mic, Part B system) in one request and ask for segments tagged track='mic'|'system'. This gives exact You-vs-remote attribution and recovers overlapping speech; dedupe echo by dropping mic segments whose text matches an overlapping system segment. Measure both modes with the bench before choosing a default.",
+  "Chirp 3: build as a second engine behind the same window interface only if the bench shows it winning. Use sync Recognize on \u226455 s windows cut at silences, language_codes ['hi-IN','en-IN'] (test 'auto' too), phrase-set adaptation from MeetingContext terms (\u22641,000; fewer is better), and denoiser off on already-denoised tracks. Authenticate with credentials from the vertex service-account/ADC branch via AuthorizedSession REST (no new dependency) and a separate us/eu location setting. Avoid BatchRecognize/GCS in v1 (bucket lifecycle, audio at rest, extra IAM). Expect Devanagari output and keep romanize.py in the loop.",
+  "Evaluation gate for 'top-notch': extend tools/asr_bench.py with a windowed-Gemini backend, timestamp error (segment boundary against the corrected reference), speaker-turn accuracy (a WDER-style measure), and name/term recall against the glossary. Use 3+ corrected Hinglish meetings of 30-90 minutes from the transcript editor (transcript_edit.py and ai_trace corrections). Compare Gemini Flash vs Pro tiers, windows of 120/240/480 s, and temperature 1.0 vs lower. Remove the db.set_setting side effect at tools/asr_bench.py:169.",
+  "Tests to add: a fake genai client fixture returning canned JSON or errors. Cover plan_windows (gap cuts, max cap, no-gap fallback), validate_window (non-monotonic, out of range, low coverage, runaway, prompt echo, MAX_TOKENS), a fallback ladder that keeps good windows, multi-part offset mapping, request-config assertions (schema, thinking_level, no temperature 0), route engine selection, and the privacy-note label.",
+  "Compliance before routing real meetings through it: require the Vertex provider (not the AI Studio key) for cloud ASR; let the user pin a regional location instead of 'global'; show region and model in Settings and in each recording's privacy_note; consider shorter ai_trace payload retention for transcripts; move the service-account JSON out of the plaintext fallback file (credentials.py:617-618) into the Keychain only."
+ ]
+}

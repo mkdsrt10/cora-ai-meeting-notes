@@ -20,7 +20,7 @@
       <h2>Welcome to Cora</h2>
       <p class="muted">Cora records your meetings, transcribes and structures them, and separates speakers — 100% locally by default, using MLX Whisper and a local Liquid model on your own Mac. No account, no API key required.</p>
       <ul class="onboarding-feature-list">
-        <li><strong>Local transcription &amp; summaries</strong> — nothing leaves your Mac unless you turn on the optional cloud coaching plugin later.</li>
+        <li><strong>Local transcription &amp; summaries</strong> — nothing leaves your Mac unless you choose cloud processing or cloud coaching.</li>
         <li><strong>Auto meeting detection</strong> — Zoom, Google Meet, Teams, Slack Huddles.</li>
         <li><strong>Live notepad</strong> alongside the transcript and summary for every meeting.</li>
         <li><strong>Screenshot capture with local OCR</strong> so on-screen text is searchable too.</li>
@@ -176,6 +176,7 @@
       <span class="kicker">STEP 5 OF 5</span>
       <h2>Models &amp; privacy</h2>
       <p class="muted">Models download automatically the first time you process a recording if not already cached — nothing to wait for now.</p>
+      <div id="onboardingProcessing" class="processing-controls"></div>
       <div id="onboardingWhisperOptions" class="onboarding-checklist"></div>
       <div id="onboardingLiquidOptions" class="onboarding-checklist" style="margin-top:12px"></div>
       <div class="permission-row" style="margin-top:16px">
@@ -307,6 +308,7 @@
           <button class="notepad-tab" data-notepad-tab="participants">Participants</button>
           <button class="notepad-tab" data-notepad-tab="timeline">Meeting Timeline</button>
           <button class="notepad-tab" data-notepad-tab="transcript">Clean Transcript</button>
+          <button class="notepad-tab" data-notepad-tab="processing">Processing</button>
         </div>
         <div class="notepad-panel" data-notepad-panel="notes">
           <div id="notepadProcessingStatus" class="notepad-processing-status" style="display:none"></div>
@@ -317,6 +319,10 @@
           <div id="notepadEnhancedNotes" class="notepad-readonly" style="display:none"></div>
           <textarea id="notepadNotes" placeholder="Type notes during or after the meeting — saved automatically, and used to sharpen Cora's memory of names and terms."></textarea>
           <div class="notepad-status" id="notepadSaveStatus"></div>
+        </div>
+        <div class="notepad-panel" data-notepad-panel="processing" hidden>
+          <div class="processing-history-header"><div><h3>Processing history</h3><p class="muted">Model calls and measured usage, grouped by run. Logs stay on this Mac.</p></div><button type="button" class="button secondary small" id="refreshProcessingHistory">Refresh</button></div>
+          <div id="processingHistory" aria-live="polite"></div>
         </div>
         <div class="notepad-panel" data-notepad-panel="participants" hidden>
           <div id="notepadParticipants" class="notepad-readonly">Participants appear here as soon as Cora detects who's in the meeting.</div>
@@ -343,6 +349,15 @@
     </section>
 
     <section class="view" id="view-people">
+      <form id="createPersonForm" class="panel" style="margin-bottom:20px">
+        <h3>Add a person</h3>
+        <div class="speaker-fields">
+          <input id="createPersonName" name="name" placeholder="Name" aria-label="Person name" required maxlength="200">
+          <input id="createPersonRole" name="role" placeholder="Role (optional)" aria-label="Role">
+          <input id="createPersonOrganization" name="organization" placeholder="Organization (optional)" aria-label="Organization">
+        </div>
+        <div class="workflow-actions" style="margin-top:12px"><button type="submit" class="button primary" id="createPersonBtn">Add person</button><span id="createPersonFeedback" role="status" aria-live="polite"></span></div>
+      </form>
       <div id="peopleList" style="display:flex; flex-direction:column; gap:12px"></div>
     </section>
 
@@ -370,7 +385,7 @@
           <button class="settings-nav-item active" data-settings-panel="profile">Profile</button>
           <button class="settings-nav-item" data-settings-panel="preferences">Preferences</button>
           <button class="settings-nav-item" data-settings-panel="meeting-types">Meeting types</button>
-          <button class="settings-nav-item" data-settings-panel="models">On-Device Models</button>
+          <button class="settings-nav-item" data-settings-panel="models">Processing &amp; models</button>
           <button class="settings-nav-item" data-settings-panel="cloud-models">Cloud LLMs &amp; APIs</button>
           <button class="settings-nav-item" data-settings-panel="mcp">Claude / ChatGPT (MCP)</button>
           <button class="settings-nav-item" data-settings-panel="privacy">Data &amp; privacy</button>
@@ -403,16 +418,9 @@
           </div>
 
           <div class="settings-panel" data-settings-content="models" hidden>
-            <h1 class="settings-title">On-Device Models</h1>
-            <p class="settings-sub">Pick a local model for each job. Everything downloads once and runs on-device — swap any of these anytime without losing past notes.</p>
-            <div class="settings-field" style="margin-bottom:16px">
-              <label for="settingsAsrEngine">Transcription engine</label>
-              <select id="settingsAsrEngine" class="recording-select">
-                <option value="local">On this Mac (private — default)</option>
-                <option value="gemini">Google Gemini (cloud — audio leaves your Mac)</option>
-              </select>
-              <small class="muted" id="settingsAsrEngineNote">Cloud transcription uses the Google credentials from "Cloud LLMs &amp; APIs" and is unavailable under enterprise lockdown.</small>
-            </div>
+            <h1 class="settings-title">Processing &amp; models</h1>
+            <p class="settings-sub">Choose the processing defaults used after recording stops, and configure local models. You can override these choices for any manual run.</p>
+            <div id="settingsProcessing" class="processing-controls"></div>
             <div id="settingsModelRows" class="settings-model-rows"></div>
           </div>
 
@@ -567,7 +575,7 @@
       <div>
         <span class="kicker">EXECUTIVE INTELLIGENCE</span>
         <h2>Re-summarize with AI</h2>
-        <p>Select a model to analyze the full transcript, slide OCR, and notes:</p>
+        <p>Choose a template, notes strategy and engines for this run. Defaults stay unchanged.</p>
       </div>
       <button class="modal-close" id="closeSummarizeModal" aria-label="Close">✕</button>
     </header>
@@ -577,7 +585,7 @@
 
     <div class="modal-actions" style="margin-top: 20px; justify-content: flex-end;">
       <button class="button secondary" id="cancelSummarizeModal" type="button">Cancel</button>
-      <button class="button primary" id="confirmSummarizeBtn" type="button">Generate Executive Notes</button>
+      <button class="button primary" id="confirmSummarizeBtn" type="button">Run processing</button>
     </div>
   </div>
 </div>
@@ -686,8 +694,10 @@
 <script src="/js/recording.js"></script>
 <script src="/js/sessions.js"></script>
 <script src="/js/memory.js"></script>
+<script src="/js/processing.js"></script>
 <script src="/js/settings.js"></script>
 <script src="/js/model-setup.js"></script>
+<script src="/js/processing-history.js"></script>
 <script src="/js/notepad.js"></script>
 <script src="/js/transcript.js"></script>
 <script src="/js/detail.js"></script>

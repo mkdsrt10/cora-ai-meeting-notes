@@ -316,6 +316,7 @@ def _compute_public_status() -> dict[str, Any]:
     return {
         "provider": provider,
         "notes_llm_provider": notes_provider,
+        "gemini_model": file_cfg.get("gemini_model") or DEFAULT_MODEL,
         "vertex_project": vertex_project,
         "vertex_location": vertex_location,
         "vertex_auth_type": vertex_auth_type,
@@ -479,6 +480,7 @@ def _call_configured_llm(
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.2,
+            "max_tokens": max_tokens,
         }
         res = requests.post(f"{base_url.rstrip('/')}/chat/completions", headers=headers, json=payload, timeout=90)
         res.raise_for_status()
@@ -499,6 +501,7 @@ def _call_configured_llm(
                 {"role": "user", "content": prompt},
             ],
             "temperature": 0.2,
+            "max_tokens": max_tokens,
         }
         res = requests.post(f"{base_url.rstrip('/')}/chat/completions", headers=headers, json=payload, timeout=90)
         res.raise_for_status()
@@ -507,9 +510,10 @@ def _call_configured_llm(
 
     elif p in {"vertex", "ai_studio", "gemini"}:
         client = get_client(traced=False)  # traced once, by call_configured_llm
-        m = model or DEFAULT_MODEL
-        full_content = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-        res = client.models.generate_content(model=m, contents=full_content)
+        m = model or file_cfg.get('gemini_model') or DEFAULT_MODEL
+        res = client.models.generate_content(model=m, contents=prompt,
+                                            config={'system_instruction': system_prompt or None,
+                                                    'max_output_tokens': max_tokens})
         return (res.text.strip() if res and res.text else ""), _gemini_usage(res), m
 
     else:

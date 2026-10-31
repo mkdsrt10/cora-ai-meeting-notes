@@ -77,7 +77,8 @@ def model_ready(model_id: str) -> bool:
 
 def whisper_model_status() -> dict[str, Any]:
     import policy
-    engine = db.get_setting("transcription_engine", "local")
+    from . import cloud_asr
+    engine = cloud_asr.engine()
     lockdown = policy.lockdown_enabled()
     if engine != "local" and not lockdown:
         # A hosted engine needs no local weights, so don't nag to download any.
@@ -139,7 +140,7 @@ LOCAL_LLM_MODEL_DEFAULT = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 BIN_OCR = paths.BIN_DIR / "mac-ocr"
 
 
-def _cap_mlx_memory() -> None:
+def _cap_mlx_memory(memory_bytes: int = 6 * 1024**3) -> None:
     """Hard-cap MLX's Metal memory use for this process, once, at import
     time. Without this, both set_memory_limit and set_cache_limit default
     to ~1.5x the device's max recommended working set — on this machine
@@ -157,7 +158,7 @@ def _cap_mlx_memory() -> None:
     try:
         import mlx.core as mx
         mx.set_cache_limit(1 * 1024**3)
-        mx.set_memory_limit(6 * 1024**3)
+        mx.set_memory_limit(memory_bytes)
     except Exception as exc:
         print(f"[Local Pipeline] Could not set MLX memory limits: {exc}", flush=True)
 

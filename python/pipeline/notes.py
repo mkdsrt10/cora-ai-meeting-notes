@@ -48,7 +48,9 @@ def generate_summary_variant(transcript_text: str, notes_text: str, slides_data:
         raise ValueError(f"Unknown summary format: {format_name}")
 
     liquid_model = db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT)
-    model, tokenizer = mlx_lm.load(liquid_model)
+    import ai_trace
+    with ai_trace.span('model_load', 'model.load', provider='mlx', model=liquid_model):
+        model, tokenizer = mlx_lm.load(liquid_model)
 
     slides_summary = ""
     if slides_data:
@@ -187,7 +189,7 @@ def _reconcile_decisions(decisions_md: str, reversals_md: str, overlap_threshold
     return "\n".join(kept) if kept else "- None noted."
 
 
-def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, Any]], aligned_segments: list[dict[str, Any]], folder: Optional[Path] = None) -> dict[str, Any]:
+def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, Any]], aligned_segments: list[dict[str, Any]], folder: Optional[Path] = None, *, template_instruction: str = "", user_notes: str = "", model_id: str = "") -> dict[str, Any]:
     """Six narrow, single-purpose local LLM calls (see _llm_extract) instead
     of one big structured-JSON ask — model choice honors an onboarding
     selection (db setting) over the default. Long transcripts are chunked
@@ -214,136 +216,142 @@ def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, An
 
     import mlx_lm
 
-    liquid_model = db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT)
+    liquid_model = model_id or db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT)
     print(f"[Local LLM] Loading {liquid_model} for enhanced notes...", flush=True)
     if folder:
         _write_progress(folder, "loading_notes_model", "Preparing notes analysis engine...", percent=52)
-    model, tokenizer = mlx_lm.load(liquid_model)
+    import ai_trace
+    with ai_trace.span('model_load', 'model.load', provider='mlx', model=liquid_model):
+        model, tokenizer = mlx_lm.load(liquid_model)
 
-    slides_summary = ""
-    if slides_data:
-        slides_summary = "\n--- SLIDES & SCREENSHOTS OCR DATA ---\n"
-        for s in slides_data[:6]:
-            slides_summary += f"[{s.get('timestamp')}] {s.get('text', '')[:300]}\n"
+    try:
+        slides_summary = ""
+        if slides_data:
+            slides_summary = "\n--- SLIDES & SCREENSHOTS OCR DATA ---\n"
+            for s in slides_data[:6]:
+                slides_summary += f"[{s.get('timestamp')}] {s.get('text', '')[:300]}\n"
 
-    chunks = _chunk_transcript(transcript_text)
-    t0 = time.time()
-    total_output_tokens = 0
+        transcript_text += "\nUSER NOTES:\n" + user_notes if user_notes else ""
+        chunks = _chunk_transcript(transcript_text)
+        t0 = time.time()
+        total_output_tokens = 0
 
-    SECTION_PROGRESS = {
-        "Overview": ("Generating Executive Overview", 60),
-        "Action Items": ("Extracting Action Items & Tasks", 68),
-        "Key Discussion & Decisions": ("Extracting Decisions & Key Points", 76),
-        "Timeline": ("Building Chronological Timeline", 84),
-        "Open Questions": ("Identifying Open Questions", 90),
-        "Key Entities": ("Extracting Key Entities & Keywords", 95),
-    }
+        SECTION_PROGRESS = {
+            "Overview": ("Generating Executive Overview", 60),
+            "Action Items": ("Extracting Action Items & Tasks", 68),
+            "Key Discussion & Decisions": ("Extracting Decisions & Key Points", 76),
+            "Timeline": ("Building Chronological Timeline", 84),
+            "Open Questions": ("Identifying Open Questions", 90),
+            "Key Entities": ("Extracting Key Entities & Keywords", 95),
+        }
 
-    def run(instruction: str, max_tokens: int = 1600, grounded: bool = True, section: str = "", source_text: Optional[str] = None) -> str:
-        nonlocal total_output_tokens
-        results = []
-        run_chunks = _chunk_transcript(source_text) if source_text is not None else chunks
-        label, pct = SECTION_PROGRESS.get(section, (f"Generating {section}", 70))
-        for i, chunk in enumerate(run_chunks):
+        def run(instruction: str, max_tokens: int = 1600, grounded: bool = True, section: str = "", source_text: Optional[str] = None) -> str:
+            nonlocal total_output_tokens
+            instruction += "\nTemplate guidance: " + template_instruction
+            results = []
+            run_chunks = _chunk_transcript(source_text) if source_text is not None else chunks
+            label, pct = SECTION_PROGRESS.get(section, (f"Generating {section}", 70))
+            for i, chunk in enumerate(run_chunks):
+                if folder:
+                    detail = f"{label} (chunk {i + 1}/{len(run_chunks)})" if len(run_chunks) > 1 else label
+                    _write_progress(folder, "generating_notes", detail, percent=pct)
+                text = chunk + (slides_summary if i == 0 else "")
+                out = _llm_extract(model, tokenizer, instruction, text, max_tokens, grounded=grounded,
+                                   model_id=liquid_model, name=f"enhanced_notes.{_slug(section)}")
+                results.append(out)
+                try:
+                    total_output_tokens += len(tokenizer.encode(out))
+                except Exception:
+                    pass
+                _clear_mlx_cache()
+            if len(results) == 1:
+                return results[0]
+            # Long recording, multiple chunks: merge with one more narrow pass
+            # (still single-purpose — "tidy this list" — so it stays fast and
+            # think-free in practice, same as every other call here) rather
+            # than a heavier hierarchical reduce.
             if folder:
-                detail = f"{label} (chunk {i + 1}/{len(run_chunks)})" if len(run_chunks) > 1 else label
-                _write_progress(folder, "generating_notes", detail, percent=pct)
-            text = chunk + (slides_summary if i == 0 else "")
-            out = _llm_extract(model, tokenizer, instruction, text, max_tokens, grounded=grounded,
-                               model_id=liquid_model, name=f"enhanced_notes.{_slug(section)}")
-            results.append(out)
+                _write_progress(folder, "generating_notes", f"Merging {section}...", percent=pct + 2)
+            merged_raw = "\n".join(results)
+            merge_instruction = f"Merge and deduplicate this list into one clean Markdown bullet list, keeping only distinct items. Context: {instruction}"
+            out = _llm_extract(model, tokenizer, merge_instruction, merged_raw, max_tokens, grounded=grounded,
+                               model_id=liquid_model, name=f"enhanced_notes.{_slug(section)}.merge")
             try:
                 total_output_tokens += len(tokenizer.encode(out))
             except Exception:
                 pass
             _clear_mlx_cache()
-        if len(results) == 1:
-            return results[0]
-        # Long recording, multiple chunks: merge with one more narrow pass
-        # (still single-purpose — "tidy this list" — so it stays fast and
-        # think-free in practice, same as every other call here) rather
-        # than a heavier hierarchical reduce.
-        if folder:
-            _write_progress(folder, "generating_notes", f"Merging {section}...", percent=pct + 2)
-        merged_raw = "\n".join(results)
-        merge_instruction = f"Merge and deduplicate this list into one clean Markdown bullet list, keeping only distinct items. Context: {instruction}"
-        out = _llm_extract(model, tokenizer, merge_instruction, merged_raw, max_tokens, grounded=grounded,
-                           model_id=liquid_model, name=f"enhanced_notes.{_slug(section)}.merge")
-        try:
-            total_output_tokens += len(tokenizer.encode(out))
-        except Exception:
-            pass
-        _clear_mlx_cache()
-        return out
+            return out
 
-    overview = run("Write a 1-2 sentence executive overview of what this meeting covered, as plain prose (not a list).", 1200, grounded=False, section="Overview")
+        overview = run("Write a 1-2 sentence executive overview of what this meeting covered, as plain prose (not a list).", 1200, grounded=False, section="Overview")
 
-    # Deterministic pre-filter (see _mine_commitment_turns): a small model
-    # extracting action items from a dense slice of turns that actually
-    # sound like commitments does better than hunting for a handful of
-    # real ones across a whole chunked transcript. Falls back to the full
-    # transcript when mining finds too little to trust.
-    commitment_text = _mine_commitment_turns(aligned_segments)
-    action_items_md = run(
-        "Extract ONLY the concrete action items/tasks from this meeting, as a Markdown bullet list — include an owner and due date only if actually mentioned.",
-        section="Action Items",
-        source_text=commitment_text or None,
-    )
+        # Deterministic pre-filter (see _mine_commitment_turns): a small model
+        # extracting action items from a dense slice of turns that actually
+        # sound like commitments does better than hunting for a handful of
+        # real ones across a whole chunked transcript. Falls back to the full
+        # transcript when mining finds too little to trust.
+        commitment_text = _mine_commitment_turns(aligned_segments)
+        action_items_md = run(
+            "Extract ONLY the concrete action items/tasks from this meeting, as a Markdown bullet list — include the named speaker as owner for first-person commitments, and a due date only if actually mentioned.",
+            section="Action Items",
+            source_text=commitment_text or None,
+        )
 
-    # A separate "reversals" extraction pass (dropping decisions later
-    # overruled/postponed — see _reconcile_decisions) was tried and reverted:
-    # it added a 7th per-chunk LLM section on top of an already
-    # memory-heavy run and contributed to a real crash on this machine.
-    # Priority right now is accuracy + low memory footprint, not more calls.
-    decisions_md = run("Extract the key discussion points and any decisions made in this meeting, as a Markdown bullet list. Do not repeat action items or restate the overview here — only genuine discussion points or decisions.", section="Key Discussion & Decisions")
-    topics_md = run("List the distinct topics this meeting moved through, in the order discussed, as a Markdown bullet list — format each line as '- <short topic name>: <one sentence summary>'.", section="Timeline")
-    questions_md = run("Extract any unresolved questions or open items left from this meeting, as a Markdown bullet list.", section="Open Questions")
-    entities_md = run("List AT MOST 8 of the most important products, projects, systems, or people actually named in this meeting, as a Markdown bullet list. Each line must be JUST the name and nothing else — no description, no explanation, no dash or colon after the name. Fewer than 8 is fine; do not pad the list with generic terms that weren't actually said.", 1200, section="Key Entities")
-    title_raw = run("Write a concise 3 to 6 word executive title for this meeting (no quotes, no punctuation at end).", 30, grounded=True, section="Title")
-    meeting_title = re.sub(r'^["\'\s]+|["\'\s.]+$', '', title_raw).strip().split("\n")[0].strip()
+        # A separate "reversals" extraction pass (dropping decisions later
+        # overruled/postponed — see _reconcile_decisions) was tried and reverted:
+        # it added a 7th per-chunk LLM section on top of an already
+        # memory-heavy run and contributed to a real crash on this machine.
+        # Priority right now is accuracy + low memory footprint, not more calls.
+        decisions_md = run("Extract the key discussion points and any decisions made in this meeting, as a Markdown bullet list. Do not repeat action items or restate the overview here — only genuine discussion points or decisions.", section="Key Discussion & Decisions")
+        topics_md = run("List the distinct topics this meeting moved through, in the order discussed, as a Markdown bullet list — format each line as '- <short topic name>: <one sentence summary>'.", section="Timeline")
+        questions_md = run("Extract any unresolved questions or open items left from this meeting, as a Markdown bullet list.", section="Open Questions")
+        entities_md = run("List AT MOST 8 of the most important products, projects, systems, or people actually named in this meeting, as a Markdown bullet list. Each line must be JUST the name and nothing else — no description, no explanation, no dash or colon after the name. Fewer than 8 is fine; do not pad the list with generic terms that weren't actually said.", 1200, section="Key Entities")
+        title_raw = run("Write a concise 3 to 6 word executive title for this meeting (no quotes, no punctuation at end).", 30, grounded=True, section="Title")
+        meeting_title = re.sub(r'^["\'\s]+|["\'\s.]+$', '', title_raw).strip().split("\n")[0].strip()
 
-    gen_seconds = time.time() - t0
-    _last_llm_stats.clear()
-    _last_llm_stats.update({
-        "model": liquid_model,
-        "generation_seconds": round(gen_seconds, 2),
-        "output_tokens": total_output_tokens or None,
-        "tokens_per_second": round(total_output_tokens / gen_seconds, 1) if total_output_tokens and gen_seconds > 0 else None,
-    })
-    print(f"[Local LLM] Enhanced notes generated in {gen_seconds:.1f}s across {len(chunks)} chunk(s), {len(_markdown_bullets(action_items_md))} action item(s)", flush=True)
+        gen_seconds = time.time() - t0
+        _last_llm_stats.clear()
+        _last_llm_stats.update({
+            "model": liquid_model,
+            "generation_seconds": round(gen_seconds, 2),
+            "output_tokens": total_output_tokens or None,
+            "tokens_per_second": round(total_output_tokens / gen_seconds, 1) if total_output_tokens and gen_seconds > 0 else None,
+        })
+        print(f"[Local LLM] Enhanced notes generated in {gen_seconds:.1f}s across {len(chunks)} chunk(s), {len(_markdown_bullets(action_items_md))} action item(s)", flush=True)
 
-    # Anchor each Timeline topic to a real transcript timestamp — the model
-    # names topics but was never asked for (and can't reliably invent)
-    # exact times; estimate_topic_timestamp matches word-overlap against
-    # the actual segments instead.
-    timeline_lines = []
-    for bullet in _markdown_bullets(topics_md):
-        title, _, summary = bullet.partition(":")
-        anchor = estimate_topic_timestamp(bullet, aligned_segments)
-        prefix = f"**{format_ts(anchor)}** — " if anchor is not None else ""
-        timeline_lines.append(f"- {prefix}{title.strip()}{': ' + summary.strip() if summary.strip() else ''}")
-    timeline_md = "\n".join(timeline_lines) if timeline_lines else "- None noted."
+        # Anchor each Timeline topic to a real transcript timestamp — the model
+        # names topics but was never asked for (and can't reliably invent)
+        # exact times; estimate_topic_timestamp matches word-overlap against
+        # the actual segments instead.
+        timeline_lines = []
+        for bullet in _markdown_bullets(topics_md):
+            title, _, summary = bullet.partition(":")
+            anchor = estimate_topic_timestamp(bullet, aligned_segments)
+            prefix = f"**{format_ts(anchor)}** — " if anchor is not None else ""
+            timeline_lines.append(f"- {prefix}{title.strip()}{': ' + summary.strip() if summary.strip() else ''}")
+        timeline_md = "\n".join(timeline_lines) if timeline_lines else "- None noted."
 
-    result = {
-        "title": meeting_title,
-        "overview": overview,
-        "action_items_md": action_items_md,
-        "decisions_md": decisions_md,
-        "timeline_md": timeline_md,
-        "open_questions_md": questions_md,
-        "key_entities_md": entities_md,
-        # Hard cap regardless of what the model actually returns — a real
-        # meeting rarely surfaces more than a handful of genuine key
-        # entities, so a much longer list is itself a strong hallucination
-        # signal (measured directly: one run free-associated 55 generic
-        # buzzwords never mentioned in the transcript, e.g. "A/B testing",
-        # "Sprint planning" — none of which were said). The instruction
-        # above asks for at most 8; this is the structural backstop for
-        # when it doesn't listen.
-        "keywords": [k for k in (_clean_keyword(b) for b in _markdown_bullets(entities_md)) if k][:8],
-    }
-    _release_mlx_model(model, tokenizer)
-    return result
+        result = {
+            "title": meeting_title,
+            "overview": overview,
+            "action_items_md": action_items_md,
+            "decisions_md": decisions_md,
+            "timeline_md": timeline_md,
+            "open_questions_md": questions_md,
+            "key_entities_md": entities_md,
+            # Hard cap regardless of what the model actually returns — a real
+            # meeting rarely surfaces more than a handful of genuine key
+            # entities, so a much longer list is itself a strong hallucination
+            # signal (measured directly: one run free-associated 55 generic
+            # buzzwords never mentioned in the transcript, e.g. "A/B testing",
+            # "Sprint planning" — none of which were said). The instruction
+            # above asks for at most 8; this is the structural backstop for
+            # when it doesn't listen.
+            "keywords": [k for k in (_clean_keyword(b) for b in _markdown_bullets(entities_md)) if k][:8],
+        }
+        return result
+    finally:
+        _release_mlx_model(model, tokenizer)
 
 
 def generate_enhanced_notes_frontier(

@@ -8,6 +8,7 @@
   "transcription_vocabulary_hint": "",
   "local_whisper_models": [],
   "enterprise_lockdown": false,
+  "default_processing_mode": null,
   "plugins": {
     "coaching": {
       "enabled": false

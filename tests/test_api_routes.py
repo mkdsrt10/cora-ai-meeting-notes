@@ -80,3 +80,46 @@ def test_settings_round_trip(port):
 def test_static_ui_is_served(port):
     status, body = call(port, "GET", "/")
     assert status == 200 and b"Content-Security-Policy" in body
+
+
+def test_processing_profile_roundtrip(port):
+    import db
+    previous = db.get_setting('processing_preferences')
+    try:
+        status, body = call(port, 'GET', '/api/processing')
+        assert status == 200
+        payload = json.loads(body)
+        assert payload['templates'] and 'recommended_mode' in payload['hardware']
+        assert call(port, 'POST', '/api/processing', {'mode':'local_thorough','template':'auto'})[0] == 200
+        saved = json.loads(call(port, 'GET', '/api/processing')[1])['preferences']
+        assert saved['mode'] == 'local_thorough' and saved['transcription'] == 'local'
+        assert call(port, 'POST', '/api/processing', {'mode':'unknown'})[0] == 400
+    finally:
+        db.set_setting('processing_preferences', previous)
+
+
+def test_processing_history_endpoint_is_scoped(port):
+    import ai_trace
+    import paths
+    folder = paths.RECORDINGS_DIR / 'history-endpoint'
+    folder.mkdir(parents=True, exist_ok=True)
+    with ai_trace.run('api-history', recording_id=folder.name):
+        with ai_trace.span('llm', 'notes.test', provider='mlx', model='test-model') as span:
+            span.set(input_tokens=5, output_tokens=2)
+    status, body = call(port, 'GET', '/api/recording/processing?id=history-endpoint')
+    assert status == 200
+    data = json.loads(body)
+    assert any(item['model'] == 'test-model' for item in data['calls'])
+    assert call(port, 'GET', '/api/recording/processing?id=..%2F..%2Fetc')[0] in (400, 404)
+
+
+def test_people_can_be_created_without_overwriting_namesakes(port):
+    first_status, first_body = call(port, 'POST', '/api/people/create', {'name':'Namesake Person','role':'Engineer','organization':'Example'})
+    assert first_status == 201
+    first = json.loads(first_body)['person']
+    status, body = call(port, 'POST', '/api/people/create', {'name':'Namesake Person','role':'Designer'})
+    second = json.loads(body)['person']
+    assert status == 201 and first['id'] != second['id']
+    stored = json.loads(call(port, 'GET', '/api/person?id='+first['id'])[1])['person']
+    assert stored['role'] == 'Engineer' and stored['organization'] == 'Example'
+    assert call(port,'POST','/api/people/create',{'name':None})[0] == 400

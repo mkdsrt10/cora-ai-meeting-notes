@@ -27,6 +27,7 @@ import contextvars
 import hashlib
 import json
 import platform
+import resource
 import sqlite3
 import subprocess
 import sys
@@ -288,6 +289,12 @@ def file_fingerprint(path: Path | str) -> dict[str, Any]:
 
 # --- runs & spans ---------------------------------------------------------
 
+def process_peak_rss_mb() -> float:
+    """Process lifetime high-water RSS, not memory attributable to one call."""
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return round(rss / (2**20 if sys.platform == 'darwin' else 1024), 1)
+
+
 @contextmanager
 def run(pipeline: str, recording_id: Optional[str] = None, **meta: Any) -> Iterator[Optional[str]]:
     """Group every span inside this block under one pipeline run."""
@@ -314,8 +321,9 @@ def run(pipeline: str, recording_id: Optional[str] = None, **meta: Any) -> Itera
         _run_id.reset(run_token)
         _recording_id.reset(rec_token)
         ended = time.time()
-        _write("UPDATE runs SET ended_at=?, duration_s=?, status=?, error=? WHERE id=?",
-               (ended, round(ended - started, 3), status, error, run_id))
+        _write("UPDATE runs SET ended_at=?, duration_s=?, status=?, error=?, meta=? WHERE id=?",
+               (ended, round(ended - started, 3), status, error,
+                _json(dict(meta, process_peak_rss_mb=process_peak_rss_mb())), run_id))
 
 
 def _pipeline_settings() -> dict[str, Any]:
@@ -385,6 +393,7 @@ def span(kind: str, name: str, *, provider: str, model: Optional[str] = None, in
         _span_id.reset(token)
         duration = time.perf_counter() - t0
         model_name = handle.model or model
+        handle.metrics["process_peak_rss_mb"] = process_peak_rss_mb()
         peak = handle.peak_memory_mb if handle.peak_memory_mb is not None else _mlx_peak_mb(provider)
         tokens_per_s = round(handle.output_tokens / duration, 2) if handle.output_tokens and duration > 0 else None
         rtf = round(duration / handle.audio_s, 4) if handle.audio_s else None
@@ -465,3 +474,15 @@ def purge_recording(recording_id: str) -> None:
             conn.execute("DELETE FROM corrections WHERE recording_id = ?", (recording_id,))
     except Exception as exc:
         print(f"[ai_trace] purge failed: {exc}", file=sys.stderr)
+
+
+def reassign_recording(source: str, target: str) -> None:
+    """Keep processing history when a continuation is folded into its parent."""
+    if not TRACE_DB.exists():
+        return
+    try:
+        with _connect() as conn:
+            for table in ('runs', 'spans', 'corrections'):
+                conn.execute(f'UPDATE {table} SET recording_id=? WHERE recording_id=?', (target, source))
+    except Exception as exc:
+        print(f'[ai_trace] reassign failed: {exc}', file=sys.stderr)

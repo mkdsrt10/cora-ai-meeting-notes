@@ -16,7 +16,7 @@ import paths
 from .common import _parse_ts, _write_progress, format_ts
 from .config import LOCAL_LLM_MODEL_DEFAULT, resolve_whisper_model
 from .llm import _last_llm_stats
-from .notes import _markdown_bullets, generate_enhanced_notes
+from .notes import _markdown_bullets
 from .speakers import _guess_remote_speakers, _load_continuation_segments, guess_speaker_from_tracks, load_accessibility_timeline, load_ax_participants, match_speaker_from_timeline, resolve_other_participant_name
 from .transcribe import transcribe_with_silence_removal
 from . import romanize
@@ -95,14 +95,20 @@ def _archive_previous_outputs(folder: Path) -> None:
     print(f"[Local Pipeline] Archived previous outputs for {folder.name} to versions/{stamp}", flush=True)
 
 
-def process_recording_local(folder: Path) -> dict[str, Any]:
+def process_recording_local(folder: Path, options: dict | None = None) -> dict[str, Any]:
+    import processing
+    with processing.scope(processing.resolve(options), wait=options is None):
+        return _process_recording_selected(folder)
+
+
+def _process_recording_selected(folder: Path) -> dict[str, Any]:
     """Complete end-to-end local processing: MLX Whisper + AX Speakers + OCR Slides + Qwen3-4B."""
     audio_file = next((p for p in folder.iterdir() if p.is_file() and p.name.startswith("audio.")), None)
     if not audio_file:
         raise FileNotFoundError(f"No audio file found in {folder}")
 
     _archive_previous_outputs(folder)
-    _write_progress(folder, "starting", "Initializing local pipeline...", percent=5)
+    _write_progress(folder, "starting", "Initializing selected processing pipeline...", percent=5)
     try:
         with ai_trace.run("local_meeting_pipeline", recording_id=folder.name, audio_file=audio_file.name):
             result = _process_recording_local_inner(folder, audio_file)
@@ -150,7 +156,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
             return chunk_prompt
 
         p_segs, p_dur, p_speech = transcribe_with_silence_removal(pfile, prompt, folder=(folder if idx == 0 else None),
-                                                                  prompt_for=prompt_for)
+                                                                  prompt_for=prompt_for, context=context,
+                                                                  time_offset=current_time_offset)
         for s in p_segs:
             raw_segments.append({
                 **s,
@@ -213,7 +220,13 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
     # people on the call): conversational rules first, then the local LLM.
     # One local model serves both text passes below, then is released
     # before the notes stage loads its own.
-    text_llm = LazyLLM(db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT))
+    import processing
+    options = processing.CURRENT.get()
+    if options and options['mode'] == 'cloud' and options['provider'] != 'local_mlx':
+        from .processing_notes import CloudLLM
+        text_llm = CloudLLM(options)
+    else:
+        text_llm = LazyLLM(db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT))
     try:
         # 2a-i. Romanized Hinglish: convert any Devanagari the ASR produced
         # (see pipeline/romanize.py) before names and notes are derived.
@@ -249,7 +262,9 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
     # structured-JSON ask — see generate_enhanced_notes() for why.
     full_transcript = "\n".join(f"[{s['start']} - {s['end']}] {s['speaker_name']}: {s['text']}" for s in aligned_segments)
     t0 = time.time()
-    notes = generate_enhanced_notes(full_transcript, slides_data, aligned_segments, folder=folder)
+    from .processing_notes import generate_notes, render
+    notes = generate_notes(full_transcript, slides_data, aligned_segments, folder=folder,
+                           user_notes=db.get_notes(folder.name) or '', context=processing.meeting_context(metadata, aligned_segments))
     stage_timings["summarization"] = time.time() - t0
     _write_progress(folder, "persisting", "Saving notes & updating Cora database...", percent=98)
 
@@ -269,12 +284,14 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
     ]
 
     asr_model, privacy_note = _provenance()
+    diarization_processing = notes["processing"]
     diarization_payload = {
         "summary": notes["overview"],
         "model": asr_model,
         "analyzed_at": now_iso,
         "audio_file": audio_file.name,
         "privacy_note": privacy_note,
+        "processing": diarization_processing,
         "speakers": speaker_profiles,
         "segments": aligned_segments,
         "slides_indexed": len(slides_data),
@@ -293,7 +310,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         "action_items": _markdown_bullets(notes["action_items_md"]),
         "unresolved_questions": _markdown_bullets(notes["open_questions_md"]),
         "keywords": notes["keywords"],
-        "model": db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT),
+        "model": notes["processing"]["model"],
+        "processing": notes["processing"],
         "generated_at": now_iso,
         "schema_version": "2.0",
         "source_recording": audio_file.name,
@@ -305,14 +323,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         (folder / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
         db.update_recording_data(folder.name, "metadata", metadata)
 
-    enhanced_notes_md = "\n\n".join([
-        "## Overview", notes["overview"],
-        "## Action Items", notes["action_items_md"],
-        "## Key Discussion & Decisions", notes["decisions_md"],
-        "## Timeline", notes["timeline_md"],
-        "## Open Questions", notes["open_questions_md"],
-        "## Key Entities", notes["key_entities_md"],
-    ])
+    enhanced_notes_md = render(notes)
 
     # Save to disk
     (folder / "diarization.json").write_text(json.dumps(diarization_payload, indent=2, ensure_ascii=False) + "\n")
@@ -420,6 +431,9 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
             )
             conn.commit()
 
+        ai_trace.reassign_recording(folder.name, parent_folder.name)
+        if live_rec_id:
+            ai_trace.reassign_recording(live_rec_id, parent_folder.name)
         db.delete_recording(folder.name)
         shutil.rmtree(folder, ignore_errors=True)
         print(f"[Local Pipeline] Continuation merged directly into parent {parent_folder.name} and child removed.", flush=True)
@@ -446,6 +460,11 @@ def _provenance() -> tuple[str, str]:
         model = f"cloud-asr:{engine}:{db.get_setting('cloud_asr_model') or 'default'}"
         note = ("Speech audio was sent to Google Gemini for transcription (Settings > Transcription engine). "
                 "Notes were generated locally on Apple Silicon (MLX).")
+    import processing
+    options = processing.CURRENT.get()
+    if options:
+        from .processing_notes import privacy_note
+        note = privacy_note(engine != 'local', options)
     if tracing.tracing_opted_in():
         note += " Summary metadata was also sent to your Langfuse project (tracing opt-in)."
     return model, note

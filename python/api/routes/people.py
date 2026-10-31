@@ -2,6 +2,7 @@
 from __future__ import annotations
 import datetime as dt
 import re
+import uuid
 
 from api.router import route
 from diarization import confirm_speaker
@@ -34,12 +35,15 @@ def get_api_person(req, path: str, query: dict) -> None:
 
 @route("POST", '/api/people/create')
 def post_api_people_create(req, path: str, body: dict) -> None:
-    name = str(body.get("name", "")).strip()
-    if not name:
+    raw_name = body.get('name')
+    if not isinstance(raw_name, str) or not raw_name.strip():
         raise ValueError("Name is required")
+    name = raw_name.strip()
+    if len(name) > 200:
+        raise ValueError('Name must be at most 200 characters')
     role = str(body.get("role", "")).strip()
     relationship = str(body.get("relationship", "")).strip()
-    person_id = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or dt.datetime.now().strftime("p%Y%m%d%H%M%S%f")
+    person_id = (re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "person") + "_" + uuid.uuid4().hex
     now = dt.datetime.now().astimezone().isoformat()
     db.upsert_person(
         person_id, name, role, str(body.get("organization", "")).strip(),

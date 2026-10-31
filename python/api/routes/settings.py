@@ -249,3 +249,20 @@ def post_api_settings(req, path: str, body: dict) -> None:
         return req.send_json({"ok": True})
     else:
         return req.send_json({"value": db.get_setting(key)})
+
+
+@route('GET', '/api/processing')
+def get_api_processing(req, path: str, query: dict) -> None:
+    import processing
+    return req.send_json(dict(preferences=processing.preferences(), hardware=processing.hardware(),
+                              templates=[dict(id=k, name=v[0], description=v[1]) for k, v in processing.TEMPLATES.items()]))
+
+
+@route('POST', '/api/processing')
+def post_api_processing(req, path: str, body: dict) -> None:
+    import processing
+    selected = processing.validate(body)
+    # Saving this explicit profile is consent to automatic use, unlike saving an API key.
+    processing.resolve(selected)
+    db.set_setting('processing_preferences', selected)
+    return req.send_json(dict(ok=True, preferences=selected))

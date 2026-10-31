@@ -42,7 +42,7 @@ $('#notepadSnapBtn')?.addEventListener('click', async () => {
   }
 });
 
-$('#notepadReprocessBtn')?.addEventListener('click', async () => {
+async function triggerReprocess(processingOptions) {
   const record = selectedRecording();
   if (!record || activeReprocess.has(record.id)) return;
   if (!confirm('Re-run transcription and notes generation from the original audio?\n\nThe current transcript and notes will be safely archived to versions/ first.')) {
@@ -63,7 +63,7 @@ $('#notepadReprocessBtn')?.addEventListener('click', async () => {
     host.innerHTML = `<div class="notepad-processing-header">
       <div class="notepad-processing-title">
         <span class="recording-pulse-dot"></span>
-        <span><strong>Starting local pipeline…</strong></span>
+        <span><strong>Starting selected pipeline…</strong></span>
       </div>
       <span class="notepad-processing-timer">Elapsed: 00:00</span>
     </div>
@@ -83,13 +83,13 @@ $('#notepadReprocessBtn')?.addEventListener('click', async () => {
   try {
     await api('/api/process-recording', {
       method: 'POST',
-      body: JSON.stringify({ id: recId }),
+      body: JSON.stringify({ id: recId, processing: processingOptions }),
     });
     clearInterval(pollInterval);
     activeReprocess.delete(recId);
     delete reprocessStartTimes[recId];
 
-    if(host){
+    if(host && isSelectedMeeting(recId)){
       host.innerHTML = `<div class="notepad-processing-header">
         <div class="notepad-processing-title">
           <span>✅ <strong>Complete!</strong> Enhanced notes &amp; transcript refreshed.</span>
@@ -99,125 +99,43 @@ $('#notepadReprocessBtn')?.addEventListener('click', async () => {
         <div class="notepad-progress-bar" style="width: 100%; background: var(--success, #10b981);"></div>
       </div>`;
       setTimeout(() => {
-        if(!activeReprocess.has(recId)){
+        if(isSelectedMeeting(recId) && !activeReprocess.has(recId) && !activeSummaries.has(recId)){
           host.style.display = 'none';
         }
       }, 2500);
     }
     toast('Retranscription and summary completed successfully.');
-    await loadSelectedRecording(recId);
+    if(isSelectedMeeting(recId)) await loadSelectedRecording(recId);
   } catch(error) {
     clearInterval(pollInterval);
     activeReprocess.delete(recId);
     delete reprocessStartTimes[recId];
-    if(host){
+    if(host && isSelectedMeeting(recId)){
       host.classList.add('stalled');
       host.innerHTML = `<span>⚠️ Processing failed: ${esc(error.message)}. You can click Retranscribe to try again.</span>`;
     }
     toast(error.message, true);
   } finally {
-    if(btn && document.body.contains(btn)){
+    if(btn && document.body.contains(btn) && isSelectedMeeting(recId)){
       btn.disabled = false;
       btn.textContent = '🔁 Retranscribe & Re-summarize';
     }
   }
-});
+}
 
-let selectedSummarizeProvider = 'gemini';
-let selectedSummarizeModel = 'gemini-3.8-flash';
+$('#notepadReprocessBtn')?.addEventListener('click', () => openSummarizeModal(true));
 
-async function openSummarizeModal() {
+async function openSummarizeModal(retranscribe = false) {
   const record = selectedRecording();
   if (!record) return;
-
-  const modal = $('#summarizeModal');
-  const list = $('#summarizeModelList');
-  if (!modal || !list) return;
-
-  let creds = {};
   try {
-    const res = await api('/api/credentials/status');
-    creds = res.credentials || {};
-  } catch (e) {}
-
-  const hasGemini = Boolean(creds.has_ai_studio_key || creds.has_adc || creds.has_service_account);
-  const hasOpenAI = Boolean(creds.has_openai_key);
-  const hasAnthropic = Boolean(creds.has_anthropic_key);
-
-  const options = [
-    {
-      id: 'gemini',
-      provider: 'gemini',
-      model: creds.gemini_model || 'gemini-3.8-flash',
-      title: 'Google Gemini 3.8 Flash',
-      sub: 'Ultra-fast multimodal reasoning with long-context comprehension',
-      badge: hasGemini ? '✅ Ready' : 'Key Needed',
-      badgeClass: hasGemini ? 'stage-pill coached' : 'stage-pill',
-      enabled: hasGemini,
-    },
-    {
-      id: 'openai',
-      provider: 'openai',
-      model: creds.openai_model || 'gpt-4o',
-      title: 'OpenAI GPT-4o',
-      sub: 'High accuracy decision extraction and task breakdown',
-      badge: hasOpenAI ? '✅ Ready' : 'Key Needed',
-      badgeClass: hasOpenAI ? 'stage-pill coached' : 'stage-pill',
-      enabled: hasOpenAI,
-    },
-    {
-      id: 'anthropic',
-      provider: 'anthropic',
-      model: creds.anthropic_model || 'claude-3-7-sonnet-20250219',
-      title: 'Anthropic Claude 3.7 Sonnet',
-      sub: 'Top executive reasoning, nuances, and strategic clarity',
-      badge: hasAnthropic ? '✅ Ready' : 'Key Needed',
-      badgeClass: hasAnthropic ? 'stage-pill coached' : 'stage-pill',
-      enabled: hasAnthropic,
-    },
-    {
-      id: 'local_mlx',
-      provider: 'local_mlx',
-      model: 'Qwen/Qwen3-4B-Instruct-2507',
-      title: 'Local Apple Silicon (Qwen3-4B)',
-      sub: '100% private, on-device MLX Metal execution without internet',
-      badge: '⚡ Local',
-      badgeClass: 'stage-pill ready',
-      enabled: true,
-    },
-  ];
-
-  const defaultOption = options.find(o => o.enabled) || options[3];
-  selectedSummarizeProvider = defaultOption.provider;
-  selectedSummarizeModel = defaultOption.model;
-
-  list.innerHTML = options.map(o => `
-    <div class="model-select-card ${o.provider === selectedSummarizeProvider ? 'active' : ''} ${!o.enabled ? 'disabled' : ''}" data-provider="${esc(o.provider)}" data-model="${esc(o.model)}" data-enabled="${o.enabled}">
-      <div class="model-select-info">
-        <h4>${esc(o.title)}</h4>
-        <p>${esc(o.sub)}</p>
-      </div>
-      <span class="${o.badgeClass}">${esc(o.badge)}</span>
-    </div>
-  `).join('');
-
-  $$('.model-select-card').forEach(card => {
-    card.addEventListener('click', () => {
-      const isEnabled = card.dataset.enabled === 'true';
-      if (!isEnabled) {
-        modal.style.display = 'none';
-        showView('settings');
-        switchSettingsCloudTab(card.dataset.provider);
-        toast(`Please enter your ${card.dataset.provider} API key first.`);
-        return;
-      }
-      $$('.model-select-card').forEach(c => c.classList.toggle('active', c === card));
-      selectedSummarizeProvider = card.dataset.provider;
-      selectedSummarizeModel = card.dataset.model;
-    });
-  });
-
-  modal.style.display = 'flex';
+    await loadProcessingControls('#summarizeModelList', {manual:true});
+    const host = $('#summarizeModelList');
+    host.querySelector('[data-processing="retranscribe"]').checked = retranscribe;
+    const previousTemplate = record.call_summary?.processing?.template;
+    if (previousTemplate) host.querySelector('[data-processing="template"]').value = previousTemplate;
+    $('#summarizeModal').style.display = 'flex';
+  } catch (error) { toast(error.message, true); }
 }
 
 function closeSummarizeModal() {
@@ -236,8 +154,17 @@ $('#confirmSummarizeBtn')?.addEventListener('click', async () => {
   if (!record) return;
   closeSummarizeModal();
 
-  const provider = selectedSummarizeProvider;
-  const model = selectedSummarizeModel;
+  let options;
+  try { options = readProcessingControls('#summarizeModelList'); }
+  catch (error) { toast(error.message, true); return; }
+  if ($('#summarizeModelList [data-processing="retranscribe"]').checked) {
+    await triggerReprocess(options);
+    return;
+  }
+  if(activeSummaries.has(record.id)) return;
+  activeSummaries.add(record.id);
+  const provider = options.provider;
+  const model = options.model || 'configured default';
   const btn = $('#notepadAiSummarizeBtn');
   if (btn) {
     btn.disabled = true;
@@ -262,9 +189,9 @@ $('#confirmSummarizeBtn')?.addEventListener('click', async () => {
   try {
     const res = await api('/api/recording/re-summarize', {
       method: 'POST',
-      body: JSON.stringify({ id: record.id, provider, model }),
+      body: JSON.stringify({ id: record.id, processing: options }),
     });
-    if (host) {
+    if (host && isSelectedMeeting(record.id)) {
       host.innerHTML = `<div class="notepad-processing-header">
         <div class="notepad-processing-title">
           <span>✅ <strong>Complete!</strong> Executive notes generated with ${esc(res.model || provider)}.</span>
@@ -273,30 +200,34 @@ $('#confirmSummarizeBtn')?.addEventListener('click', async () => {
       <div class="notepad-progress-track">
         <div class="notepad-progress-bar" style="width: 100%; background: var(--success, #10b981);"></div>
       </div>`;
-      setTimeout(() => { host.style.display = 'none'; }, 2500);
+      setTimeout(() => { if(isSelectedMeeting(record.id) && !activeSummaries.has(record.id) && !activeReprocess.has(record.id)) host.style.display = 'none'; }, 2500);
     }
     toast(`Executive notes generated successfully using ${res.model || provider}.`);
+    activeSummaries.delete(record.id);
+    if(!isSelectedMeeting(record.id)) return;
     await loadSelectedRecording(record.id);
+    if(!isSelectedMeeting(record.id)) return;
 
     // Automatically switch view to Enhanced Notes tab
     $$('.notes-toggle-btn').forEach(b => b.classList.toggle('active', b.dataset.notesView === 'enhanced'));
     if ($('#notepadEnhancedNotes')) $('#notepadEnhancedNotes').style.display = '';
     if ($('#notepadNotes')) $('#notepadNotes').style.display = 'none';
   } catch (err) {
-    if (host) {
+    if (host && isSelectedMeeting(record.id)) {
       host.classList.add('stalled');
       host.innerHTML = `<span>⚠️ AI Summarization failed: ${esc(err.message)}</span>`;
     }
     toast(`AI Summarization: ${err.message}`, true);
   } finally {
-    if (btn && document.body.contains(btn)) {
+    activeSummaries.delete(record.id);
+    if (btn && document.body.contains(btn) && isSelectedMeeting(record.id)) {
       btn.disabled = false;
       btn.textContent = '✨ Re-summarize with LLM';
     }
   }
 });
 
-$('#notepadAiSummarizeBtn')?.addEventListener('click', openSummarizeModal);
+$('#notepadAiSummarizeBtn')?.addEventListener('click', () => openSummarizeModal());
 
 $('#notepadContinueBtn')?.addEventListener('click', async () => {
   const record = selectedRecording();

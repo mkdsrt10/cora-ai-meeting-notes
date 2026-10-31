@@ -463,6 +463,14 @@ def process(path: Path, key: str, config: dict) -> Path:
             except Exception:
                 pass
 
+        capture_status_source = path.parent / (path.stem + "_capture_status.json")
+        if capture_status_source.exists():
+            try:
+                shutil.copy2(capture_status_source, importing / "capture_status.json")
+                capture_status_source.unlink(missing_ok=True)
+            except Exception:
+                pass
+
         # Companion meeting screenshots from screenshot engine
         screenshots_source = path.parent / (path.stem + "_screenshots")
         if screenshots_source.is_dir():

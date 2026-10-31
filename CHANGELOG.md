@@ -1,9 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.2.3 — 2026-10-31
 
+- Team builds (`scripts/build-app.sh --team`): new installs default to Gemini for transcription and notes, skip local model downloads, and ask for the Gemini key after onboarding. `docs/TEAM_SETUP.md` walks a new member through it.
+- Bundled ffmpeg/ffprobe (built from the official 7.1.1 source by `scripts/build-ffmpeg.sh`): no Homebrew needed.
+- Releases are signed with one persistent self-signed identity (`scripts/signing-setup.sh`), so macOS permission grants survive updates.
+- Participant names in browser meetings: one tab-less window or tab refusing JavaScript no longer aborts the whole scan; Zoom web client supported; clear fixes shown for "Allow JavaScript from Apple Events" and Automation errors.
+- Fix: packaged app now ships `config.example.json`, so fresh installs get default settings.
+- Installer URL now points at the `production` branch.
 - Notifications & logs panel, pause/resume and "Continue this meeting" now show live progress on the original meeting (and let you listen before it merges), floating widget lost its Screen button.
-- Optional hosted transcription: Settings > On-Device Models > Transcription engine can now use Google Gemini instead of the local model (off by default, disabled under enterprise lockdown).
+- Optional hosted transcription: Settings > On-Device Models > Transcription engine can use Google Gemini instead of the local model (off by default, disabled under enterprise lockdown). It transcribes in ~4-minute windows (15-17 requests per meeting-hour instead of ~200 short clips), validates every window, snaps timestamps to the local speech detector, retries then splits a bad window, and fails loudly rather than silently switching engines. See docs/transcription.md.
+- Fix: choosing "On this Mac" no longer uploads the recording; transcripts now record which engine really ran.
+- One-line installer (`scripts/install.sh`) so the unsigned app opens without the macOS warning; INSTALL docs explain why the app isn't notarized.
 - `tools/asr_bench.py` + `docs/ASR_BENCHMARK.md`: score candidate speech models on your own meeting.
 
 ## 0.2.2 — 2026-10-05

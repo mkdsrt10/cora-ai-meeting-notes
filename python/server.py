@@ -20,10 +20,11 @@ from pathlib import Path
 # silently failed on every recording whenever Cora wasn't launched from a
 # terminal, with no way to tell from a plain subprocess.run() error. Fixing
 # PATH here, before anything else in this process can shell out, covers
-# every such call for the rest of the process's life.
+# every such call for the rest of the process's life. Appended, not
+# prepended: the release app puts its bundled ffmpeg first on PATH.
 for _brew_bin in ("/opt/homebrew/bin", "/usr/local/bin"):
     if _brew_bin not in os.environ.get("PATH", "").split(os.pathsep):
-        os.environ["PATH"] = _brew_bin + os.pathsep + os.environ.get("PATH", "")
+        os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + _brew_bin
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import credentials  # noqa: E402

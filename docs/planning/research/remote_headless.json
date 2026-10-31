@@ -1,0 +1,222 @@
+{
+ "summary": "Short answer: it can be done, but it doesn't work today, and the gaps are specific.\n\n(1) **Processing.** python/server.py runs fine on its own: it has no Electron dependency, creates its own token, fixes PATH and serves the UI. It can take a recording all the way to notes if two calls are made in order: `voice_memo_pipeline.py --once` (copies the file from inbox/ into recordings/ and creates the DB row), then `POST /api/process-recording {id}` (transcription, speaker labels and LLM notes, run in the request thread). Nothing makes those two calls automatically except Electron's stopRecording path (main.js:714/772 -> runArchivePipelineWithRetry -> diarizeLatestRecording). The repo ships no cron job, plist or file watcher. cron_runner.py is only started by main.js. /api/scan only restarts an optional \"Cora Scanner.app\" LaunchAgent that isn't configured. So even with Electron running, a file dropped into inbox/ waits until the next meeting recording stops. diarizeLatestRecording also processes only the single newest unprocessed row (db.py:463 LIMIT 1), so several uploads in one scan would leave the rest unprocessed.\n\n(2) **Upload.** There is no upload endpoint. do_POST always calls read_json first (http.py:131), which requires application/json and caps bodies at 1 MB (http.py:64-71). Audio upload needs its own branch before that call: stream the body to disk in chunks, then rename it into inbox/.\n\n(3) **Auth.** tailscale serve keeps the browser's Host header. I confirmed this in Tailscale's serve.go: `r.Out.Host = r.In.Host`; it also adds X-Forwarded-Host, X-Forwarded-Proto and X-Forwarded-For. So every remote request gets a 403 \"Forbidden host\" (http.py:40-42). The Origin check would also reject `https://<name>.ts.net`, because it only strips `http://` (http.py:43-46). The only token is a single per-launch token that changes on every start (auth.py:33). Electron sets it as a cookie only for 127.0.0.1, so the phone has no way to get it.\n\n(4) **UI.** The UI half-works at phone width (bottom nav at \u2264820px). But every API call depends on the Electron cookie, and the fallback buttons that run when Electron isn't there would start or stop the Mac Studio's own microphone capture or open Finder on it.\n\n(5) **Phone audio.** Single-track iPhone m4a goes through cleanly:\n- the denoise step and the mixed playback copy are skipped;\n- the mic/system mix is skipped;\n- every segment is labeled \"You\" (or the user's name).\n\nThat's correct for a solo voice note. An in-person conversation recorded on the phone would also come out as all \"You\": the local path has no way to tell voices apart.\n\n**What's missing:**\n- an upload route;\n- a background worker in the server process that archives then processes the specific upload, with a single-flight lock (none exists today);\n- an allowlist for the exact ts.net host and origin;\n- long-lived per-device tokens with scopes and a deny-by-default route list;\n- a small mobile page;\n- a launchd plist;\n- handling for the port clash with Electron.",
+ "facts": [
+  {
+   "claim": "server.py runs headless with no Electron dependency. It adds Homebrew to PATH, refuses non-loopback --host, creates its own token, sanitizes the credentials DB and serves through ThreadingHTTPServer.",
+   "evidence": "python/server.py:24-26, 36-57 (45-46 loopback guard, 47 init_api_token, 50 ThreadingHTTPServer)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Standalone, the token is minted at random unless VOICECOACH_API_TOKEN is set, and it is rewritten to DATA_DIR/.api_token (0600) on every start. It is per-launch and not stable.",
+   "evidence": "python/api/auth.py:26-38",
+   "confidence": "verified"
+  },
+  {
+   "claim": "DATA_DIR resolution matches between Python and Electron: env var first, then ~/voicecoach-desktop if voicecoach.db is there (true for this install, so the repo checkout is the data dir), otherwise Application Support. INBOX_DIR is DATA_DIR/inbox.",
+   "evidence": "python/paths.py:35-46; src/main/paths.js:37-41",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive step (voice_memo_pipeline.run_once) scans voice_memos_source plus INBOX recursively for AUDIO_SUFFIXES (.m4a .mp3 .wav .aiff .aif .mp4 .caf .mov; no .webm/.ogg/.aac). It skips files whose mtime is younger than minimum_age_seconds (default 30, this install's config.json has 5), skips files whose pending row is recording/paused, and dedupes on sha256(resolved path|size|mtime_ns).",
+   "evidence": "python/voice_memo_pipeline.py:34, 45, 80-83, 269-288, 513-553",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Stable-file detection: file_key is re-checked before the copy and the size/mtime snapshot is compared after the copy; a change raises SourceNotReady, which defers the file. If the duration probe fails or the moov atom is missing, the source is renamed to .<name>.corrupted and marked processed. So a stalled in-place upload longer than minimum_age could be archived truncated and then quarantined.",
+   "evidence": "python/voice_memo_pipeline.py:359-379, 577-597",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive step only copies the file and writes metadata with analysis_status='awaiting_diarization'. It does not transcribe. The inbox original is copied, not moved, so inbox/ grows forever. recorded_at is the source file's mtime, so an uploaded file gets the upload time unless the server sets the mtime with os.utime.",
+   "evidence": "python/voice_memo_pipeline.py:364-376, 411-436, 477-485",
+   "confidence": "verified"
+  },
+  {
+   "claim": "process() picks up a pending DB row keyed by path.stem and carries over only archetype, meeting_tool, folder_id, continues_recording_id and notes. An upload endpoint could pre-create a pending row (status 'processing') to show the item at once and tag it, but extra keys such as source/device need a code change.",
+   "evidence": "python/voice_memo_pipeline.py:402-445, 486-496; python/db.py:227-233",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The archive lock (fcntl flock on LOCK_PATH) is taken only in voice_memo_pipeline.main(), not in run_once. cron_runner.py just wraps `voice_memo_pipeline.py --once` with a 900s timeout and log redirection.",
+   "evidence": "python/voice_memo_pipeline.py:601-613; python/cron_runner.py:37-49",
+   "confidence": "verified"
+  },
+  {
+   "claim": "cron_runner.py is only ever started by Electron (PIPELINE_SCRIPT). The repo contains no crontab, plist or file watcher. /api/scan only runs `launchctl kickstart` on an external 'ai.voicecoach.scanner' agent and fails if /Applications/Cora Scanner.app is missing (scanner_app/scanner_launch_agent are null in config.json).",
+   "evidence": "src/main/paths.js:49; src/main.js:680-686; python/api/core.py:150-160; python/api/routes/system.py:21-29; grep for LaunchAgent/plist/crontab found nothing else",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Archive and process are triggered only by Electron's stopRecording(), which calls runArchivePipelineWithRetry. That runs the archive twice, the second time after minimum_age+3 s, and after each pass calls diarizeLatestRecording. There is no periodic scan, so a file dropped in inbox/ sits there until the next meeting recording stops, even with Electron running.",
+   "evidence": "src/main.js:688-695, 714, 772; no other spawn of PIPELINE_SCRIPT in src/main.js",
+   "confidence": "verified"
+  },
+  {
+   "claim": "diarizeLatestRecording does GET /api/unprocessed-recording and then POST /api/process-recording. The query returns only the newest archived row with no diarization model (LIMIT 1, ORDER BY recorded_at DESC), so several new files in one pass leave the others unprocessed.",
+   "evidence": "src/main.js:607-656; python/api/routes/capture.py:17-20; python/db.py:453-469",
+   "confidence": "verified"
+  },
+  {
+   "claim": "main.js assumes the default minimum_age is 5 when config lacks the key, but Python's default is 30. On a config without the key the retry pass (8 s) would miss the file.",
+   "evidence": "src/main.js:671-678 vs python/voice_memo_pipeline.py:45",
+   "confidence": "verified"
+  },
+  {
+   "claim": "POST /api/process-recording runs pipeline.runner.process_recording_local synchronously in the HTTP request thread (local by default; cloud only with an explicit engine=cloud/gemini/vertex). Nothing stops two concurrent processing runs, so a UI reprocess and an automatic trigger could load two MLX models.",
+   "evidence": "python/api/routes/recordings.py:208-251; python/pipeline/runner.py:98-113; python/api/core.py:125 (DATA_LOCK is the only lock, for coach data)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Processing progress is exposed per recording through .pipeline_progress.json and GET /api/recording/progress. It resolves live ids through live_recording_id (= inbox file stem), so an upload's server-chosen stem works as a polling handle before and after archiving.",
+   "evidence": "python/pipeline/common.py:36-50; python/api/routes/recordings.py:91-108; python/voice_memo_pipeline.py:419; python/db.py:384-390",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The local pipeline makes no outbound calls by default. Cloud ASR is forced to local under lockdown, tracing is off under lockdown, and the Gemini client and LLM providers are gated by policy.",
+   "evidence": "python/pipeline/cloud_asr.py:32-36, 52; python/tracing.py:22-24; python/credentials.py:439-440, 670-671; python/policy.py:24-49",
+   "confidence": "verified"
+  },
+  {
+   "claim": "No upload, multipart or binary-ingest route exists. Inbox writes happen only through Mac-side capture (dual-capture writing INBOX/<id>.mov).",
+   "evidence": "grep of python/api/routes: capture.py:68-91, 103-123 are the only INBOX writers; logs.py:118-157 'upload' is an outbound log bundle",
+   "confidence": "verified"
+  },
+  {
+   "claim": "do_POST calls read_json() before routing. read_json requires Content-Type application/json and rejects Content-Length over 1,000,000, so a binary or multipart upload can't reach any POST handler without changing http.py. Only GET and POST are implemented; OPTIONS/PUT get the BaseHTTPRequestHandler 501, which also means CORS preflights fail. No socket timeout is set on Handler.",
+   "evidence": "python/api/http.py:64-71, 125-139",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The venv is Python 3.10.12 (requires-python >=3.10). cgi is deprecated there and removed in 3.13, so a raw-body upload (Content-Type audio/*) is simpler and more future-proof than multipart.",
+   "evidence": ".venv/bin/python --version; pyproject.toml:7",
+   "confidence": "verified"
+  },
+  {
+   "claim": "authorize() rules: Host must be exactly 127.0.0.1:<port> or localhost:<port>. If an Origin is present, after stripping 'http://' it must be in that same set. Paths outside /api/ and /media are public (static UI). /api/health is public. Everything else needs X-VC-Token or the vc_token cookie, compared with hmac.compare_digest against the single API_TOKEN.",
+   "evidence": "python/api/http.py:31-53; python/api/auth.py:20-23, 41-46",
+   "confidence": "verified"
+  },
+  {
+   "claim": "tailscale serve keeps the inbound Host header for TCP backends, so Cora gets Host <machine>.<tailnet>.ts.net and returns 403 at http.py:40-42. Serve sets X-Forwarded-Host, X-Forwarded-Proto=https (TLS) and X-Forwarded-For=<peer tailnet IP>. It always strips client-supplied Tailscale-User-* headers and sets Tailscale-User-Login/Name only for untagged tailnet user nodes, and sets Tailscale-Funnel-Request: ?1 for Funnel traffic.",
+   "evidence": "https://raw.githubusercontent.com/tailscale/tailscale/main/ipn/ipnlocal/serve.go (r.Out.Host = r.In.Host; addProxyForwardedHeaders; addTailscaleIdentityHeaders); https://tailscale.com/kb/1312/serve",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A phone browser's Origin will be https://<machine>.<tailnet>.ts.net with no port. http.py strips only 'http://' and compares against host:port, so it fails with 'Forbidden origin'.",
+   "evidence": "python/api/http.py:43-46",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Electron sets the token cookie only for http://127.0.0.1:<port> (httpOnly, sameSite strict, no Secure). The UI's api() helper sends no token header and relies on that cookie. A phone browser has neither, so every /api call returns 401.",
+   "evidence": "src/main.js:1005-1011; src/main/api-client.js:10-18; src/ui/web/js/core.js:33-38",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The headless server and Electron can't share port 8765. Electron always starts its own server.py, and verifyOwnServer exits the app with an error dialog if the port answers 401/403 to its token. Both also write the same DATA_DIR/.api_token.",
+   "evidence": "src/main.js:994; src/main/api-client.js:8, 87-104; python/api/auth.py:34-37",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The Electron-only bridge (window.electronAPI) covers recording state/IPC, start/stop/pause/resume, screenshots, audio-level meters, permission checks and floater controls.",
+   "evidence": "src/preload.js:3-22",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Without electronAPI, the UI falls back to HTTP endpoints that control capture on the Mac Studio (dual-capture/pkill): /api/recording/stop, /pause, /resume, /trigger-start, /screenshot. From a phone these would start or stop the Mac's microphone and screen capture, so remote principals must be denied these routes.",
+   "evidence": "src/ui/web/js/recording.js:45-49, 77-78, 116-117; src/ui/web/js/detail-actions.js:13-23, 36-41, 305-317; python/api/routes/capture.py:62-123",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Other Mac-local side effects reachable from the UI: /api/open-folder and /api/open-recording-folder run `open` on the server Mac.",
+   "evidence": "python/api/routes/system.py:32-42",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The live recording banner and audio meters work only through IPC; the UI never polls for them, so on a phone they never show.",
+   "evidence": "src/ui/web/js/recording.js:55-128, 141-143",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The UI has some phone handling: a viewport meta tag, \u2264820px turns the sidebar into a bottom nav and stacks grids, \u2264540px goes to single-column metrics. The recording-detail header still packs many desktop actions into one row, and the delivery timeline keeps a 540px minimum column with inner scrolling. Probably usable for reading, but cluttered, with desktop-only actions. Not checked visually.",
+   "evidence": "src/ui/web/index.html:7, 257-270; src/ui/web/styles.css:623-657, 923",
+   "confidence": "likely"
+  },
+  {
+   "claim": "index.html's CSP (connect-src 'self', media-src 'self' blob:, form-action 'none') allows same-origin fetch and blob playback but blocks native form posts. A mobile recorder page would use fetch with a Blob body. getUserMedia/MediaRecorder need a secure context, which tailscale serve's HTTPS provides.",
+   "evidence": "src/ui/web/index.html:6",
+   "confidence": "likely"
+  },
+  {
+   "claim": "/api/dashboard returns the full recordings list plus storage stats, credential provider status (Keychain lookup) and AI engine info. That is too broad for a phone 'read' scope; a narrow list endpoint is needed.",
+   "evidence": "python/api/views.py:501-531",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Media is served with Cache-Control 'public, max-age=3600', so meeting audio would be cached by the phone browser. JSON uses no-store.",
+   "evidence": "python/api/http.py:60, 99; python/api/routes/media.py:13-19",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Single-track archive: clean_track_audio measures track 1, gets -100 dB, returns False, and the file is copied plain (no denoise or highpass for phone audio). build_playback_mix returns False when there are fewer than 2 streams, so the player serves audio.m4a directly.",
+   "evidence": "python/voice_memo_pipeline.py:152-155, 386-393, 208-209; python/api/views.py:306-309, 373",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Single-track transcription: ensure_mixed_audio returns the original path when stream_count < 2. Silence detection and chunked Whisper then run on it as usual, and part discovery only looks for audio_part*.mov.",
+   "evidence": "python/pipeline/audio.py:191-202; python/pipeline/transcribe.py:219-240; python/pipeline/runner.py:100-130",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Single-track speaker attribution: track_mean_volume(track 1) fails and returns -100, so guess_speaker_from_tracks returns 'You' whenever the mic is above -55 dB, and None otherwise, which falls back to pending_self_name or 'You'. With no AX timeline or participants file, the remote-speaker step does nothing. Every segment of a phone recording becomes 'You': right for solo notes, wrong for in-person multi-speaker recordings, because the local path does no voice-based diarization. It also starts one wasted ffmpeg process per segment.",
+   "evidence": "python/pipeline/speakers.py:101-107, 144-157; python/pipeline/audio.py:98-116; python/pipeline/runner.py:172-199",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Any phone file with 2 or more audio streams would be read as track 0 = mic, track 1 = system by clean_track_audio, ensure_mixed_audio and guess_speaker_from_tracks, which would mislabel speakers and apply mic-ducking.",
+   "evidence": "python/voice_memo_pipeline.py:163-178; python/pipeline/audio.py:201-229; python/pipeline/speakers.py:149-157",
+   "confidence": "verified"
+  },
+  {
+   "claim": "In this install voice_memos_source equals the inbox, so the first-run baseline code would treat inbox files as an existing library and skip them if scan state were ever reset. This contradicts the comment that inbox files are never baselined.",
+   "evidence": "config.json voice_memos_source=inbox; python/voice_memo_pipeline.py:516-539",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The Keychain lookup (credentials.get_public_status) and Metal/MLX probably need the server to run as a LaunchAgent in the logged-in GUI session, not as a system LaunchDaemon. The Mac Studio would also need to stay logged in and not sleep.",
+   "evidence": "python/api/views.py:504-506 (Keychain shell-out comment); macOS launchd domain behavior",
+   "confidence": "likely"
+  },
+  {
+   "claim": "Tailscale HTTPS certificates are publicly issued, so the machine and tailnet names (e.g. macstudio.tailXXXX.ts.net) appear in public Certificate Transparency logs.",
+   "evidence": "Tailscale HTTPS/serve docs (general knowledge; not re-fetched)",
+   "confidence": "likely"
+  }
+ ],
+ "design_recommendations": [
+  "Keep binding to 127.0.0.1 (server.py:45-46 stays) and expose only through `tailscale serve --https=443 http://127.0.0.1:8765`. Never use Funnel, and reject any request carrying the `Tailscale-Funnel-Request` header. Don't bind to the 100.x address.",
+  "Add remote access as a separate, off-by-default switch (config `remote_access: {enabled, hosts:[\"<machine>.<tailnet>.ts.net\"]}`). Force it off when policy.lockdown_enabled() unless an admin-only env/MDM flag allows it, matching policy.py's pattern. Show it in Settings with a list of paired devices.",
+  "http.py authorize(): build the allowed Host set as the existing loopback host:port pairs plus the exact configured ts.net hosts (no wildcards). Compare Origin against full origins ({http://127.0.0.1:8765, http://localhost:8765} plus https://<ts host>) instead of removeprefix('http://'). For remote-host requests also require X-Forwarded-Proto == https, and as defense in depth require Tailscale-User-Login == the configured owner login. Treat these headers as hints only: any local process can reach loopback and forge them, so a token is always required.",
+  "Per-device tokens: add a `devices` table (id, name, sha256(token), scopes, created_at, last_seen_at, last_ip from X-Forwarded-For, revoked_at). Owner/Electron keeps the full-power per-launch API_TOKEN. Device tokens resolve to a principal with scopes. Pair from the Mac UI with a short-lived single-use code (QR) that the phone exchanges via POST for a cookie `vc_dev=<token>; Secure; HttpOnly; SameSite=Strict; Path=/`. Never put long-lived tokens in URLs, because log_message prints request lines (http.py:21-22). iOS Shortcuts can send the same token as the X-VC-Token header.",
+  "Scope enforcement: extend router.route() (router.py:16-26) with an explicit `scopes=` set and deny by default for device principals. Suggested scopes: `upload` = POST /api/mobile/upload, GET /api/mobile/uploads and progress for the device's own items. `read` = a narrow GET /api/mobile/recordings, GET /api/recording, and optionally GET /media/<id>/audio.* served with `Cache-Control: private, no-store`. Never grant devices: settings/credentials/onboarding, recording/trigger-start|stop|pause|resume|screenshot, open-folder/open-recording-folder, scan, logs/bundle, models/download, cloud/*, dataset/export, people/* writes, re-summarize with cloud providers, or /api/dashboard.",
+  "Upload route: handle it in do_POST before read_json (or in a new do_PUT), with a raw body (Content-Type audio/mp4|audio/x-m4a|audio/aac|audio/wav|audio/webm) instead of multipart, since multipart is a CORS 'simple' type and cgi is deprecated. Require Content-Length, reject chunked and anything over a cap (e.g. 500 MB), and stream in 64 KB chunks to INBOX/.upload-<uuid>.part (that suffix is ignored by discover()). fsync, ffprobe-validate (duration > 0, exactly one audio stream; otherwise downmix to mono with ffmpeg), os.utime to the client-supplied recorded-at time, then os.replace to a server-generated stem such as `phone_<ts>_<uuid8>.m4a`. Don't use the phone's filename, which can contain PHI, in folder names. Optionally pre-create a pending row (status 'processing', archetype 7 'Solo Ideation & Voice Memo') keyed by that stem so it appears immediately. Return 202 with the stem for polling.",
+  "Background worker inside server.py: one daemon thread with a queue plus a process-wide single-flight lock. On enqueue or every ~60 s: take LOCK_PATH flock and call voice_memo_pipeline.run_once(), then call process_recording_local() for each archived row with analysis_status awaiting_diarization and no diarization model, by id, oldest first. Don't use db.get_unprocessed_recording's LIMIT 1. Write the same lock around /api/process-recording so UI reprocessing and the worker can't run at the same time. This also fixes today's gap where inbox drops sit until the next meeting.",
+  "Electron coexistence: on the Mac Studio, either run only the headless server under a LaunchAgent (gui/<uid>, KeepAlive, explicit VOICECOACH_DATA_DIR, logs to LOGS_DIR, `pmset` to prevent sleep), or teach Electron to attach to an already-running owned server (read 0600 .api_token, verify, skip spawning) instead of exiting at api-client.js:87-104. Avoid two servers on different ports sharing one DB and pipeline.",
+  "Phone recording client: a separate minimal page (e.g. /m/index.html with its own strict CSP) that records with MediaRecorder (iOS Safari gives audio/mp4 AAC, saved as .m4a) and uploads the Blob with fetch and retry. Keep the blob in IndexedDB until a 2xx reply so a dropped connection doesn't lose a note. Show a recent-notes list and an enhanced_notes view from the narrow read endpoint. For sharing existing Voice Memos, offer an iOS Shortcut ('Get Contents of URL', POST, file body, X-VC-Token header) for the share sheet. If any non-Safari recorder is supported, transcode .webm/.ogg to .m4a on upload or add the suffixes to AUDIO_SUFFIXES in both voice_memo_pipeline.py:34 and diarization.py:29.",
+  "Pipeline tweaks for phone audio: skip guess_speaker_from_tracks when audio_stream_count == 1 (saves two ffmpeg processes per segment) and label segments with the owner's name. Optionally run a mono denoise/highpass pass for single-track files, since clean_track_audio currently skips them. Delete or move the inbox copy after a successful archive so uploads aren't stored twice. Record source='mobile_upload' and device_id in metadata, which needs a passthrough in process() at voice_memo_pipeline.py:402-445."
+ ],
+ "risks": [
+  "SOC 2 control gap: this adds a network-reachable surface to an app whose security model assumes loopback only (auth.py:11-19). It needs change-management sign-off, device-access review (paired-device list, revocation), an audit log of remote access (device id, X-Forwarded-For, Tailscale-User-Login, endpoint, recording id) and a documented policy decision on how it interacts with enterprise_lockdown, which today covers outbound traffic only (policy.py:1-9).",
+  "PHI/CUI moving to the phone: 'read' scope puts customer meeting transcripts and audio on a mobile device. That requires a device passcode, ideally MDM, and no-store caching. Media currently goes out as 'public, max-age=3600' (http.py:99). For regulated customers' data, consider limiting read scope to recordings uploaded by that device.",
+  "If remote principals inherit today's full-power token model, a phone or a stolen device token could start or stop the Mac Studio's mic and screen capture (capture.py:62-123), change credentials and settings, run `open` on the Mac (system.py:32-42), or trigger the outbound log upload/cloud sync. Deny by default per route is mandatory.",
+  "Tailscale identity headers and X-Forwarded-For are trustworthy only because Serve strips client copies; any local process can connect to 127.0.0.1:8765 and forge them. They must never replace token auth.",
+  "Accidentally enabling Tailscale Funnel would publish the endpoint to the internet. Funnel traffic carries no identity headers but does carry Tailscale-Funnel-Request, so explicitly reject it. Tailnet ACLs/grants should allow only the owner's phone to reach the Mac Studio on 443.",
+  "Tailscale's control plane and DERP relays are third-party infrastructure (the traffic itself stays end-to-end encrypted), and ts.net certificates put the machine and tailnet names in public CT logs. For DoD/HIPAA deployments this may need approval or a self-hosted control server (Headscale).",
+  "In-place uploads into inbox/ with minimum_age_seconds=5 could archive a truncated file during a stalled cellular upload, which then gets quarantined as .corrupted while the upload is still writing. Temp-file plus atomic rename is required.",
+  "process_recording_local has no concurrency guard. A phone-triggered run alongside a UI reprocess or an Electron-triggered run could load two MLX models at once and race on the same folder or DB rows. Running Electron and a headless server together makes this worse and fails outright on port 8765.",
+  "Long synchronous processing over HTTP (recordings.py:228-248) will outlive iOS Safari's background/connection limits. The server keeps working, but the client gets no result, so polling /api/recording/progress is required.",
+  "Multi-speaker in-person recordings from the phone will all be attributed to 'You'. Notes and action-item owners may be wrong, and the only diarizing path is cloud Gemini, which is blocked under lockdown and sends audio off-device.",
+  "Phone filenames (e.g. a contact's name) would leak into recording folder names and logs through safe_name(path.stem) (voice_memo_pipeline.py:365) unless the server generates the stem.",
+  "Error responses return str(exc), which can expose local filesystem paths to remote clients (http.py:120-123, 136-139). Return generic errors to device principals.",
+  "No socket timeout on Handler, and ThreadingHTTPServer starts one thread per connection. A slow or stuck upload holds a thread indefinitely. Set Handler.timeout and a per-device rate limit."
+ ]
+}

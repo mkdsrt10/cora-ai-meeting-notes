@@ -107,48 +107,19 @@ signal(SIGTERM) { _ in
     exit(0)
 }
 
-// Regex patterns to identify speaking indicators across meeting apps
-let speakingRegex = try! NSRegularExpression(
-    pattern: #"(?:(?:speaking:\s*|is speaking|speaking\b)(.*))|(?:^(.*?)\s*\((?:is\s*)?speaking\))"#,
-    options: [.caseInsensitive]
-)
-
 func findSpeakingInText(_ text: String) -> String? {
-    let lower = text.lowercased()
-
-    // Zoom pattern: "<Name>, Computer audio unmuted, Video off, active speaker"
-    if lower.contains("active speaker") {
-        let parts = text.split(separator: ",")
-        if let first = parts.first {
-            let candidate = String(first).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !candidate.isEmpty && candidate.count < 50 {
-                return candidate
-            }
-        }
-    }
-
-    // Google Meet / Teams patterns: "<Name> is speaking" or "<Name> (speaking)"
-    if lower.contains("speaking") {
-        let cleaned = text.replacingOccurrences(of: "(speaking)", with: "", options: .caseInsensitive)
-                          .replacingOccurrences(of: "is speaking", with: "", options: .caseInsensitive)
-                          .replacingOccurrences(of: "speaking:", with: "", options: .caseInsensitive)
-                          .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !cleaned.isEmpty && cleaned.count < 50 && !cleaned.contains("\n") {
-            return cleaned
-        }
-    }
-
-    let nsText = text as NSString
-    let matches = speakingRegex.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length))
-    for match in matches {
-        for i in 1...match.numberOfRanges - 1 {
-            let r = match.range(at: i)
-            if r.location != NSNotFound {
-                let candidate = nsText.substring(with: r).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !candidate.isEmpty && candidate.count < 50 {
-                    return candidate
-                }
-            }
+    let patterns = [
+        #"^(.+?),.*\bactive speaker\b"#,
+        #"^(.+?)\s+is speaking[.!]?$"#,
+        #"^(.+?)\s*\((?:is\s+)?speaking\)$"#,
+        #"^speaking:\s*(.+)$"#,
+    ]
+    for pattern in patterns {
+        if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+           let range = Range(match.range(at: 1), in: text) {
+            let name = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if isValidPersonName(name) { return name }
         }
     }
     return nil
@@ -175,6 +146,10 @@ func isValidPersonName(_ text: String) -> Bool {
     if trimmed.rangeOfCharacter(from: .decimalDigits) != nil { return false }
     
     let lower = trimmed.lowercased()
+    if ["participant", "unknown", "someone", "you", "everyone"].contains(lower) { return false }
+    let uiWords = Set(["video", "audio", "settings", "microphone", "camera", "mute", "unmute", "share", "recording"])
+    let words = Set(lower.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty })
+    if !words.isDisjoint(with: uiWords) { return false }
     let badTokens = [
         "notetaker", "note taker", "meeting notes", "tldv", "read.ai", "otter.ai", "otter", "fireflies",
         "fathom", "granola", "fellow", "airgram", "tactiq", "avoma", "supernormal", "bluedot", "meetgeek",
@@ -189,7 +164,7 @@ func isValidPersonName(_ text: String) -> Bool {
 }
 
 func extractParticipantName(_ text: String) -> String? {
-    if text.contains("audio") || text.contains("Video") || text.contains("speaker") {
+    if text.contains(",") && (text.contains("audio") || text.contains("Video") || text.contains("speaker")) {
         let parts = text.split(separator: ",")
         if let first = parts.first {
             let name = String(first).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -205,6 +180,12 @@ func extractParticipantName(_ text: String) -> String? {
         if isValidPersonName(name) {
             return name
         }
+    }
+    if let regex = try? NSRegularExpression(pattern: #"^View (.+?)(?:['’]s)? profile$"#, options: [.caseInsensitive]),
+       let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+       let range = Range(match.range(at: 1), in: text) {
+        let name = String(text[range])
+        if isValidPersonName(name) { return name }
     }
     // Google Meet: "More options for Jane Doe"
     if text.hasPrefix("More options for ") {
@@ -326,6 +307,10 @@ func traverseElement(_ element: AXUIElement, depth: Int = 0, appName: String, du
             }
             if activeSpeaker == nil, let speaker = findSpeakingInText(strVal) {
                 activeSpeaker = speaker
+                if isValidPersonName(speaker) && !knownParticipants.contains(speaker) {
+                    knownParticipants.insert(speaker)
+                    saveParticipantsIfChanged()
+                }
             }
         }
     }
@@ -402,53 +387,224 @@ func extractMeetingTitle(from raw: String, appName: String) -> String? {
     return nil
 }
 
+var browserCaptureWarnings: [String: String] = [:]
+
+func captureStatusURL() -> URL? {
+    guard let participantFile = participantsFile else { return nil }
+    if participantFile.path.hasSuffix("_participants.json") {
+        return URL(fileURLWithPath: participantFile.path.replacingOccurrences(of: "_participants.json", with: "_capture_status.json"))
+    }
+    return participantFile.deletingLastPathComponent().appendingPathComponent("capture_status.json")
+}
+
+func recordBrowserCapture(_ browser: String, errorCode: Int?) {
+    let message: String
+    if let code = errorCode {
+        switch code {
+        case 12:  // Chromium: "Executing JavaScript through AppleScript is turned off"
+            message = "Participant names unavailable in \(browser): turn on View › Developer › Allow JavaScript from Apple Events in \(browser). Speaker turns are still recorded."
+        case -1743:  // errAEEventNotPermitted
+            message = "Participant names unavailable in \(browser): allow Cora under System Settings › Privacy & Security › Automation › \(browser)."
+        default:
+            message = "Browser meeting capture unavailable in \(browser) (AppleScript \(code)). Accessibility capture is still attempted."
+        }
+    } else {
+        message = ""
+    }
+    guard browserCaptureWarnings[browser] != message else { return }
+    browserCaptureWarnings[browser] = message
+    if !message.isEmpty { print("CAPTURE_WARNING: \(message)"); fflush(stdout) }
+    let warnings = browserCaptureWarnings.values.filter { !$0.isEmpty }.sorted()
+    if let url = captureStatusURL(), let data = try? JSONEncoder().encode(warnings) {
+        try? data.write(to: url, options: .atomic)
+    }
+}
+
+// Raw JS avoids the previous nested newline/selector escaping errors.
+let googleMeetSnapshotJS = #"""
+(() => {
+    const names = new Set();
+    const speaking = new Set();
+    const clean = value => (value || '').trim();
+    const explicitName = label => {
+        const match = clean(label).match(/^More options for (.+)$/i);
+        return match ? match[1].trim() : '';
+    };
+    const tileName = tile => {
+        if (!tile) return '';
+        const control = tile.querySelector('[aria-label^="More options for "]');
+        const explicit = explicitName(control && control.getAttribute('aria-label'));
+        if (explicit) return explicit;
+        const name = tile.getAttribute('data-self-name') || tile.getAttribute('data-participant-name');
+        if (name) return clean(name);
+        return clean((tile.innerText || '').split(/\n/)[0]);
+    };
+    // Slack in a browser: accept only a huddle dialog/container with a leave
+    // control. A DM tab title and message authors are not call participants.
+    const host = typeof location !== 'undefined' ? location.hostname : 'meet.google.com';
+    const slack = host === 'app.slack.com' || host.endsWith('.slack.com');
+    // Zoom web client: names from video tiles and the participants panel;
+    // the active-speaker tile gives the current speaker.
+    if (host === 'zoom.us' || host.endsWith('.zoom.us')) {
+        const zoomName = el => clean(el && el.innerText).replace(/\s*\((?:host|co-host|me|guest)[^)]*\)\s*$/i, '');
+        document.querySelectorAll('.participants-item__display-name, .video-avatar__avatar-name, [class*="avatar-name"]').forEach(el => {
+            const name = zoomName(el);
+            if (name && name.length <= 60) names.add(name);
+        });
+        const activeTile = document.querySelector('.speaker-active-container__video-frame .video-avatar__avatar-name, [class*="speaker-active"] [class*="avatar-name"]');
+        if (activeTile && zoomName(activeTile)) { names.add(zoomName(activeTile)); speaking.add(zoomName(activeTile)); }
+        const live = !!document.querySelector('.footer__leave-btn, button[aria-label^="Leave"]');
+        return JSON.stringify({active: live, participants: [...names], speaking_names: [...speaking], meeting_title: document.title});
+    }
+    let scope = document;
+    if (slack) {
+        const roots = [...document.querySelectorAll('[role="dialog"], [data-qa*="huddle"], [data-testid*="huddle"]')];
+        scope = roots.find(root => /huddle/i.test(root.getAttribute('aria-label') || root.getAttribute('data-qa') || root.getAttribute('data-testid') || '') &&
+            [...root.querySelectorAll('button, [role="button"]')].some(button => /^(?:leave|end)(?: the)? huddle/i.test(button.getAttribute('aria-label') || button.innerText || '')));
+        if (!scope) return JSON.stringify({active: false, participants: [], speaking_names: [], meeting_title: ''});
+        scope.querySelectorAll('[aria-label]').forEach(el => {
+            const label = clean(el.getAttribute('aria-label'));
+            const match = label.match(/^View (.+?)(?:['’]s)? profile$/i);
+            if (match) names.add(match[1].trim());
+        });
+    }
+    scope.querySelectorAll('[data-participant-id]').forEach(tile => {
+        const name = tileName(tile);
+        if (name && name.length <= 60 && !name.includes(':')) names.add(name);
+    });
+    scope.querySelectorAll('[aria-label^="More options for "]').forEach(el => {
+        const name = explicitName(el.getAttribute('aria-label'));
+        if (name) names.add(name);
+    });
+    scope.querySelectorAll('[aria-label]').forEach(el => {
+        const label = clean(el.getAttribute('aria-label'));
+        const match = label.match(/^(.+?) is speaking[.!]?$/i) ||
+                      label.match(/^(.+?)\s*\((?:is\s+)?speaking\)$/i) ||
+                      label.match(/^speaking:\s*(.+)$/i);
+        if (match) { names.add(match[1].trim()); speaking.add(match[1].trim()); }
+        else if (/^(?:is )?speaking$/i.test(label)) {
+            const name = tileName(el.closest('[data-participant-id]'));
+            if (name) { names.add(name); speaking.add(name); }
+        }
+    });
+    const title = document.querySelector('[data-meeting-title], [data-call-title]');
+    const active = [...scope.querySelectorAll('button, [role="button"]')].some(button => /^(?:leave|end)(?: the)? (?:call|huddle)/i.test(button.getAttribute('aria-label') || button.innerText || ''));
+    return JSON.stringify({active, participants: [...names], speaking_names: [...speaking], meeting_title: title ? title.innerText.trim() : document.title});
+})()
+"""#
+
 func scanBrowserGoogleMeet(browserName: String) {
+    let escapedJS = googleMeetSnapshotJS.replacingOccurrences(of: "\\", with: "\\\\")
+                                         .replacingOccurrences(of: "\"", with: "\\\"")
+                                         .replacingOccurrences(of: "\n", with: " ")
     let scriptText = """
     tell application "\(browserName)"
-        set js to "(() => { const names = new Set(); document.querySelectorAll('[data-participant-id]').forEach(el => { const txt = (el.innerText || '').split('\\\\n')[0].trim(); if (txt && txt.length < 40 && !txt.includes(':')) names.add(txt); }); document.querySelectorAll('[aria-label*=\\\"More options for \\\"]').forEach(el => { const label = el.getAttribute('aria-label') || ''; const name = label.replace('More options for ', '').trim(); if (name) names.add(name); }); let speaking = []; document.querySelectorAll('[aria-label*=\\\"speaking\\\"], [aria-label*=\\\"Speaking\\\"]').forEach(el => { speaking.push(el.getAttribute('aria-label')); }); const meetTitleEl = document.querySelector('div[data-meeting-title]') || document.querySelector('[data-call-title]'); const callTitle = meetTitleEl ? meetTitleEl.innerText.trim() : ''; return JSON.stringify({participants: Array.from(names), speaking: speaking, meeting_title: callTitle || document.title}); })()"
+        set js to "\(escapedJS)"
+        set snapshots to ""
+        -- A window without tabs (PWA, devtools, picture-in-picture) or one tab
+        -- refusing JS must not abort the whole scan, hence the nested trys.
         repeat with w in windows
-            repeat with t in tabs of w
-                if (URL of t) contains "meet.google.com" then
-                    return execute t javascript js
-                end if
-            end repeat
+            try
+                repeat with t in tabs of w
+                    set u to URL of t
+                    if u starts with "https://meet.google.com/" or u starts with "https://app.slack.com/" or u contains "zoom.us/wc/" then
+                        try
+                            set snapshots to snapshots & (execute t javascript js) & linefeed
+                        on error number n
+                            set snapshots to snapshots & "ERR:" & n & linefeed
+                        end try
+                    end if
+                end repeat
+            end try
         end repeat
-        return "{}"
+        return snapshots
     end tell
     """
     guard let appleScript = NSAppleScript(source: scriptText) else { return }
     var error: NSDictionary?
     let result = appleScript.executeAndReturnError(&error)
-    guard let jsonStr = result.stringValue, jsonStr.count > 5,
-          let data = jsonStr.data(using: .utf8),
-          let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+    let lines = (result.stringValue ?? "").components(separatedBy: .newlines)
+    let tabErrors = lines.filter { $0.hasPrefix("ERR:") }.compactMap { Int($0.dropFirst(4)) }
+    let scriptError = error.map { $0["NSAppleScriptErrorNumber"] as? Int ?? 0 }
+    let anySnapshot = lines.contains { $0.hasPrefix("{") }
+    recordBrowserCapture(browserName, errorCode: scriptError ?? (anySnapshot ? nil : tabErrors.first))
+    guard error == nil else { return }
+    let snapshots = lines.compactMap { line -> [String: Any]? in
+        guard let data = line.data(using: .utf8) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+    for parsed in snapshots where parsed["active"] as? Bool == true {
 
     if let title = parsed["meeting_title"] as? String, let cleanTitle = extractMeetingTitle(from: title, appName: browserName) {
         emitMeetingTitleOnce(cleanTitle)
     }
-
+    let ownName = ProcessInfo.processInfo.environment["CORA_SELF_NAME"] ?? ""
+    func resolveName(_ raw: String) -> String {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.lowercased() == "you" && !ownName.isEmpty ? ownName : value
+    }
     if let parts = parsed["participants"] as? [String] {
         for p in parts {
-            let clean = p.trimmingCharacters(in: .whitespacesAndNewlines)
+            let clean = resolveName(p)
             if isValidPersonName(clean) && !knownParticipants.contains(clean) {
                 knownParticipants.insert(clean)
                 saveParticipantsIfChanged()
             }
         }
     }
+    if let speaking = parsed["speaking_names"] as? [String], speaking.count == 1 {
+        let name = resolveName(speaking[0])
+        if isValidPersonName(name) { updateSpeaker(name, from: "Browser meeting") }
+    }
+}
+}
 
-    if let speaking = parsed["speaking"] as? [String], let firstSpeaking = speaking.first {
-        if let spk = findSpeakingInText(firstSpeaking) {
-            updateSpeaker(spk, from: "Google Meet")
+func hasLeaveHuddleControl(_ element: AXUIElement, depth: Int = 0) -> Bool {
+    if depth > 28 { return false }
+    for attr in [kAXTitleAttribute, kAXDescriptionAttribute] {
+        var value: AnyObject?
+        AXUIElementCopyAttributeValue(element, attr as CFString, &value)
+        if let text = value as? String {
+            let lower = text.lowercased()
+            if lower.contains("leave huddle") || lower.contains("leave the huddle") || lower.contains("end huddle") { return true }
         }
     }
+    var value: AnyObject?
+    AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value)
+    return (value as? [AXUIElement] ?? []).contains { hasLeaveHuddleControl($0, depth: depth + 1) }
+}
+
+func findSlackHuddleRoot(_ element: AXUIElement, depth: Int = 0) -> AXUIElement? {
+    if depth > 28 { return nil }
+    var labels: [String] = []
+    for attr in [kAXTitleAttribute, kAXDescriptionAttribute] {
+        var value: AnyObject?
+        if AXUIElementCopyAttributeValue(element, attr as CFString, &value) == .success, let text = value as? String {
+            labels.append(text.lowercased())
+        }
+    }
+    var roleValue: AnyObject?
+    AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleValue)
+    let role = roleValue as? String ?? ""
+    if ["AXGroup", "AXWindow", "AXDialog", "AXWebArea"].contains(role),
+       labels.contains(where: { $0.contains("huddle") && !$0.contains("start a huddle") && !$0.contains("start huddle") && !$0.contains("huddle history") }), hasLeaveHuddleControl(element) {
+        return element
+    }
+    var childrenValue: AnyObject?
+    if AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenValue) == .success,
+       let children = childrenValue as? [AXUIElement] {
+        for child in children {
+            if let root = findSlackHuddleRoot(child, depth: depth + 1) { return root }
+        }
+    }
+    return nil
 }
 
 func scanMeetingApps() {
     let targetAppNames = ["Brave Browser", "Google Chrome", "Arc", "Safari", "Microsoft Edge", "zoom.us", "Microsoft Teams", "Slack"]
     let running = NSWorkspace.shared.runningApplications.filter {
         guard let name = $0.localizedName else { return false }
-        return targetAppNames.contains(where: { name.localizedCaseInsensitiveContains($0) })
+        return targetAppNames.contains(where: { name.localizedCaseInsensitiveCompare($0) == .orderedSame })
     }
 
     let now = elapsedSeconds()
@@ -496,24 +652,20 @@ func scanMeetingApps() {
                                 appName.localizedCaseInsensitiveContains("Edge") ||
                                 appName.localizedCaseInsensitiveContains("Safari")
 
+                let slack = appName == "Slack" || (isBrowser && title.localizedCaseInsensitiveContains("Slack"))
+                if slack {
+                    if let huddle = findSlackHuddleRoot(win),
+                       let speaker = traverseElement(huddle, appName: appName, dumping: dumpingThisPass) {
+                        updateSpeaker(speaker, from: appName)
+                    }
+                    if dumpingThisPass { print("[AX-DUMP] Slack huddle capture: inspected active huddle containers in \(appName)") }
+                    continue
+                }
                 let isMeetingWindow: Bool
                 if isBrowser {
-                    // In browsers, only scan if it is an actual Google Meet window
                     isMeetingWindow = title.localizedCaseInsensitiveContains("Meet")
                 } else if appName.localizedCaseInsensitiveContains("zoom") {
-                    // In Zoom app, only scan actual Zoom Meeting windows
-                    isMeetingWindow = title.localizedCaseInsensitiveContains("Zoom Meeting") || title.localizedCaseInsensitiveContains("Meeting")
-                } else if appName.localizedCaseInsensitiveContains("slack") {
-                    // Slack huddles take place in DM or channel windows (e.g. "Jane Doe - Acme Inc - Slack")
-                    isMeetingWindow = true
-                    let parts = title.components(separatedBy: " - ")
-                    if let first = parts.first {
-                        let cleanName = first.replacingOccurrences(of: " (DM)", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                        if isValidPersonName(cleanName) && !knownParticipants.contains(cleanName) {
-                            knownParticipants.insert(cleanName)
-                            saveParticipantsIfChanged()
-                        }
-                    }
+                    isMeetingWindow = title.localizedCaseInsensitiveContains("Meeting")
                 } else {
                     isMeetingWindow = title.localizedCaseInsensitiveContains("Huddle") || title.localizedCaseInsensitiveContains("Call")
                 }
@@ -532,6 +684,22 @@ func scanMeetingApps() {
             }
         }
     }
+}
+
+if CommandLine.arguments.contains("--self-test") {
+    precondition(extractParticipantName("More options for Jane R.T.") == "Jane R.T.")
+    precondition(extractParticipantName("Video settings") == nil)
+    precondition(!isValidPersonName("Video settings"))
+    precondition(!isValidPersonName("Participant"))
+    precondition(extractParticipantName("View Jane Doe profile") == "Jane Doe")
+    precondition(extractParticipantName("Audio settings") == nil)
+    precondition(findSpeakingInText("Jane Doe is speaking") == "Jane Doe")
+    precondition(findSpeakingInText("Speaking: Jane Doe") == "Jane Doe")
+    precondition(findSpeakingInText("Jane Doe (speaking)") == "Jane Doe")
+    precondition(findSpeakingInText("Jane Doe, Computer audio unmuted, active speaker") == "Jane Doe")
+    precondition(findSpeakingInText("Speaking") == nil)
+    print("Speaker watcher parser checks passed")
+    exit(0)
 }
 
 // Main execution
