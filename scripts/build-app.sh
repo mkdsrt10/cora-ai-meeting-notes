@@ -32,7 +32,7 @@ say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 SIGN_ARGS=(--sign -)
 if [[ -f "$SIGN_KC" ]]; then
   security unlock-keychain -p "$(cat "$HOME/.cora-signing/keychain-password")" "$SIGN_KC"
-  SIGN_HASH="$(security find-identity -p codesigning "$SIGN_KC" | awk 'NR==1 && $2 ~ /^[0-9A-F]{40}$/ {print $2}')"
+  SIGN_HASH="$(security find-identity -p codesigning "$SIGN_KC" | awk '$1 == "1)" {print $2; exit}')"
   [[ -n "$SIGN_HASH" ]] || { echo "no code-signing identity in $SIGN_KC" >&2; exit 1; }
   SIGN_ARGS=(--keychain "$SIGN_KC" --sign "$SIGN_HASH")
 else
