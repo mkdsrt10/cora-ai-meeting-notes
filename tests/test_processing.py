@@ -7,7 +7,7 @@ import pytest
 
 import db
 import processing
-from pipeline import cloud_asr, processing_notes
+from pipeline import processing_notes
 
 
 @pytest.fixture(autouse=True)
@@ -37,21 +37,33 @@ def test_lockdown_overrides_automatic_cloud_but_rejects_manual_cloud(monkeypatch
     monkeypatch.setattr(processing, 'preferences', lambda: processing.validate({'mode':'cloud'}))
     monkeypatch.setenv('VOICECOACH_ENTERPRISE_LOCKDOWN', '1')
     assert processing.resolve()['provider'] == 'local_mlx'
-    assert cloud_asr.engine() == 'local'
+    assert processing.resolve()['transcription'] == 'local'
     with pytest.raises(Exception, match='lockdown'):
         processing.resolve({'mode':'cloud'})
 
 
-def test_scope_is_thread_local_locked_and_reset(tmp_path, monkeypatch):
+def test_lockdown_keeps_an_on_device_openai_compatible_provider(monkeypatch):
+    import credentials
+    monkeypatch.setattr(credentials, 'provider_settings', lambda name: {'base_url': 'http://localhost:11434/v1'} if name == 'custom' else {})
+    monkeypatch.setattr(processing, 'preferences', lambda: processing.validate({'provider': 'custom', 'model': 'llama3'}))
+    monkeypatch.setenv('VOICECOACH_ENTERPRISE_LOCKDOWN', '1')
+    assert (processing.resolve()['provider'], processing.resolve()['model']) == ('custom', 'llama3')
+    assert processing.resolve({'provider': 'ollama'})['provider'] == 'ollama'
+    with pytest.raises(Exception, match='lockdown'):
+        processing.resolve({'provider': 'openrouter'})
+
+
+def test_scope_allows_one_run_at_a_time(tmp_path, monkeypatch):
     monkeypatch.setattr(processing.paths, 'DATA_DIR', tmp_path)
     with processing.scope(processing.validate({'mode':'cloud'})):
-        assert cloud_asr.engine() == 'gemini'
         with ThreadPoolExecutor() as pool:
-            assert pool.submit(processing.CURRENT.get).result() is None
-        with pytest.raises(ValueError, match='Another processing'):
-            with processing.scope(processing.validate({})):
-                pass
-    assert processing.CURRENT.get() is None
+            def second():
+                with processing.scope(processing.validate({})):
+                    pass
+            with pytest.raises(ValueError, match='Another processing'):
+                pool.submit(second).result()
+    with processing.scope(processing.validate({})):
+        pass
 
 
 def test_template_ai_and_explicit_selection():
@@ -69,62 +81,51 @@ def response():
     return dict(title='Release planning', overview='Ship on Friday.', **{k:'- None noted.' for k in processing_notes.FIELDS if k != 'overview'})
 
 
-def test_cloud_template_and_hierarchy_cover_late_transcript(monkeypatch):
-    import credentials
-    prompts = []
-    monkeypatch.setattr(credentials, 'get_public_status', lambda: {'gemini_model':'configured-model'})
-    def generate(**kwargs):
-        prompts.append(kwargs)
-        return 'technical_review' if kwargs['trace_name'] == 'template.select' else json.dumps(response())
-    monkeypatch.setattr(credentials, 'call_configured_llm', generate)
+def test_cloud_template_and_hierarchy_cover_late_transcript(fake_text):
+    fake_text.reply = lambda prompt, trace, **k: 'technical_review' if trace == 'template.select' else json.dumps(response())
+    fake_text.fit = lambda text: len(text) <= 48000
     text = ('early discussion\n' * 6000) + 'FINAL DECISION: cancel release'
     result = processing_notes.generate_notes(text, [], [], options=processing.validate({'mode':'cloud'}))
     assert result['processing']['template'] == 'technical_review'
-    assert result['processing']['model'] == 'configured-model'
-    assert any('FINAL DECISION: cancel release' in p['prompt'] for p in prompts if p['trace_name'].startswith('notes.chunk'))
-    assert any(p['trace_name'].startswith('notes.merge') for p in prompts)
+    assert result['processing']['model'] == 'saved-gemini'
+    chunks = [c for c in fake_text.calls if c['trace'].startswith('notes.chunk')]
+    assert len(chunks) > 1 and any('FINAL DECISION: cancel release' in c['prompt'] for c in chunks)
+    assert any(c['trace'].startswith('notes.merge') for c in fake_text.calls)
     assert 'Technical review' in processing_notes.render(result)
 
 
-def test_malformed_output_is_retried_once(monkeypatch):
-    import credentials
-    calls = []
-    monkeypatch.setattr(credentials, 'get_public_status', lambda: {})
-    monkeypatch.setattr(credentials, 'call_configured_llm', lambda **k: calls.append(k) or '{}')
+def test_malformed_output_is_retried_once(fake_text):
+    fake_text.reply = '{}'
     with pytest.raises(ValueError, match='incomplete notes'):
         processing_notes.generate_notes('Hello', [], [], options=processing.validate({'mode':'cloud','template':'general'}))
-    assert len(calls) == 2
+    assert len(fake_text.calls) == 2
 
 
-def test_local_thorough_uses_full_context_and_releases(monkeypatch):
-    class LLM:
-        def __init__(self, model):
-            self._model = SimpleNamespace(args=SimpleNamespace(max_position_embeddings=8192))
-            self._tokenizer = SimpleNamespace(encode=lambda text:list(text), apply_chat_template=lambda messages, **k: messages[0]['content'])
-            self.released = False
-        def generate(self, prompt, **kwargs):
-            assert 'specific fact' in prompt
-            return json.dumps(response())
-        def release(self):
-            self.released = True
-    llm = LLM('test')
-    monkeypatch.setattr(processing_notes, 'LazyLLM', lambda model: llm)
-    result = processing_notes.generate_notes('specific fact', [], [], options=processing.validate({'mode':'local_thorough','template':'technical_review'}))
+def test_non_json_output_is_retried_then_fails(fake_text):
+    fake_text.reply = ['Sorry, I cannot help', json.dumps(response())]
+    result = processing_notes.generate_notes('Hello', [], [], options=processing.validate({'mode':'cloud','template':'general'}))
+    assert result['title'] == 'Release planning' and len(fake_text.calls) == 2
+
+
+def test_local_thorough_uses_one_local_model_for_the_run_and_releases_it(fake_text):
+    fake_text.reply = lambda prompt, **k: json.dumps(response()) if 'specific fact' in prompt else ''
+    profile = processing.validate({'mode':'local_thorough','template':'technical_review'})
+    result = processing_notes.generate_notes('specific fact', [], [], options=profile)
     assert result['processing']['mode'] == 'local_thorough'
-    assert llm.released
+    assert result['processing']['model'] == 'saved-local_mlx'
+    assert [c['trace'] for c in fake_text.calls] == ['notes.chunk.0']
+    assert fake_text.closed
 
 
-def test_light_keeps_extractor_with_template_guidance(monkeypatch):
-    import pipeline.notes
-    captured = {}
-    def light(*args, **kwargs):
-        captured.update(kwargs)
-        return response()
-    monkeypatch.setattr(pipeline.notes, 'generate_enhanced_notes', light)
+def test_light_uses_narrow_extractor_with_template_guidance_and_user_notes(fake_text):
+    fake_text.reply = lambda prompt, trace, **k: '- item' if trace != 'enhanced_notes.title' else 'Daily standup'
     result = processing_notes.generate_notes('hello', [], [], user_notes='My notes', options=processing.validate({'template':'standup'}))
-    assert 'blockers' in captured['template_instruction']
-    assert captured['user_notes'] == 'My notes'
+    traces = [c['trace'] for c in fake_text.calls]
+    assert 'enhanced_notes.overview' in traces and 'enhanced_notes.key_entities' in traces
+    assert all('blockers' in c['prompt'] and 'My notes' in c['prompt'] for c in fake_text.calls)
+    assert result['title'] == 'Daily standup'
     assert result['processing']['template_selection'] == 'manual'
+    assert fake_text.closed
 
 
 def test_split_keeps_every_character_and_handles_single_long_turn():
@@ -151,11 +152,7 @@ def test_regeneration_uses_segments_not_previous_ai_summary(tmp_path, monkeypatc
         return dict(response(), keywords=[], processing=dict(processing.validate({}), template='standup'))
     monkeypatch.setattr(processing_notes, 'generate_notes', generate)
     req = SimpleNamespace(send_json=lambda payload: payload)
-    token = processing.CURRENT.set(processing.validate({}))
-    try:
-        result = recordings._re_summarize(req, '', {'id':'meeting'})
-    finally:
-        processing.CURRENT.reset(token)
+    result = recordings._re_summarize(req, '', {'id':'meeting'}, processing.validate({}))
     assert result['call_summary']['processing']['template'] == 'standup'
     assert (folder / 'transcript_diarized.md').read_text() == 'OLD AI HALLUCINATION'
     assert 'locally' in json.loads((folder / 'diarization.json').read_text())['privacy_note']
@@ -175,16 +172,12 @@ def test_meeting_context_excludes_internal_paths():
     assert context == {'recording_name':'Daily','participants':['Alice']}
 
 
-def test_gemini_adapter_honors_configured_model_and_output_budget(monkeypatch):
-    import credentials
-    captured = {}
-    monkeypatch.setattr(credentials, 'get_public_status', lambda: {})
-    monkeypatch.setattr(credentials, '_read_secure_file', lambda: {'gemini_model':'configured-model'})
-    def generate(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(text='general')
-    monkeypatch.setattr(credentials, 'get_client', lambda **_: SimpleNamespace(models=SimpleNamespace(generate_content=generate)))
-    text, _, model = credentials._call_configured_llm('meeting data', 'static instructions', 'gemini', None, 256)
-    assert text == 'general' and model == 'configured-model'
-    assert captured['contents'] == 'meeting data'
-    assert captured['config'] == {'system_instruction':'static instructions','max_output_tokens':256}
+def test_summary_variant_uses_the_profiles_text_model(fake_text):
+    from pipeline import notes
+    fake_text.reply = '<think>plan</think>- [ ] Send deck (Priya)'
+    result = notes.generate_summary_variant('Priya: I will send the deck', 'deck!', [], 'action_items_only',
+                                            processing.validate({'mode': 'cloud', 'provider': 'anthropic'}))
+    assert result['text'] == '- [ ] Send deck (Priya)' and result['model'] == 'saved-anthropic'
+    call = fake_text.calls[0]
+    assert 'checklist' in call['system'] and 'deck!' in call['prompt'] and call['trace'] == 'summary_variant.action_items_only'
+    assert fake_text.closed

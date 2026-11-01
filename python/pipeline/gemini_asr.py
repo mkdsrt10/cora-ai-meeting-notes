@@ -71,11 +71,12 @@ def model_name() -> str:
 def transcribe_window(clip: Path, duration: float, context: str, client: Optional[Any] = None,
                       model: Optional[str] = None) -> list[dict[str, Any]]:
     """Returns raw turns (times relative to the clip). Raises AsrCallError."""
-    import json_repair
     from google.genai import types
+
+    from .text_model import parse_json
     if client is None:
         import credentials
-        client = credentials.get_client(traced=False)
+        client = credentials.build_gemini_client()  # traced below as a transcription span
     model = model or model_name()
     mime = {".wav": "audio/wav", ".flac": "audio/flac"}.get(clip.suffix.lower(), "audio/flac")
     contents = [types.Part.from_bytes(data=clip.read_bytes(), mime_type=mime), context]
@@ -111,7 +112,10 @@ def transcribe_window(clip: Path, duration: float, context: str, client: Optiona
         text = (getattr(response, "text", None) or "").strip()
         if not text:
             raise AsrCallError(f"Gemini returned no text (finish_reason={reason or 'unknown'}, candidates={len(candidates)}, block_reason={blocked or 'none reported'})")
-        parsed = json_repair.loads(text)
+        try:
+            parsed = parse_json(text)
+        except ValueError:
+            raise AsrCallError("Gemini reply was not JSON") from None
         turns = parsed.get("turns") if isinstance(parsed, dict) else parsed
         if not isinstance(turns, list):
             raise AsrCallError("Gemini reply had no turns list")

@@ -92,7 +92,7 @@ def transcribe_windows(audio_path: Path, speech: list[tuple[float, float]], cont
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         # Executor workers do not inherit ContextVars. Give every task a
         # separate copy (a Context cannot be entered concurrently), preserving
-        # the recording/run IDs and per-run processing options.
+        # the recording/run IDs and the parent trace span.
         futures = [pool.submit(copy_context().run, run, window) for window in windows]
         results = [future.result() for future in futures]
     segments = [seg for part in results for seg in part]

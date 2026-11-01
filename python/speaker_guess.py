@@ -103,17 +103,18 @@ def _windows(segments: list[dict[str, Any]], unresolved: list[int]) -> list[list
     return [w for w in windows if wanted & set(w)]
 
 
-def parse_guess_list(raw: str, json_repair: Any) -> list[Any]:
+def parse_guess_list(raw: str) -> list[Any]:
     """The JSON list from the model, tolerating output cut off at the token
     limit (no closing bracket): complete objects are recovered, the
     truncated tail is dropped."""
+    from pipeline.text_model import parse_json
     start = raw.find("[")
     if start < 0:
         return []
     end = raw.rfind("]")
     body = raw[start: end + 1] if end > start else raw[start:]
     try:
-        parsed = json_repair.loads(body)
+        parsed = parse_json(body)
         if isinstance(parsed, list) and (end > start or len(parsed) > 1):
             return parsed[:-1] if end <= start else parsed  # last item of a cut-off list may be partial
     except Exception:
@@ -121,7 +122,7 @@ def parse_guess_list(raw: str, json_repair: Any) -> list[Any]:
     items = []
     for match in re.finditer(r"\{[^{}]*\}", body):
         try:
-            items.append(json_repair.loads(match.group(0)))
+            items.append(parse_json(match.group(0)))
         except Exception:
             continue
     return items
@@ -135,8 +136,6 @@ def _label(seg: dict[str, Any], self_ids: set[str]) -> str:
 
 
 def _llm_guesses(segments, unresolved, others, title, generate, self_ids) -> dict[int, dict[str, Any]]:
-    import json_repair
-
     corpus = _normalise(" ".join(s.get("text", "") for s in segments))
     results: dict[int, dict[str, Any]] = {}
     for window in _windows(segments, unresolved):
@@ -147,7 +146,7 @@ def _llm_guesses(segments, unresolved, others, title, generate, self_ids) -> dic
         prompt = INSTRUCTION.format(roster=", ".join(others), title=title or "(none)", turns=turns)
         raw = generate(prompt)
         raw = re.sub(r"<think>.*?</think>", "", raw or "", flags=re.S)
-        for item in parse_guess_list(raw, json_repair):
+        for item in parse_guess_list(raw):
             if not isinstance(item, dict):
                 continue
             try:

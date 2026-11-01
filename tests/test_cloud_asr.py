@@ -1,20 +1,24 @@
 """Hosted transcription is opt-in: default stays local, lockdown forces local,
-and runaway cloud output is dropped rather than becoming a transcript."""
+and the recording says honestly where its audio went."""
 import db
+import processing
 import pipeline.config as pcfg
-from pipeline import cloud_asr
+
+
+def engine():
+    return processing.resolve()["transcription"]
 
 
 def test_defaults_to_local():
-    assert cloud_asr.engine() == "local"
+    assert engine() == "local"
 
 
 def test_selected_engine_and_lockdown_override(monkeypatch):
     db.set_setting("transcription_engine", "gemini")
     try:
-        assert cloud_asr.engine() == "gemini"
+        assert engine() == "gemini"
         monkeypatch.setenv("VOICECOACH_ENTERPRISE_LOCKDOWN", "1")
-        assert cloud_asr.engine() == "local"
+        assert engine() == "local"
         assert pcfg.whisper_model_status()["engine"] == "local"
     finally:
         db.set_setting("transcription_engine", "local")
@@ -27,14 +31,6 @@ def test_cloud_engine_needs_no_local_weights():
         assert status["ready"] and status["engine"] == "gemini"
     finally:
         db.set_setting("transcription_engine", "local")
-
-
-
-
-
-
-
-
 
 
 class _Req:
@@ -78,9 +74,12 @@ def test_explicit_legacy_request_still_reaches_whole_file_path(monkeypatch, tmp_
 
 
 def test_provenance_labels_are_honest(monkeypatch):
+    import credentials
     from pipeline import runner
-    model, note = runner._provenance()
-    assert model.startswith("local-mlx:") and "No audio or text left" in note
-    monkeypatch.setattr(cloud_asr, "engine", lambda: "gemini")
-    model, note = runner._provenance()
-    assert model.startswith("cloud-asr:gemini") and "sent to Google" in note
+    monkeypatch.setattr(credentials, "get_public_status", lambda: {"provider": "ai_studio"})
+    model, note = runner._provenance(processing.validate({}))
+    assert model.startswith("local-mlx:") and "transcribed locally" in note and "generated locally" in note
+    model, note = runner._provenance(processing.validate({"mode": "cloud"}))
+    assert model.startswith("cloud-asr:gemini:gemini-") and "sent to Google Gemini" in note
+    model, note = runner._provenance(processing.validate({"transcription": "openai_compatible", "provider": "openai"}))
+    assert model == "cloud-asr:openai_compatible:whisper-1" and "OpenAI-compatible endpoint" in note

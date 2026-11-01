@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from contextvars import ContextVar
 import fcntl
 import os
 import platform
@@ -11,10 +10,11 @@ import subprocess
 import db
 import paths
 import policy
+from pipeline.text_model import PRESETS
+from pipeline.transcriber import ENGINES
 
-CURRENT = ContextVar('processing_options', default=None)
 MODES = ('local_light', 'local_thorough', 'cloud')
-PROVIDERS = ('local_mlx', 'gemini', 'openai', 'anthropic', 'custom')
+PROVIDERS = PRESETS  # Text model provider presets
 TEMPLATES = {
     'general': ('General meeting', 'Capture outcomes, discussion, decisions and unresolved questions.'),
     'one_on_one': ('1:1', 'Focus on feedback, concerns, development and mutual commitments.'),
@@ -56,7 +56,7 @@ def validate(raw):
     out = dict(mode=mode, transcription=raw.get('transcription') or ('gemini' if mode == 'cloud' else 'local'),
                provider=raw.get('provider') or ('gemini' if mode == 'cloud' else 'local_mlx'),
                model=str(raw.get('model') or '').strip(), template=raw.get('template', 'auto'))
-    if out['transcription'] not in ('local', 'gemini') or out['provider'] not in PROVIDERS:
+    if out['transcription'] not in ENGINES or out['provider'] not in PROVIDERS:
         raise ValueError('Unknown transcription engine or notes provider')
     if out['template'] not in (*TEMPLATES, 'auto'):
         raise ValueError('Unknown notes template')
@@ -76,23 +76,37 @@ def resolve(overrides=None):
         base.update(overrides)
     out = validate(base)
     if policy.lockdown_enabled():
-        if overrides and (out['provider'] != 'local_mlx' or out['transcription'] != 'local'):
+        # The same rule the Text model enforces: on-device models only, which
+        # includes an OpenAI-compatible endpoint on localhost (e.g. Ollama).
+        text_ok = _text_provider_allowed(out['provider'])
+        if overrides and (not text_ok or out['transcription'] != 'local'):
             raise policy.LockdownError('Cloud processing is disabled by enterprise lockdown')
-        out.update(mode='local_light' if out['mode'] == 'cloud' else out['mode'],
-                   transcription='local', provider='local_mlx', model='')
+        out.update(mode='local_light' if out['mode'] == 'cloud' else out['mode'], transcription='local')
+        if not text_ok:
+            out.update(provider='local_mlx', model='')
     return out
+
+
+def _text_provider_allowed(provider):
+    from pipeline.text_model import OPENAI_COMPATIBLE
+    if provider not in OPENAI_COMPATIBLE:
+        return policy.provider_allowed(provider)
+    import credentials
+    base_url = credentials.provider_settings(provider).get('base_url') or OPENAI_COMPATIBLE[provider][0]
+    return policy.provider_allowed(provider, base_url)
 
 
 @contextmanager
 def scope(options, *, wait=False):
-    # Across API threads/processes. Automatic runs queue; manual runs fail clearly when busy.
+    """One processing run at a time, across API threads/processes: automatic
+    runs queue; manual runs fail clearly when busy. Callers pass `options`
+    (the Processing profile) explicitly to everything they run inside."""
     paths.DATA_DIR.mkdir(parents=True, exist_ok=True)
     with (paths.DATA_DIR / '.processing.lock').open('a') as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
             raise ValueError('Another processing job is running; retry when it finishes') from None
-        token = CURRENT.set(options)
         thorough = options['mode'] == 'local_thorough' and options['provider'] == 'local_mlx'
         try:
             if thorough:
@@ -104,7 +118,6 @@ def scope(options, *, wait=False):
             if thorough:
                 from pipeline.config import _cap_mlx_memory
                 _cap_mlx_memory()
-            CURRENT.reset(token)
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 

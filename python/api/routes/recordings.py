@@ -220,7 +220,7 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
     engine = str(body.get("engine", "")).lower()
     # The legacy whole-file Gemini diarization runs only on an explicit,
     # per-request ask. The Settings "Transcription engine" choice is handled
-    # inside the pipeline (pipeline/cloud_asr.py), so "On this Mac" never
+    # inside the pipeline (pipeline/transcriber.py), so "On this Mac" never
     # uploads anything and "Google Gemini" uses the chunked cloud engine.
     # (Previously this compared the setting to "local_mlx" while Settings
     # saves "local"/"gemini", so choosing the private option sent the whole
@@ -322,8 +322,10 @@ def post_api_recording_summary(req, path: str, body: dict) -> None:
     notes_text = db.get_notes(folder.name)
     slides_data = local_meeting_pipeline.load_slides_ocr(folder)
     import ai_trace
+    import processing
     with ai_trace.run('summary_variant', recording_id=folder.name, format=format_name):
-        result = local_meeting_pipeline.generate_summary_variant(transcript_text, notes_text, slides_data, format_name)
+        result = local_meeting_pipeline.generate_summary_variant(transcript_text, notes_text, slides_data, format_name,
+                                                                 processing.resolve())
     db.update_summary(folder.name, format_name, result)
     return req.send_json({"ok": True, "summary": result})
 
@@ -336,16 +338,16 @@ def post_api_recording_re_summarize(req, path: str, body: dict) -> None:
         overrides = dict(provider=body['provider'], model=body.get('model', ''))
     folder = safe_folder(body.get('id', ''))
     import ai_trace
-    with processing.scope(processing.resolve(overrides)):
+    options = processing.resolve(overrides)
+    with processing.scope(options):
         with ai_trace.run('notes_regeneration', recording_id=folder.name):
-            return _re_summarize(req, path, body)
+            return _re_summarize(req, path, body, options)
 
 
-def _re_summarize(req, path: str, body: dict) -> None:
+def _re_summarize(req, path: str, body: dict, options: dict) -> None:
     folder = safe_folder(body.get("id", ""))
     from pipeline.processing_notes import generate_notes, render, privacy_note
     import processing
-    options = processing.CURRENT.get()
     import local_meeting_pipeline
     user_notes = db.get_notes(folder.name) or ""
     slides_data = local_meeting_pipeline.load_slides_ocr(folder)

@@ -155,6 +155,7 @@ def post_api_credentials_test(req, path: str, body: dict) -> None:
         service_account_json=body.get("service_account_json"),
         api_key=body.get("api_key"),
         model=body.get("model"),
+        base_url=body.get("base_url"),
     )
     if not ok:
         return req.send_json({"ok": False, "error": msg}, 400)
@@ -176,19 +177,18 @@ def post_api_credentials_save(req, path: str, body: dict) -> None:
         ok, msg = credentials.test_credentials(provider="anthropic", api_key=raw_key, model=model or None)
         if not ok:
             return req.send_json({"ok": False, "error": f"Anthropic key rejected: {msg}"}, 400)
-        credentials.save_anthropic_credentials(raw_key, model=model or "claude-3-7-sonnet-20250219")
+        credentials.save_anthropic_credentials(raw_key, model=model)
 
-    elif provider == "openai":
-        ok, msg = credentials.test_credentials(provider="openai", api_key=raw_key, model=model or None, location=base_url or None)
+    elif provider in credentials.OPENAI_COMPATIBLE_PRESETS:
+        # openai, openrouter, groq, ollama, lmstudio, custom: one OpenAI-compatible adapter.
+        if provider == "custom" and not base_url:
+            raise ValueError("Base URL cannot be empty.")
+        ok, msg = credentials.test_credentials(provider=provider, api_key=raw_key, model=model or None, base_url=base_url or None)
         if not ok:
-            return req.send_json({"ok": False, "error": f"OpenAI key rejected: {msg}"}, 400)
-        credentials.save_openai_credentials(raw_key, model=model or "gpt-4o", base_url=base_url or "https://api.openai.com/v1")
-
-    elif provider == "custom":
-        ok, msg = credentials.test_credentials(provider="custom", api_key=raw_key, model=model or None, location=base_url)
-        if not ok:
-            return req.send_json({"ok": False, "error": f"Custom endpoint rejected: {msg}"}, 400)
-        credentials.save_custom_llm_credentials(base_url=base_url, api_key=raw_key, model=model or "default")
+            label = {"openai": "OpenAI key", "custom": "Custom endpoint"}.get(provider, f"{provider} endpoint")
+            return req.send_json({"ok": False, "error": f"{label} rejected: {msg}"}, 400)
+        credentials.save_openai_compatible_credentials(provider, base_url=base_url, api_key=raw_key,
+                                                       model=model or ("default" if provider == "custom" else ""))
 
     elif provider == "vertex":
         ok, msg = credentials.test_credentials(

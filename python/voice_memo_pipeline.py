@@ -293,23 +293,6 @@ def safe_name(value: str) -> str:
     return value[:80] or "voice-memo"
 
 
-def transcribe(path: Path, config: dict) -> dict:
-    import mlx_whisper
-
-    import ai_trace
-
-    kwargs = {"path_or_hf_repo": config["whisper_model"], "verbose": False}
-    if config.get("language"):
-        kwargs["language"] = config["language"]
-    with ai_trace.span("transcription", "whisper.voice_memo", provider="mlx", model=config["whisper_model"],
-                       input={"audio": ai_trace.file_fingerprint(path)}, params=kwargs) as trace:
-        result = mlx_whisper.transcribe(str(path), **kwargs)
-        segments = result.get("segments", [])
-        trace.set_output({"language": result.get("language"), "text": result.get("text")},
-                         audio_s=segments[-1]["end"] if segments else None, segments=len(segments))
-    return result
-
-
 def sentences(text: str) -> list[str]:
     text = re.sub(r"\s+", " ", text).strip()
     if not text:

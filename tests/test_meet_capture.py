@@ -56,13 +56,6 @@ assert.deepEqual(result.speaking_names,['Jane R.T.','Alice Smith']);
     subprocess.run(['node',str(script)], check=True, capture_output=True,text=True)
 
 
-def test_cloud_speaker_guess_adapter_exposes_effective_model(monkeypatch):
-    import credentials
-    from pipeline.processing_notes import CloudLLM
-    monkeypatch.setattr(credentials,'get_public_status',lambda: {'gemini_model':'configured-cloud-model'})
-    assert CloudLLM(dict(provider='gemini',model='')).model_id == 'configured-cloud-model'
-
-
 @pytest.mark.parametrize('name', ['Participant','Unknown','You','Share with audio','Use a phone for audio'])
 def test_generic_labels_and_audio_controls_are_not_roster_entries(name):
     assert clean_and_validate_participant(name) is None
