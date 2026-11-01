@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from contextvars import ContextVar
 import fcntl
 import os
 import platform
@@ -12,8 +11,8 @@ import db
 import paths
 import policy
 from pipeline.text_model import PRESETS
+from pipeline.transcriber import ENGINES
 
-CURRENT = ContextVar('processing_options', default=None)
 MODES = ('local_light', 'local_thorough', 'cloud')
 PROVIDERS = PRESETS  # Text model provider presets
 TEMPLATES = {
@@ -57,7 +56,7 @@ def validate(raw):
     out = dict(mode=mode, transcription=raw.get('transcription') or ('gemini' if mode == 'cloud' else 'local'),
                provider=raw.get('provider') or ('gemini' if mode == 'cloud' else 'local_mlx'),
                model=str(raw.get('model') or '').strip(), template=raw.get('template', 'auto'))
-    if out['transcription'] not in ('local', 'gemini') or out['provider'] not in PROVIDERS:
+    if out['transcription'] not in ENGINES or out['provider'] not in PROVIDERS:
         raise ValueError('Unknown transcription engine or notes provider')
     if out['template'] not in (*TEMPLATES, 'auto'):
         raise ValueError('Unknown notes template')
@@ -99,14 +98,15 @@ def _text_provider_allowed(provider):
 
 @contextmanager
 def scope(options, *, wait=False):
-    # Across API threads/processes. Automatic runs queue; manual runs fail clearly when busy.
+    """One processing run at a time, across API threads/processes: automatic
+    runs queue; manual runs fail clearly when busy. Callers pass `options`
+    (the Processing profile) explicitly to everything they run inside."""
     paths.DATA_DIR.mkdir(parents=True, exist_ok=True)
     with (paths.DATA_DIR / '.processing.lock').open('a') as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
             raise ValueError('Another processing job is running; retry when it finishes') from None
-        token = CURRENT.set(options)
         thorough = options['mode'] == 'local_thorough' and options['provider'] == 'local_mlx'
         try:
             if thorough:
@@ -118,7 +118,6 @@ def scope(options, *, wait=False):
             if thorough:
                 from pipeline.config import _cap_mlx_memory
                 _cap_mlx_memory()
-            CURRENT.reset(token)
             fcntl.flock(lock, fcntl.LOCK_UN)
 
 

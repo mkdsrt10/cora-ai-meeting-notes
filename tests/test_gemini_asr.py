@@ -14,6 +14,28 @@ from pipeline.windowed import WindowedASRError, transcribe_windows
 pytestmark = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
 
 
+@pytest.fixture(autouse=True)
+def genai_types(monkeypatch):
+    """google-genai is an optional extra; stand in for its `types` when absent."""
+    try:
+        from google.genai import types  # noqa: F401
+        return
+    except ImportError:
+        pass
+    import sys
+    import types as pytypes
+
+    class Obj:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+    fake = SimpleNamespace(Part=SimpleNamespace(from_bytes=lambda data, mime_type: Obj(data=data, mime_type=mime_type)),
+                           Schema=Obj, GenerateContentConfig=Obj, ThinkingConfig=Obj,
+                           Type=SimpleNamespace(OBJECT="OBJECT", NUMBER="NUMBER", STRING="STRING", ARRAY="ARRAY"))
+    module = pytypes.ModuleType("google.genai")
+    module.types = fake
+    monkeypatch.setitem(sys.modules, "google.genai", module)
+
+
 @pytest.fixture
 def audio(tmp_path):
     path = tmp_path / "mix.wav"
@@ -178,7 +200,6 @@ def test_continuous_invalid_windows_still_fail_with_bounded_requests(tmp_path, m
 def test_parallel_asr_keeps_meeting_context_and_failed_attempt_history(audio, tmp_path, monkeypatch):
     import sqlite3
     import ai_trace
-    import processing
     trace_db = tmp_path / 'parallel-traces.db'
     monkeypatch.setattr(ai_trace, 'TRACE_DB', trace_db)
     monkeypatch.setattr(ai_trace, '_schema_ready', False)
@@ -186,7 +207,6 @@ def test_parallel_asr_keeps_meeting_context_and_failed_attempt_history(audio, tm
     monkeypatch.setattr(windowed, '_sleep', lambda _: None)
     seen = []
     def caller(clip, duration, block):
-        assert processing.CURRENT.get()['mode'] == 'cloud'
         with ai_trace.span('transcription','gemini.window',provider='gemini',model='fake-cloud') as span:
             span.set(input_tokens=100,output_tokens=20)
             seen.append(duration)
@@ -194,13 +214,9 @@ def test_parallel_asr_keeps_meeting_context_and_failed_attempt_history(audio, tm
             if duration == 30 and seen.count(30) == 1:
                 return [{'start':0,'end':duration+18.6,'text':'timestamp overrun'}]
             return good_caller(clip,duration,block)
-    token = processing.CURRENT.set(processing.validate({'mode':'cloud'}))
-    try:
-        with ai_trace.run('parallel-asr',recording_id='meeting-with-retries') as run_id:
-            segments = transcribe_windows(audio,[(0,30),(60,100)],CONTEXT,caller=caller,
-                                          strict=[(0,30),(60,100)],workers=2)
-    finally:
-        processing.CURRENT.reset(token)
+    with ai_trace.run('parallel-asr',recording_id='meeting-with-retries') as run_id:
+        segments = transcribe_windows(audio,[(0,30),(60,100)],CONTEXT,caller=caller,
+                                      strict=[(0,30),(60,100)],workers=2)
     assert len(segments) == 2
     with sqlite3.connect(trace_db) as conn:
         conn.row_factory = sqlite3.Row

@@ -77,8 +77,8 @@ def model_ready(model_id: str) -> bool:
 
 def whisper_model_status() -> dict[str, Any]:
     import policy
-    from . import cloud_asr
-    engine = cloud_asr.engine()
+    import processing
+    engine = processing.resolve()["transcription"]  # the saved profile; lockdown forces "local"
     lockdown = policy.lockdown_enabled()
     if engine != "local" and not lockdown:
         # A hosted engine needs no local weights, so don't nag to download any.

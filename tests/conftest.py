@@ -33,3 +33,19 @@ def fake_text(monkeypatch):
     monkeypatch.setattr(text_model, "_adapter", lambda preset, model, settings: fake)
     monkeypatch.setattr(text_model, "_saved", lambda preset: {"model": "saved-" + preset})
     return fake
+
+
+@pytest.fixture
+def fake_transcriber(monkeypatch):
+    """Every transcriber(profile) built during the test is a FakeTranscriber
+    returning `fake_transcriber.segments`; `profiles` records what was asked for."""
+    from pipeline import transcriber
+
+    recorder = type("Recorder", (), {})()
+    recorder.segments, recorder.profiles = [], []
+
+    def make(profile):
+        recorder.profiles.append(dict(profile))
+        return transcriber.FakeTranscriber(recorder.segments, engine=profile.get("transcription") or "local")
+    monkeypatch.setattr(transcriber, "_make", make)
+    return recorder

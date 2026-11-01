@@ -7,7 +7,7 @@ import pytest
 
 import db
 import processing
-from pipeline import cloud_asr, processing_notes
+from pipeline import processing_notes
 
 
 @pytest.fixture(autouse=True)
@@ -37,21 +37,33 @@ def test_lockdown_overrides_automatic_cloud_but_rejects_manual_cloud(monkeypatch
     monkeypatch.setattr(processing, 'preferences', lambda: processing.validate({'mode':'cloud'}))
     monkeypatch.setenv('VOICECOACH_ENTERPRISE_LOCKDOWN', '1')
     assert processing.resolve()['provider'] == 'local_mlx'
-    assert cloud_asr.engine() == 'local'
+    assert processing.resolve()['transcription'] == 'local'
     with pytest.raises(Exception, match='lockdown'):
         processing.resolve({'mode':'cloud'})
 
 
-def test_scope_is_thread_local_locked_and_reset(tmp_path, monkeypatch):
+def test_lockdown_keeps_an_on_device_openai_compatible_provider(monkeypatch):
+    import credentials
+    monkeypatch.setattr(credentials, 'provider_settings', lambda name: {'base_url': 'http://localhost:11434/v1'} if name == 'custom' else {})
+    monkeypatch.setattr(processing, 'preferences', lambda: processing.validate({'provider': 'custom', 'model': 'llama3'}))
+    monkeypatch.setenv('VOICECOACH_ENTERPRISE_LOCKDOWN', '1')
+    assert (processing.resolve()['provider'], processing.resolve()['model']) == ('custom', 'llama3')
+    assert processing.resolve({'provider': 'ollama'})['provider'] == 'ollama'
+    with pytest.raises(Exception, match='lockdown'):
+        processing.resolve({'provider': 'openrouter'})
+
+
+def test_scope_allows_one_run_at_a_time(tmp_path, monkeypatch):
     monkeypatch.setattr(processing.paths, 'DATA_DIR', tmp_path)
     with processing.scope(processing.validate({'mode':'cloud'})):
-        assert cloud_asr.engine() == 'gemini'
         with ThreadPoolExecutor() as pool:
-            assert pool.submit(processing.CURRENT.get).result() is None
-        with pytest.raises(ValueError, match='Another processing'):
-            with processing.scope(processing.validate({})):
-                pass
-    assert processing.CURRENT.get() is None
+            def second():
+                with processing.scope(processing.validate({})):
+                    pass
+            with pytest.raises(ValueError, match='Another processing'):
+                pool.submit(second).result()
+    with processing.scope(processing.validate({})):
+        pass
 
 
 def test_template_ai_and_explicit_selection():

@@ -18,7 +18,7 @@ from .config import resolve_whisper_model
 from .llm import UNTRUSTED, _last_llm_stats
 from .notes import _markdown_bullets
 from .speakers import _guess_remote_speakers, _load_continuation_segments, guess_speaker_from_tracks, load_accessibility_timeline, load_ax_participants, match_speaker_from_timeline, resolve_other_participant_name
-from .transcribe import transcribe_with_silence_removal
+from .transcriber import transcriber
 from . import romanize
 from .context import build_context
 from .text_model import text_model
@@ -147,6 +147,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
     total_speech_duration = 0.0
     current_time_offset = 0.0
     t0 = time.time()
+    asr = transcriber(profile)
 
     for idx, pfile in enumerate(part_files):
         p_label = f" (Part {idx + 1}/{len(part_files)})" if len(part_files) > 1 else ""
@@ -156,9 +157,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
             context.record(start + offset, end + offset, chunk_prompt)
             return chunk_prompt
 
-        p_segs, p_dur, p_speech = transcribe_with_silence_removal(pfile, prompt, folder=(folder if idx == 0 else None),
-                                                                  prompt_for=prompt_for, context=context,
-                                                                  time_offset=current_time_offset)
+        p_segs, p_dur, p_speech = asr.transcribe(pfile, prompt=prompt, keep_audio_in=(folder if idx == 0 else None),
+                                                 prompt_for=prompt_for, context=context, offset=current_time_offset)
         for s in p_segs:
             raw_segments.append({
                 **s,
@@ -276,7 +276,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
         for s in sorted(assigned_speakers)
     ]
 
-    asr_model, privacy_note = _provenance()
+    asr_model, privacy_note = _provenance(profile)
     diarization_processing = notes["processing"]
     diarization_payload = {
         "summary": notes["overview"],
@@ -439,25 +439,14 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
     }
 
 
-def _provenance() -> tuple[str, str]:
+def _provenance(profile: dict[str, Any]) -> tuple[str, str]:
     """What actually transcribed this recording, and an honest statement of
     what left the device — never a blanket "100% local" when it wasn't."""
-    from . import cloud_asr
     import tracing
-    engine = cloud_asr.engine()
-    if engine == "local":
-        model_id = resolve_whisper_model()
-        model = f"local-mlx:{Path(model_id).name if os.path.isabs(model_id) else model_id}"
-        note = "Transcribed and summarized locally on Apple Silicon (MLX). No audio or text left this device."
-    else:
-        model = f"cloud-asr:{engine}:{db.get_setting('cloud_asr_model') or 'default'}"
-        note = ("Speech audio was sent to Google Gemini for transcription (Settings > Transcription engine). "
-                "Notes were generated locally on Apple Silicon (MLX).")
-    import processing
-    options = processing.CURRENT.get()
-    if options:
-        from .processing_notes import privacy_note
-        note = privacy_note(engine != 'local', options)
+    from .processing_notes import privacy_note
+    asr = transcriber(profile)
+    model = f"local-mlx:{asr.model}" if asr.engine == "local" else f"cloud-asr:{asr.engine}:{asr.model}"
+    note = privacy_note(asr.engine != "local", profile)
     if tracing.tracing_opted_in():
         note += " Summary metadata was also sent to your Langfuse project (tracing opt-in)."
     return model, note

@@ -220,7 +220,7 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
     engine = str(body.get("engine", "")).lower()
     # The legacy whole-file Gemini diarization runs only on an explicit,
     # per-request ask. The Settings "Transcription engine" choice is handled
-    # inside the pipeline (pipeline/cloud_asr.py), so "On this Mac" never
+    # inside the pipeline (pipeline/transcriber.py), so "On this Mac" never
     # uploads anything and "Google Gemini" uses the chunked cloud engine.
     # (Previously this compared the setting to "local_mlx" while Settings
     # saves "local"/"gemini", so choosing the private option sent the whole
