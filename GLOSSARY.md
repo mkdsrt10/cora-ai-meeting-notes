@@ -20,6 +20,8 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Provider**: who serves a Text model or Transcriber call: `local_mlx`, `openai_compatible`, `anthropic`, `gemini`. Not to be confused with **Gemini backend** (`vertex` vs `ai_studio`), which is how Gemini credentials are reached.
 
+**OpenAI-compatible preset**: a named `openai_compatible` endpoint a Processing profile can choose: `openai`, `openrouter`, `groq`, `ollama`, `lmstudio`, or `custom` (any base URL, e.g. a LiteLLM proxy). One preset serves both the profile's text and, when its transcription is `openai_compatible`, its audio. _Avoid_: custom LLM (that is only one preset).
+
 **Plugin**: a bundled extension that declares a View, data for a Recording, and Hooks. Bundled plugins at v1: Coaching, Todo/Planner.
 
 **View**: a page in the Cora window, registered by id with a title and a render function. Plugins add Views without editing core files.
