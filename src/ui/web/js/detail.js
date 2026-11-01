@@ -400,35 +400,6 @@ function fmtVersionStamp(stamp){
   return d.toLocaleString();
 }
 
-// Developer-only: the VM sync button stays hidden unless a target is configured.
-api('/api/cloud/sync-status').then(s => { if (s.configured) $('#topbarSyncVmBtn')?.removeAttribute('hidden'); }).catch(() => {});
-$('#topbarSyncVmBtn')?.addEventListener('click', async () => {
-  const btn = $('#topbarSyncVmBtn');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = '☁️ Syncing to VM…';
-  }
-  toast('Syncing meetings, database & datasets to your VM…');
-  try {
-    const res = await api('/api/cloud/sync-vm', { method: 'POST', body: '{}' });
-    if (res.status === 'success') {
-      toast(`✅ ${res.message || 'Synced successfully!'}`);
-      if (btn) btn.textContent = '✅ Synced to VM';
-      setTimeout(() => { if (btn) btn.textContent = '☁️ Sync to VM'; }, 3000);
-    } else {
-      toast(`⚠️ VM Sync: ${res.message}`, true);
-      if (btn) btn.textContent = '☁️ Sync to VM';
-    }
-  } catch (err) {
-    toast(`VM Sync failed: ${err.message}`, true);
-    if (btn) btn.textContent = '☁️ Sync to VM';
-  } finally {
-    if (btn && document.body.contains(btn)) {
-      btn.disabled = false;
-    }
-  }
-});
-
 // Lets you listen to a pause/resume or "Continue this meeting" segment
 // while it's stopped-but-not-yet-merged (the gap this whole feature exists
 // for) — swaps the "Listen" button for a native <audio> player pointed at

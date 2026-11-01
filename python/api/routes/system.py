@@ -1,11 +1,11 @@
-"""Health, auth check, Finder integration, scanner."""
+"""Health, auth check, Finder integration."""
 from __future__ import annotations
 import subprocess
 
 from api.router import route
 import paths
 import subprocess
-from api.core import ROOT, safe_folder, scanner_command, scanner_executable
+from api.core import safe_folder
 
 
 @route("GET", '/api/health')
@@ -16,17 +16,6 @@ def get_api_health(req, path: str, query: dict) -> None:
 @route("GET", '/api/auth/check')
 def get_api_auth_check(req, path: str, query: dict) -> None:
     return req.send_json({"ok": True})
-
-
-@route("POST", '/api/scan')
-def post_api_scan(req, path: str, body: dict) -> None:
-    logs = paths.LOGS_DIR
-    logs.mkdir(exist_ok=True)
-    out = (logs / "dashboard-scan.log").open("a")
-    if not scanner_executable().exists():
-        raise FileNotFoundError("Voice Coach Scanner.app is not installed")
-    process = subprocess.Popen(scanner_command(), cwd=ROOT, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
-    return req.send_json({"ok": True, "pid": process.pid, "message": "Scan started"}, 202)
 
 
 @route("POST", '/api/open-folder')

@@ -43,5 +43,3 @@ Either way, `python/diarization.py` and `python/server.py` degrade gracefully:
   by `server.py`; kept as a reference implementation for a no-cloud-at-all
   coaching mode, and as a starting point if you want to port scoring to a
   local model instead of Gemini.
-- `backfill_delivery_metrics.py` — maintenance script to recompute delivery
-  metrics for already-coached recordings after a scoring-logic change.

@@ -136,28 +136,8 @@ DEFAULT_DATA = {
 }
 
 
-def _config() -> dict[str, Any]:
-    try:
-        return json.loads(paths.CONFIG_PATH.read_text())
-    except (OSError, ValueError):
-        return {}
-
-
 def current_self_name() -> str | None:
     return db.get_setting("pending_self_name") or (db.get_person(db.get_self_person_id() or "") or {}).get("name")
-
-
-def scanner_executable() -> Path:
-    """Optional helper .app that owns macOS Voice Memos access (config: scanner_app)."""
-    return Path(_config().get("scanner_app") or "/Applications/Cora Scanner.app/Contents/MacOS/CoraScanner")
-
-
-def scanner_command() -> list[str]:
-    """Kickstart the LaunchAgent whose direct executable owns macOS access."""
-    label = _config().get("scanner_launch_agent") or "ai.voicecoach.scanner"
-    if not re.fullmatch(r"[A-Za-z0-9.-]+", label):
-        raise ValueError("Invalid scanner_launch_agent label in config.json")
-    return ["/bin/launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}"]
 
 
 LOCAL_LLM_MODELS = [

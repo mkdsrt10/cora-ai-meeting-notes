@@ -3,7 +3,7 @@
 For regulated deployments (HIPAA, defence contractors) an admin sets either
 `"enterprise_lockdown": true` in config.json or VOICECOACH_ENTERPRISE_LOCKDOWN=1
 (e.g. via MDM). While it is on, every outbound path refuses to run —
-tracing, cloud LLM/transcription providers, VM sync, and data contribution —
+tracing, cloud LLM/transcription providers, and data contribution —
 regardless of what a user toggles in Settings. The env var cannot be
 switched off from inside the app, which is what makes it enforceable.
 """

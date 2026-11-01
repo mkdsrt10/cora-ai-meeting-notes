@@ -5,13 +5,9 @@ import re
 import uuid
 
 from api.router import route
-from diarization import confirm_speaker
-from diarization import label_speaker
-from diarization import reset_speaker
 import datetime as dt
 import db
 import re
-from api.core import safe_folder
 from api.views import RAW_ID_PATTERN
 
 
@@ -114,29 +110,3 @@ def post_api_recording_participant(req, path: str, body: dict) -> None:
     db.update_recording_data(rec_id, "metadata", metadata)
     return req.send_json({"ok": True})
 
-
-@route("POST", '/api/confirm-speaker')
-def post_api_confirm_speaker(req, path: str, body: dict) -> None:
-    folder = safe_folder(body.get("id", ""))
-    result = confirm_speaker(folder, str(body.get("speaker_id", "")))
-    return req.send_json({"ok": True, "identity": result})
-
-
-@route("POST", '/api/label-speaker')
-def post_api_label_speaker(req, path: str, body: dict) -> None:
-    folder = safe_folder(body.get("id", ""))
-    result = label_speaker(
-        folder,
-        str(body.get("speaker_id", "")),
-        str(body.get("name", "")),
-        str(body.get("role", "")),
-        str(body.get("organization", "")),
-    )
-    return req.send_json({"ok": True, "speaker": result})
-
-
-@route("POST", '/api/reset-speaker')
-def post_api_reset_speaker(req, path: str, body: dict) -> None:
-    folder = safe_folder(body.get("id", ""))
-    reset_speaker(folder)
-    return req.send_json({"ok": True})

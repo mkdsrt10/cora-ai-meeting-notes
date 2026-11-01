@@ -332,13 +332,6 @@ def clear_coaching_artifacts(folder: Path) -> None:
     db.update_recording_data(folder.name, "delivery_metrics", {})
 
 
-def reset_speaker(folder: Path) -> None:
-    """Clear identity and identity-dependent coaching, preserving diarization."""
-    (folder / "self_speaker.json").unlink(missing_ok=True)
-    clear_coaching_artifacts(folder)
-    db.update_recording_data(folder.name, "identity", {})
-
-
 def atomic_json(path: Path, value: Any) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
