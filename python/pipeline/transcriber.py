@@ -176,10 +176,12 @@ class OpenAICompatibleAudio:
 
     def window(self, clip: Path, duration: float, block: str) -> list[dict[str, Any]]:
         """Raw turns relative to the clip. Rate limits, server errors and
-        dropped connections raise AsrCallError (retried by the ladder);
-        other HTTP errors (bad key, unknown model) fail the run."""
+        dropped connections raise AsrCallError (retried by the ladder); a
+        rejected key raises ProviderAuthError; other HTTP errors (unknown
+        model) fail the run."""
         import requests
 
+        from .errors import AUTH_STATUS, ProviderAuthError
         from .gemini_asr import AsrCallError
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         mime = {".wav": "audio/wav", ".flac": "audio/flac"}.get(clip.suffix.lower(), "audio/flac")
@@ -195,8 +197,11 @@ class OpenAICompatibleAudio:
             except (requests.ConnectionError, requests.Timeout) as exc:
                 raise AsrCallError(f"Transcription request failed: {exc}") from exc
             except requests.HTTPError as exc:
-                if getattr(exc.response, "status_code", None) in _RETRY_STATUS:
+                status = getattr(exc.response, "status_code", None)
+                if status in _RETRY_STATUS:
                     raise AsrCallError(f"Transcription request failed: {exc}") from exc
+                if status in AUTH_STATUS:
+                    raise ProviderAuthError("openai_compatible") from exc
                 raise
             body = res.json()
             raw = body.get("segments")

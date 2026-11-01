@@ -39,9 +39,12 @@ class SourceNotReady(RuntimeError):
 
 
 # Exit codes for --recording-id, read by the Electron Processing queue
-# (src/recording/processing-queue.js): 0 archived (or already archived),
-# EXIT_TEMPFAIL retry later, EXIT_NO_INPUT nothing to archive, 1 failed.
+# (src/recording/processing-queue.js): 0 archived (or already archived and its
+# Recording row exists), EXIT_USAGE bad id, EXIT_CORRUPTED unreadable audio
+# (quarantined; permanent), EXIT_NO_INPUT no audio to archive (permanent),
+# EXIT_TEMPFAIL retry later (lock busy, file still being written), 1 failed.
 EXIT_USAGE = 64
+EXIT_CORRUPTED = 65
 EXIT_NO_INPUT = 66
 EXIT_TEMPFAIL = 75
 LIVE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
@@ -583,11 +586,12 @@ def run_once(dry_run: bool = False) -> int:
     return 1 if failures else 0
 
 
-def quarantine_if_corrupted(path: Path, key: str, exc: Exception, state: dict) -> None:
-    # If the audio file is corrupted and unreadable (e.g. missing moov atom),
-    # quarantine it so future runs don't get stuck in an endless error loop.
+def quarantine_if_corrupted(path: Path, key: str, exc: Exception, state: dict) -> bool:
+    """If the audio file is corrupted and unreadable (e.g. missing moov atom),
+    quarantine it so future runs don't get stuck in an endless error loop.
+    True when the file was judged corrupted."""
     if "Failed to probe audio" not in str(exc) and "moov atom not found" not in str(exc):
-        return
+        return False
     corrupted_dest = path.parent / f".{path.name}.corrupted"
     try:
         path.rename(corrupted_dest)
@@ -601,6 +605,7 @@ def quarantine_if_corrupted(path: Path, key: str, exc: Exception, state: dict) -
         db.set_setting("state", state)
     except Exception as rename_err:
         print(f"Failed to quarantine {path}: {rename_err}", file=sys.stderr, flush=True)
+    return True
 
 
 def resolve_continues_id(continues_id: str) -> str:
@@ -628,7 +633,14 @@ def archive_recording(recording_id: str) -> int:
         p for p in INBOX.glob(f"{recording_id}.*")
         if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES and p.stem == recording_id
     ]
+    archived = db.get_recording_by_live_id(recording_id)
     if not candidates:
+        if archived:
+            print(f"Already archived: {recording_id}", flush=True)
+            return 0
+        if any(INBOX.glob(f".{recording_id}.*.corrupted")):
+            print(f"The audio for {recording_id} is corrupted and was quarantined", file=sys.stderr)
+            return EXIT_CORRUPTED
         print(f"No audio in the inbox for {recording_id}", file=sys.stderr)
         return EXIT_NO_INPUT
     path = candidates[0]
@@ -639,9 +651,17 @@ def archive_recording(recording_id: str) -> int:
     except FileNotFoundError:
         # Archived by a concurrent scan between glob and stat.
         return 0 if db.get_recording_by_live_id(recording_id) else EXIT_TEMPFAIL
-    if key in state["processed"]:
-        print(f"Already archived: {path}", flush=True)
-        return 0
+    entry = state["processed"].get(key)
+    if entry is not None:
+        if entry.get("status") == "corrupted":
+            print(f"The audio for {recording_id} is corrupted and was quarantined", file=sys.stderr)
+            return EXIT_CORRUPTED
+        if archived:
+            print(f"Already archived: {path}", flush=True)
+            return 0
+        print(f"{recording_id} was archived before but no Recording exists for it any more "
+              "(it may have been deleted); there is nothing to process", file=sys.stderr)
+        return EXIT_NO_INPUT
     runtime_config = config | {"_voice_memo_titles": load_voice_memo_titles(config)}
     print(f"Processing: {path}", flush=True)
     try:
@@ -651,8 +671,7 @@ def archive_recording(recording_id: str) -> int:
         return EXIT_TEMPFAIL
     except Exception as exc:
         print(f"ERROR processing {path}: {exc}", file=sys.stderr, flush=True)
-        quarantine_if_corrupted(path, key, exc, state)
-        return 1
+        return EXIT_CORRUPTED if quarantine_if_corrupted(path, key, exc, state) else 1
     state["processed"][key] = {
         "source": str(path),
         "output": str(folder),
@@ -670,7 +689,8 @@ def main() -> int:
     parser.add_argument(
         "--recording-id",
         help="Archive only this live recording (inbox/<id>.*) now, without the minimum-age wait. "
-        "For callers that know capture has ended. Exit codes: 0 ok, 66 no audio, 75 retry later, 1 failed.",
+        "For callers that know capture has ended. Exit codes: 0 ok, 64 usage, 65 corrupted audio, "
+        "66 no audio, 75 retry later, 1 failed.",
     )
     args = parser.parse_args()
     ensure_layout()

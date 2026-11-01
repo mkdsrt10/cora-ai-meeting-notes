@@ -216,6 +216,19 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
     # it runs local processing by default, not Gemini — the
     # confusing name is exactly why /api/process-recording
     # exists now).
+    # Every failure is answered as {"error", "code", "retryable"} so the
+    # Processing queue can tell permanent from transient (api.processing_errors).
+    try:
+        return _process_recording(req, path, body)
+    except Exception as exc:
+        from api.processing_errors import classify
+        status, payload = classify(exc)
+        print(f"[process-recording] failed: {type(exc).__name__} -> {payload['code']}", flush=True)
+        return req.send_json(payload, status)
+
+
+def _process_recording(req, path: str, body: dict) -> None:
+    from pipeline.errors import NoAudioError
     rec_id = str(body.get("id", ""))
     # The Electron Processing queue sends the live id it recorded under
     # (meeting_<timestamp>); archiving gave the Recording its folder id.
@@ -223,7 +236,10 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
         archived = db.get_recording_by_live_id(rec_id)
         if archived:
             rec_id = archived["id"]
-    folder = safe_folder(rec_id)
+    try:
+        folder = safe_folder(rec_id)
+    except (ValueError, FileNotFoundError):
+        raise NoAudioError() from None
     engine = str(body.get("engine", "")).lower()
     # The legacy whole-file Gemini diarization runs only on an explicit,
     # per-request ask. The Settings "Transcription engine" choice is handled
@@ -235,24 +251,16 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
     wants_cloud = path != "/api/local-process" and engine in {"cloud", "gemini", "vertex"}
     is_local = not wants_cloud
     if is_local:
-        try:
-            import local_meeting_pipeline
-            if 'processing' in body:
-                res = local_meeting_pipeline.process_recording_local(folder, options=body['processing'])
-            else:
-                res = local_meeting_pipeline.process_recording_local(folder)
-        except ImportError as exc:
-            return req.send_json({
-                "error": (
-                    "Local transcription isn't set up on this machine "
-                    f"(missing dependency: {exc}). Install it with "
-                    "`pip install mlx-whisper mlx-lm`, or set "
-                    "transcription_engine to \"gemini\" via /api/settings "
-                    "to use cloud diarization instead."
-                )
-            }, 503)
+        import local_meeting_pipeline
+        if 'processing' in body:
+            res = local_meeting_pipeline.process_recording_local(folder, options=body['processing'])
+        else:
+            res = local_meeting_pipeline.process_recording_local(folder)
+        # A merged Continuation is deleted; recording_id names the Recording
+        # (its parent) that now holds the result.
         return req.send_json({
             "ok": True,
+            "recording_id": res.get("recording_id") or folder.name,
             "diarization": res["diarization"],
             "speaker_profiles": res["speaker_profiles"],
             "call_summary": res["call_summary"],
@@ -260,7 +268,8 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
         })
     else:
         result = gemini_diarize(folder, model=LATEST_AUDIO_MODEL)
-        return req.send_json({"ok": True, "diarization": result, "speaker_profiles": speaker_profiles(result)})
+        return req.send_json({"ok": True, "recording_id": folder.name, "diarization": result,
+                              "speaker_profiles": speaker_profiles(result)})
 
 
 @route("POST", '/api/recording/key-phrase')

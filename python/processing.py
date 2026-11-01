@@ -96,6 +96,13 @@ def _text_provider_allowed(provider):
     return policy.provider_allowed(provider, base_url)
 
 
+class ProcessingBusyError(ValueError):
+    """The processing lock is held by another run (a manual run doesn't wait)."""
+
+    def __init__(self):
+        super().__init__('Another processing job is running; retry when it finishes')
+
+
 @contextmanager
 def scope(options, *, wait=False):
     """One processing run at a time, across API threads/processes: automatic
@@ -106,7 +113,7 @@ def scope(options, *, wait=False):
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
         except BlockingIOError:
-            raise ValueError('Another processing job is running; retry when it finishes') from None
+            raise ProcessingBusyError() from None
         thorough = options['mode'] == 'local_thorough' and options['provider'] == 'local_mlx'
         try:
             if thorough:

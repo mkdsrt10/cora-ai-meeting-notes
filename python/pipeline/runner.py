@@ -96,17 +96,26 @@ def _archive_previous_outputs(folder: Path) -> None:
 
 
 def process_recording_local(folder: Path, options: dict | None = None) -> dict[str, Any]:
+    """Process one Recording, then (lock released, trace run closed) run the
+    after_meeting Hook and clean up source audio — see post_processing.finish.
+    The result's `recording_id` is the Recording that now holds it: a merged
+    Continuation reports its parent."""
+    import post_processing
     import processing
     profile = processing.resolve(options)
     with processing.scope(profile, wait=options is None):
-        return _process_recording_selected(folder, profile)
+        result = _process_recording_selected(folder, profile)
+    source_audio = result.pop("source_audio")
+    post_processing.finish(result["recording_id"], source_audio)
+    return result
 
 
 def _process_recording_selected(folder: Path, profile: dict[str, Any]) -> dict[str, Any]:
     """Complete end-to-end local processing: MLX Whisper + AX Speakers + OCR Slides + Qwen3-4B."""
     audio_file = next((p for p in folder.iterdir() if p.is_file() and p.name.startswith("audio.")), None)
     if not audio_file:
-        raise FileNotFoundError(f"No audio file found in {folder}")
+        from .errors import NoAudioError
+        raise NoAudioError()
 
     _archive_previous_outputs(folder)
     _write_progress(folder, "starting", "Initializing selected processing pipeline...", percent=5)
@@ -368,15 +377,9 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
     except Exception as exc:
         print(f"[Local Pipeline] Langfuse tracing failed for {folder.name}: {exc}", flush=True)
 
-    # Audio retention is an explicit opt-out (default: keep it) set during
-    # onboarding. Only delete here, at the very end, after every artifact that
-    # reads the audio file (transcription, delivery metrics if coaching ran)
-    # has already been generated and persisted. Note this is a one-way trade:
-    # deleting the source audio also permanently removes playback/seek for
-    # this recording in the UI, not just the processing dependency.
-    if not db.get_setting("retain_audio", True):
-        audio_file.unlink(missing_ok=True)
-        print(f"[Local Pipeline] Deleted source audio for {folder.name} (retain_audio is off)", flush=True)
+    # The source audio stays until post_processing.finish has run the
+    # after_meeting Hook, so plugins may still read it.
+    source_audio = [audio_file]
 
     # If this recording is a continuation of an earlier meeting, merge the combined
     # artifacts directly into the parent meeting folder and database record, then clean up
@@ -392,7 +395,9 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
         (parent_folder / "transcript_diarized.md").write_text("\n".join(t_lines), encoding="utf-8")
 
         part_idx = len(list(parent_folder.glob("audio_part*.mov"))) + 2
-        shutil.copy2(audio_file, parent_folder / f"audio_part{part_idx}.mov")
+        merged_audio = parent_folder / f"audio_part{part_idx}.mov"
+        shutil.copy2(audio_file, merged_audio)
+        source_audio = [merged_audio]
 
         child_screenshots = folder / "screenshots"
         parent_screenshots = parent_folder / "screenshots"
@@ -432,9 +437,9 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
         print(f"[Local Pipeline] Continuation merged directly into parent {parent_folder.name} and child removed.", flush=True)
 
     print(f"[Local Pipeline] All artifacts saved for {folder.name}", flush=True)
-    import plugin_host  # after_meeting Hook; a continuation reports its merged parent
-    plugin_host.run_hook("after_meeting", folder.name if folder.is_dir() else parent_id)
     return {
+        "recording_id": folder.name if folder.is_dir() else parent_id,
+        "source_audio": source_audio,
         "diarization": diarization_payload,
         "call_summary": call_summary_payload,
         "speaker_profiles": speaker_profiles,

@@ -23,6 +23,7 @@ from typing import Any, Callable, Optional
 
 import ai_trace
 import policy
+from .errors import ProviderAuthError, ProviderNotConfiguredError, from_provider
 
 LOCAL_DEFAULT = "mlx-community/Qwen3-4B-Instruct-2507-4bit"
 ANTHROPIC_DEFAULT = "claude-sonnet-5-5"
@@ -177,12 +178,18 @@ def _transient(exc: Exception) -> bool:
     return status in RETRY_STATUS
 
 
-def _retrying(call: Callable[[], Any]) -> Any:
+def _retrying(call: Callable[[], Any], provider: Optional[str] = None) -> Any:
+    """Retry transient failures with backoff. Once retries are spent, or on a
+    401/403, raise the typed ProviderUnavailableError / ProviderAuthError
+    (whose message never quotes the provider's response body)."""
     for attempt in range(ATTEMPTS):
         try:
             return call()
         except Exception as exc:
             if attempt == ATTEMPTS - 1 or not _transient(exc):
+                typed = from_provider(exc, provider)
+                if typed is not None and typed is not exc:
+                    raise typed from exc
                 raise
             print(f"[Text model] transient error, retrying ({attempt + 1}/{ATTEMPTS - 1}): {type(exc).__name__}",
                   flush=True)
@@ -190,14 +197,14 @@ def _retrying(call: Callable[[], Any]) -> Any:
     raise AssertionError("unreachable")
 
 
-def _post(url: str, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
+def _post(url: str, headers: dict[str, str], payload: dict[str, Any], provider: Optional[str] = None) -> dict[str, Any]:
     import requests
 
     def call() -> dict[str, Any]:
         res = requests.post(url, headers=headers, json=payload, timeout=90)
         res.raise_for_status()
         return res.json()
-    return _retrying(call)
+    return _retrying(call, provider)
 
 
 # ---- adapters ---------------------------------------------------------------------
@@ -217,18 +224,20 @@ class OpenAICompatibleText(_Remote):
 
     def __init__(self, preset: str, base_url: str, api_key: str, model: str) -> None:
         if not base_url:
-            raise RuntimeError("Custom model endpoint has no base URL. Set it in Settings -> Models.")
+            raise ProviderNotConfiguredError(preset, "Custom model endpoint has no base URL. Set it in Settings -> Models.")
         self.trace_provider, self.base_url, self.api_key, self.model = preset, base_url, api_key, model
 
     def complete(self, prompt: str, *, system: str, max_tokens: int, trace: str) -> tuple[str, dict[str, Any]]:
         if self.trace_provider in {"openai", "openrouter", "groq"} and not self.api_key:
-            raise RuntimeError(f"{self.trace_provider} API key is not configured. Set it in Settings -> Models.")
+            raise ProviderAuthError(self.trace_provider, f"{self.trace_provider} API key is not configured. "
+                                    "Check the key in Settings -> Models.")
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         messages = ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": prompt}]
         data = _post(f"{self.base_url}/chat/completions", headers,
-                     {"model": self.model, "messages": messages, "temperature": 0.2, "max_tokens": max_tokens})
+                     {"model": self.model, "messages": messages, "temperature": 0.2, "max_tokens": max_tokens},
+                     self.trace_provider)
         choice = (data.get("choices") or [{}])[0]
         usage = data.get("usage") or {}
         return ((choice.get("message") or {}).get("content") or "",
@@ -245,13 +254,13 @@ class AnthropicText(_Remote):
 
     def complete(self, prompt: str, *, system: str, max_tokens: int, trace: str) -> tuple[str, dict[str, Any]]:
         if not self.api_key:
-            raise RuntimeError("Anthropic API key is not configured. Set it in Settings -> Models.")
+            raise ProviderAuthError("anthropic", "Anthropic API key is not configured. Check the key in Settings -> Models.")
         headers = {"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
         payload: dict[str, Any] = {"model": self.model, "max_tokens": max_tokens}
         if system:
             payload["system"] = system
         payload["messages"] = [{"role": "user", "content": prompt}]
-        data = _post(self.URL, headers, payload)
+        data = _post(self.URL, headers, payload, "anthropic")
         usage = data.get("usage") or {}
         return ("".join(c.get("text", "") for c in data.get("content", [])),
                 {"input_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens"),
@@ -270,7 +279,7 @@ class GeminiText(_Remote):
             self._client = credentials.build_gemini_client()
         res = _retrying(lambda: self._client.models.generate_content(
             model=self.model, contents=prompt,
-            config={"system_instruction": system or None, "max_output_tokens": max_tokens}))
+            config={"system_instruction": system or None, "max_output_tokens": max_tokens}), "gemini")
         return (res.text.strip() if res and res.text else ""), gemini_usage(res)
 
 

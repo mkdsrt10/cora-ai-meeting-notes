@@ -33,7 +33,10 @@ Disabled, the plugin host (`python/plugin_host.py`) leaves it out entirely:
 Enabled, the `after_meeting` Hook scores the owner's turns only for a
 Recording diarized by Gemini (whose audio already went to Google in that
 run) with a confirmed owner speaker. Locally processed Recordings are never
-uploaded by this plugin.
+uploaded by this plugin. It coaches once per diarization: the report records
+`coached_against` (a fingerprint of the diarization model, analysis time and
+owner speaker id), and a later Hook call for the same diarization uploads
+nothing and keeps the report.
 
 ## Files
 

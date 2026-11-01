@@ -3,6 +3,7 @@ and its after_meeting Hook. Light to import (no numpy, no Gemini SDK); the
 engine is imported only when a coaching report is actually generated."""
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -176,12 +177,24 @@ def payload(recording: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def coached_against(diarization: dict[str, Any], speaker_id: str) -> str:
+    """Fingerprint of what a report scores: this diarization (model and
+    analysis time) and the owner's speaker id within it. No meeting content."""
+    key = json.dumps([diarization.get("model"), diarization.get("analyzed_at"), speaker_id])
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
 def after_meeting(recording_id: str) -> None:
     """Score the owner's turns once a Recording is processed.
 
-    Runs only when this Recording was diarized by Gemini, so the audio has
-    already gone to Google in this run; a locally processed Recording is never
-    uploaded by this hook. Needs a confirmed owner speaker."""
+    Runs only when Coaching is enabled and this Recording was diarized by
+    Gemini (so the audio already went to Google for that diarization; a
+    locally processed Recording is never uploaded by this hook). Needs a
+    confirmed owner speaker. Coaches once per diarization: if the stored
+    report was coached against this diarization, nothing is uploaded."""
+    import plugin_host
+    if not plugin_host.is_enabled("coaching"):
+        return
     recording = db.get_recording(recording_id)
     if not recording:
         return
@@ -190,6 +203,10 @@ def after_meeting(recording_id: str) -> None:
     model = str(diarization.get("model") or "")
     if not (speaker_id and model.startswith("gemini")):
         return
+    fingerprint = coached_against(diarization, speaker_id)
+    if (recording.get("coaching") or {}).get("coached_against") == fingerprint:
+        return
     from plugins.coaching import engine
-    engine.coach(Path(recording["folder_path"]), mode="free", speaker_id=speaker_id, model=model,
-                 goals=db.get_setting("goals"))
+    result = engine.coach(Path(recording["folder_path"]), mode="free", speaker_id=speaker_id, model=model,
+                          goals=db.get_setting("goals"))
+    db.update_recording_data(recording_id, "coaching", {**result, "coached_against": fingerprint})

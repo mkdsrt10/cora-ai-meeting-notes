@@ -87,7 +87,7 @@ def transcribe_windows(audio_path: Path, speech: list[tuple[float, float]], cont
         if halves:
             print(f"[Cloud ASR] splitting window {window.start:.0f}-{window.end:.0f}s (level {depth + 1}/{MAX_SPLIT_DEPTH}) and retrying each half", flush=True)
             return [seg for half in halves for seg in run(half, depth + 1)]
-        raise WindowedASRError(f"Cloud transcription failed for {window.start:.0f}-{window.end:.0f}s of the recording: {last}")
+        raise WindowedASRError(f"Cloud transcription failed for {window.start:.0f}-{window.end:.0f}s of the recording: {last}") from last
 
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         # Executor workers do not inherit ContextVars. Give every task a

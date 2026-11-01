@@ -13,6 +13,7 @@ import pytest
 import credentials
 import policy
 from pipeline import transcriber as asr
+from pipeline.errors import ProviderAuthError
 
 
 def test_engines_come_from_the_module():
@@ -101,7 +102,7 @@ def test_openai_compatible_audio_errors_split_retryable_from_fatal(tmp_path, mon
         call(clip, 3.0, "ctx")
     with pytest.raises(AsrCallError):
         call(clip, 3.0, "ctx")
-    with pytest.raises(requests.HTTPError):
+    with pytest.raises(ProviderAuthError):
         call(clip, 3.0, "ctx")
 
 
