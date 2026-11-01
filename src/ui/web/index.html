@@ -385,7 +385,7 @@
           <button class="settings-nav-item" data-settings-panel="preferences">Preferences</button>
           <button class="settings-nav-item" data-settings-panel="meeting-types">Meeting types</button>
           <button class="settings-nav-item" data-settings-panel="models">Processing &amp; models</button>
-          <button class="settings-nav-item" data-settings-panel="cloud-models">Cloud LLMs &amp; APIs</button>
+          <button class="settings-nav-item" data-settings-panel="cloud-models">Where models run</button>
           <button class="settings-nav-item" data-settings-panel="mcp">Claude / ChatGPT (MCP)</button>
           <button class="settings-nav-item" data-settings-panel="privacy">Data &amp; privacy</button>
           <button class="settings-nav-item" data-settings-panel="logs">Notifications &amp; logs</button>
@@ -424,90 +424,48 @@
           </div>
 
           <div class="settings-panel" data-settings-content="cloud-models" hidden>
-            <h1 class="settings-title">Cloud LLMs &amp; APIs</h1>
-            <p class="settings-sub">Connect your own Anthropic Claude, OpenAI ChatGPT, or Google Gemini keys to generate frontier-grade executive notes, action items, and coaching.</p>
-            
-            <div class="auth-tabs" style="margin-top:14px">
-              <button type="button" class="auth-tab active" id="settingsTabAnthropic">Anthropic Claude</button>
-              <button type="button" class="auth-tab" id="settingsTabOpenAI">OpenAI</button>
-              <button type="button" class="auth-tab" id="settingsTabGemini">Google Gemini</button>
-              <button type="button" class="auth-tab" id="settingsTabCustom">Custom / Ollama</button>
+            <h1 class="settings-title">Where models run</h1>
+            <p class="settings-sub">Local (Ollama, LM Studio, on-device) keeps meetings on your Mac. Hosted providers receive the transcript.</p>
+
+            <h2 class="settings-section-title">Bring your own key</h2>
+            <div class="auth-tabs byom-tabs" id="byomPresetTabs"></div>
+            <p class="muted" id="byomPresetNote"></p>
+
+            <div class="settings-field" id="byomBaseUrlField">
+              <label for="byomBaseUrl">Base URL</label>
+              <input type="text" id="byomBaseUrl" class="auth-input" spellcheck="false" autocomplete="off">
+            </div>
+            <label class="byom-advanced" id="byomAdvancedField"><input type="checkbox" id="byomAdvanced"> Change base URL</label>
+
+            <div class="settings-field" id="byomKeyField">
+              <label for="byomKey"><span id="byomKeyLabel">API key</span> <span class="badge" id="byomKeySaved" hidden>Saved</span></label>
+              <input type="password" id="byomKey" class="auth-input" autocomplete="off" spellcheck="false">
             </div>
 
-            <!-- Anthropic Form -->
-            <div id="settingsAnthropicForm" style="margin-top:12px">
-              <div class="settings-field">
-                <label for="settingsAnthropicKey">Anthropic API Key</label>
-                <input type="password" id="settingsAnthropicKey" class="auth-input" placeholder="sk-ant-api03-…">
+            <div class="settings-field">
+              <label for="byomModel">Model</label>
+              <div class="byom-model-row">
+                <input type="text" id="byomModel" class="auth-input" list="byomModelList" spellcheck="false" autocomplete="off">
+                <button class="button secondary small" id="byomLoadModels" type="button">Load models</button>
               </div>
-              <div class="settings-field">
-                <label for="settingsAnthropicModel">Model</label>
-                <select id="settingsAnthropicModel" class="recording-select">
-                  <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (Recommended)</option>
-                  <option value="claude-opus-5-5">Claude Opus 5.5 (Most capable)</option>
-                  <option value="claude-haiku-5-5">Claude Haiku 5.5 (Fast)</option>
-                </select>
-              </div>
+              <datalist id="byomModelList"></datalist>
             </div>
 
-            <!-- OpenAI Form -->
-            <div id="settingsOpenAIForm" style="display:none;margin-top:12px">
-              <div class="settings-field">
-                <label for="settingsOpenAIKey">OpenAI API Key</label>
-                <input type="password" id="settingsOpenAIKey" class="auth-input" placeholder="sk-proj-…">
-              </div>
-              <div class="settings-field">
-                <label for="settingsOpenAIModel">Model</label>
-                <select id="settingsOpenAIModel" class="recording-select">
-                  <option value="gpt-4o">GPT-4o (Recommended)</option>
-                  <option value="gpt-4o-mini">GPT-4o mini (Fast)</option>
-                  <option value="o3-mini">o3-mini (Reasoning)</option>
-                </select>
-              </div>
-              <div class="settings-field">
-                <label for="settingsOpenAIBaseUrl">API Base URL</label>
-                <input type="text" id="settingsOpenAIBaseUrl" class="auth-input" placeholder="https://api.openai.com/v1">
-              </div>
+            <div class="settings-field" id="byomAsrField">
+              <label for="byomAsrModel">Transcription model (optional)</label>
+              <input type="text" id="byomAsrModel" class="auth-input" spellcheck="false" autocomplete="off">
             </div>
 
-            <!-- Gemini Form -->
-            <div id="settingsGeminiForm" style="display:none;margin-top:12px">
-              <div class="settings-field">
-                <label for="settingsGeminiKey">Gemini AI Studio Key</label>
-                <input type="password" id="settingsGeminiKey" class="auth-input" placeholder="AIzaSy…">
-              </div>
-              <div class="settings-field">
-                <label for="settingsGeminiModel">Model</label>
-                <select id="settingsGeminiModel" class="recording-select">
-                  <option value="gemini-3.8-flash">Gemini 3.8 Flash (Recommended)</option>
-                  <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                </select>
-              </div>
+            <div id="byomVertexField" hidden>
+              <button class="button secondary small" id="byomOpenVertex" type="button">Use Google Cloud (Vertex AI) instead</button>
             </div>
 
-            <!-- Custom Form -->
-            <div id="settingsCustomForm" style="display:none;margin-top:12px">
-              <div class="settings-field">
-                <label for="settingsCustomUrl">API Base URL</label>
-                <input type="text" id="settingsCustomUrl" class="auth-input" placeholder="http://localhost:11434/v1">
-              </div>
-              <div class="settings-field">
-                <label for="settingsCustomKey">API Key (Optional)</label>
-                <input type="password" id="settingsCustomKey" class="auth-input" placeholder="Leave blank for local Ollama">
-              </div>
-              <div class="settings-field">
-                <label for="settingsCustomModel">Model Name</label>
-                <input type="text" id="settingsCustomModel" class="auth-input" placeholder="e.g. llama3, qwen2.5, deepseek-r1">
-              </div>
-            </div>
-
-            <p class="onboarding-error" id="settingsCredError" style="display:none;margin-top:8px"></p>
-            <p class="onboarding-success" id="settingsCredSuccess" style="display:none;margin-top:8px"></p>
+            <p class="onboarding-error" id="byomError" style="display:none;margin-top:8px"></p>
+            <p class="onboarding-success" id="byomSuccess" style="display:none;margin-top:8px"></p>
 
             <div style="display:flex;gap:8px;margin-top:16px">
-              <button class="button secondary" id="settingsCredTestBtn" type="button">Test Connection</button>
-              <button class="button primary" id="settingsCredSaveBtn" type="button">Save Key</button>
+              <button class="button secondary" id="byomTestBtn" type="button">Test</button>
+              <button class="button primary" id="byomSaveBtn" type="button">Save</button>
             </div>
           </div>
 
@@ -699,6 +657,7 @@
 <script src="/js/memory.js"></script>
 <script src="/js/processing.js"></script>
 <script src="/js/settings.js"></script>
+<script src="/js/providers.js"></script>
 <script src="/js/model-setup.js"></script>
 <script src="/js/processing-history.js"></script>
 <script src="/js/notepad.js"></script>

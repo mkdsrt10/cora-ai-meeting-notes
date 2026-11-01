@@ -5,7 +5,7 @@ the best accuracy, you can switch one setting to use Google Gemini instead.
 
 ## Using Gemini
 
-1. **Settings > Cloud LLMs & APIs**: add a Google credential (an AI Studio API key, or Vertex AI).
+1. **Settings > Where models run > Gemini**: add an AI Studio API key, or use Google Cloud (Vertex AI).
    Use a **paid / billing-enabled** key or Vertex: on the AI Studio free tier Google may use your audio
    to improve its products.
 2. **Settings > On-Device Models > Transcription engine**: choose *Google Gemini*.

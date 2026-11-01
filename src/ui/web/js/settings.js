@@ -1,4 +1,4 @@
-// Settings view: profile, models, cloud providers, MCP config.
+// Settings view: profile, models, MCP config, logs (providers and keys: providers.js).
 // Classic script sharing global scope with the other files in index.html (load order matters).
 
 // --- Settings ---
@@ -41,18 +41,7 @@ async function loadSettingsView(){
   await renderSettingsModels();
   await loadMcpSettings();
   loadLogsSettings();
-  try {
-    const credsRes = await api('/api/credentials/status');
-    const c = credsRes.credentials || {};
-    if (c.has_anthropic_key && $('#settingsAnthropicKey')) $('#settingsAnthropicKey').placeholder = '•••••••••••••••••••••••• (Saved in Keychain)';
-    if (c.has_openai_key && $('#settingsOpenAIKey')) $('#settingsOpenAIKey').placeholder = '•••••••••••••••••••••••• (Saved in Keychain)';
-    if (c.has_ai_studio_key && $('#settingsGeminiKey')) $('#settingsGeminiKey').placeholder = '•••••••••••••••••••••••• (Saved in Keychain)';
-    if (c.custom_llm_url && $('#settingsCustomUrl')) $('#settingsCustomUrl').value = c.custom_llm_url;
-    if (c.anthropic_model && $('#settingsAnthropicModel')) $('#settingsAnthropicModel').value = c.anthropic_model;
-    if (c.openai_model && $('#settingsOpenAIModel')) $('#settingsOpenAIModel').value = c.openai_model;
-    if (c.openai_base_url && $('#settingsOpenAIBaseUrl')) $('#settingsOpenAIBaseUrl').value = c.openai_base_url;
-    if (c.gemini_model && $('#settingsGeminiModel')) $('#settingsGeminiModel').value = c.gemini_model;
-  } catch (e) {}
+  await loadProviderSettings();
 }
 
 async function renderSettingsModels(){
@@ -149,27 +138,7 @@ $('#settingsOpenFolder')?.addEventListener('click', () => {
   api('/api/open-folder', { method: 'POST', body: '{}' }).catch(error => toast(error.message, true));
 });
 
-// Cloud LLMs & MCP Settings tabs
-let activeSettingsCloudProvider = 'anthropic';
-
-function switchSettingsCloudTab(provider) {
-  activeSettingsCloudProvider = provider;
-  $('#settingsTabAnthropic')?.classList.toggle('active', provider === 'anthropic');
-  $('#settingsTabOpenAI')?.classList.toggle('active', provider === 'openai');
-  $('#settingsTabGemini')?.classList.toggle('active', provider === 'gemini');
-  $('#settingsTabCustom')?.classList.toggle('active', provider === 'custom');
-
-  if ($('#settingsAnthropicForm')) $('#settingsAnthropicForm').style.display = provider === 'anthropic' ? 'block' : 'none';
-  if ($('#settingsOpenAIForm')) $('#settingsOpenAIForm').style.display = provider === 'openai' ? 'block' : 'none';
-  if ($('#settingsGeminiForm')) $('#settingsGeminiForm').style.display = provider === 'gemini' ? 'block' : 'none';
-  if ($('#settingsCustomForm')) $('#settingsCustomForm').style.display = provider === 'custom' ? 'block' : 'none';
-}
-
-$('#settingsTabAnthropic')?.addEventListener('click', () => switchSettingsCloudTab('anthropic'));
-$('#settingsTabOpenAI')?.addEventListener('click', () => switchSettingsCloudTab('openai'));
-$('#settingsTabGemini')?.addEventListener('click', () => switchSettingsCloudTab('gemini'));
-$('#settingsTabCustom')?.addEventListener('click', () => switchSettingsCloudTab('custom'));
-
+// MCP settings
 async function loadMcpSettings() {
   try {
     const res = await api('/api/mcp/config');
@@ -198,80 +167,6 @@ $('#copyMcpCursorBtn')?.addEventListener('click', () => {
 $('#copyMcpCliBtn')?.addEventListener('click', () => {
   const text = $('#mcpClaudeCodeCmd')?.textContent;
   if (text) { copyText(text); toast('Copied CLI command to clipboard.'); }
-});
-
-$('#settingsCredTestBtn')?.addEventListener('click', async () => {
-  const p = activeSettingsCloudProvider;
-  let payload = { provider: p };
-  if (p === 'anthropic') {
-    payload.api_key = $('#settingsAnthropicKey')?.value.trim();
-    payload.model = $('#settingsAnthropicModel')?.value;
-  } else if (p === 'openai') {
-    payload.api_key = $('#settingsOpenAIKey')?.value.trim();
-    payload.model = $('#settingsOpenAIModel')?.value;
-    payload.base_url = $('#settingsOpenAIBaseUrl')?.value.trim();
-  } else if (p === 'gemini') {
-    payload.api_key = $('#settingsGeminiKey')?.value.trim();
-    payload.model = $('#settingsGeminiModel')?.value;
-  } else if (p === 'custom') {
-    payload.base_url = $('#settingsCustomUrl')?.value.trim();
-    payload.api_key = $('#settingsCustomKey')?.value.trim();
-    payload.model = $('#settingsCustomModel')?.value.trim();
-  }
-  const errEl = $('#settingsCredError');
-  const succEl = $('#settingsCredSuccess');
-  if (errEl) errEl.style.display = 'none';
-  if (succEl) succEl.style.display = 'none';
-  try {
-    const res = await api('/api/credentials/test', { method: 'POST', body: JSON.stringify(payload) });
-    if (succEl) {
-      succEl.textContent = `✅ ${res.message || 'Connected successfully!'}`;
-      succEl.style.display = 'block';
-    }
-    toast('Connection verified.');
-  } catch (err) {
-    if (errEl) {
-      errEl.textContent = `⚠️ ${err.message}`;
-      errEl.style.display = 'block';
-    }
-  }
-});
-
-$('#settingsCredSaveBtn')?.addEventListener('click', async () => {
-  const p = activeSettingsCloudProvider;
-  let payload = { provider: p };
-  if (p === 'anthropic') {
-    payload.api_key = $('#settingsAnthropicKey')?.value.trim();
-    payload.model = $('#settingsAnthropicModel')?.value;
-  } else if (p === 'openai') {
-    payload.api_key = $('#settingsOpenAIKey')?.value.trim();
-    payload.model = $('#settingsOpenAIModel')?.value;
-    payload.base_url = $('#settingsOpenAIBaseUrl')?.value.trim();
-  } else if (p === 'gemini') {
-    payload.api_key = $('#settingsGeminiKey')?.value.trim();
-    payload.model = $('#settingsGeminiModel')?.value;
-  } else if (p === 'custom') {
-    payload.base_url = $('#settingsCustomUrl')?.value.trim();
-    payload.api_key = $('#settingsCustomKey')?.value.trim();
-    payload.model = $('#settingsCustomModel')?.value.trim();
-  }
-  const errEl = $('#settingsCredError');
-  const succEl = $('#settingsCredSuccess');
-  if (errEl) errEl.style.display = 'none';
-  if (succEl) succEl.style.display = 'none';
-  try {
-    await api('/api/credentials/save', { method: 'POST', body: JSON.stringify(payload) });
-    if (succEl) {
-      succEl.textContent = `✅ Key saved and secured with Apple Keychain.`;
-      succEl.style.display = 'block';
-    }
-    toast('API credentials saved.');
-  } catch (err) {
-    if (errEl) {
-      errEl.textContent = `⚠️ ${err.message}`;
-      errEl.style.display = 'block';
-    }
-  }
 });
 
 // --- Notifications & logs ---

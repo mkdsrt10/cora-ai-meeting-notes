@@ -462,6 +462,13 @@ mark.search-match.active {
 .settings-field{display:flex;flex-direction:column;gap:6px}
 .settings-field label{font-size:12px;font-weight:600;color:var(--ink-2)}
 .settings-field input{padding:10px 12px;border-radius:8px;border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);font-family:inherit;font-size:13px}
+.settings-section-title{font-size:14px;font-weight:600;margin:4px 0 0}
+.byom-tabs{flex-wrap:wrap;margin:0}
+.byom-tabs .auth-tab{flex:0 1 auto}
+.byom-tabs .auth-tab small{font-weight:400;color:var(--muted);margin-left:4px}
+.byom-advanced{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.byom-model-row{display:flex;gap:8px;align-items:center}
+.byom-model-row input{flex:1}
 .settings-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-top:1px solid var(--hairline)}
 .settings-row strong{display:block;font-size:13px}
 .settings-row small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
