@@ -57,7 +57,8 @@ def read_json(path: Path, default: Any = None) -> Any:
 def find_audio(folder: Path) -> Path:
     candidates = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES)
     if not candidates:
-        raise FileNotFoundError("No archived audio file found")
+        from pipeline.errors import NoAudioError
+        raise NoAudioError()
     return candidates[0]
 
 

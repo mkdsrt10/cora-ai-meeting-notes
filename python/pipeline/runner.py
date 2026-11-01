@@ -114,7 +114,8 @@ def _process_recording_selected(folder: Path, profile: dict[str, Any]) -> dict[s
     """Complete end-to-end local processing: MLX Whisper + AX Speakers + OCR Slides + Qwen3-4B."""
     audio_file = next((p for p in folder.iterdir() if p.is_file() and p.name.startswith("audio.")), None)
     if not audio_file:
-        raise FileNotFoundError(f"No audio file found in {folder}")
+        from .errors import NoAudioError
+        raise NoAudioError()
 
     _archive_previous_outputs(folder)
     _write_progress(folder, "starting", "Initializing selected processing pipeline...", percent=5)

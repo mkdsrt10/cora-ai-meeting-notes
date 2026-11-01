@@ -11,6 +11,7 @@ import pytest
 import credentials
 import policy
 from pipeline import text_model as tm
+from pipeline.errors import ProviderAuthError
 
 
 class Response:
@@ -142,10 +143,9 @@ def test_transient_errors_are_retried_with_backoff(saved, posts):
 
 
 def test_client_errors_are_not_retried(saved, posts):
-    import requests
     saved["openai"] = {"api_key": "bad"}
     posts.replies.extend([Response({}, 401), chat_reply("never")])
-    with pytest.raises(requests.HTTPError):
+    with pytest.raises(ProviderAuthError):
         tm.text_model({"provider": "openai", "model": ""}).complete("x")
     assert len(posts.calls) == 1
 
@@ -230,7 +230,7 @@ def test_connection_test_uses_candidate_base_url_through_text_model(saved, posts
     assert posts.calls[0]["url"] == "http://localhost:9999/v1/chat/completions"
     posts.replies.append(Response({}, 401))
     ok, msg = credentials.test_credentials("openai", api_key="bad", base_url="https://api.openai.com/v1")
-    assert not ok and "Invalid OpenAI API key" in msg
+    assert not ok and "OpenAI" in msg and "API key is missing or invalid" in msg
 
 
 def test_settings_test_route_forwards_base_url(monkeypatch):

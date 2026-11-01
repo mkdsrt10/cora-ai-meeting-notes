@@ -13,10 +13,21 @@ from .config import _config
 
 
 def probe_duration(path: Path) -> float:
+    """Duration in seconds. Raises CorruptedAudioError when ffprobe cannot
+    read the file, MissingDependencyError when ffprobe is not installed."""
+    from .errors import CorruptedAudioError, MissingDependencyError
     ffprobe = shutil.which("ffprobe") or "/opt/homebrew/bin/ffprobe"
     cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)]
-    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-    return float(json.loads(result.stdout)["format"]["duration"])
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise MissingDependencyError("ffprobe") from None
+    except subprocess.CalledProcessError:
+        raise CorruptedAudioError() from None
+    try:
+        return float(json.loads(result.stdout)["format"]["duration"])
+    except (ValueError, KeyError, TypeError):
+        raise CorruptedAudioError() from None
 
 
 def find_speech_segments(

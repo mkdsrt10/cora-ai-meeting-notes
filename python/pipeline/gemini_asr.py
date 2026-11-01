@@ -94,6 +94,9 @@ def transcribe_window(clip: Path, duration: float, context: str, client: Optiona
                 response = client.models.generate_content(model=model, contents=contents,
                                                           config=_config(types, model, with_thinking=False))
         except Exception as exc:
+            from .errors import AUTH_STATUS, ProviderAuthError, status_of
+            if status_of(exc) in AUTH_STATUS:  # a rejected key: retrying or splitting cannot help
+                raise ProviderAuthError("gemini") from exc
             raise AsrCallError(f"Gemini request failed: {exc}") from exc
 
         usage = getattr(response, 'usage_metadata', None)
