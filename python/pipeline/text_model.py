@@ -58,6 +58,13 @@ def provider_of(preset: str) -> str:
     raise ValueError(f"Unknown text model provider: {preset}")
 
 
+def resolve_base_url(preset: str, url: Optional[str] = None) -> str:
+    """The one base-URL rule for an OpenAI-compatible preset: the given
+    (saved or entered) URL, else the preset's default, without a trailing
+    slash. "" for `custom` with nothing entered."""
+    return ((url or "").strip() or OPENAI_COMPATIBLE[preset][0]).rstrip("/")
+
+
 def gemini_default(backend: Optional[str] = None) -> str:
     """Default Gemini model for a Gemini backend (vertex or ai_studio)."""
     if backend is None:
@@ -143,7 +150,7 @@ def text_model(profile: dict[str, Any], *, connection: Optional[dict[str, Any]] 
     settings = dict(connection) if connection is not None else _saved(preset)
     model = profile.get("model") or settings.get("model") or default_model(preset)
     if kind == "openai_compatible":
-        settings["base_url"] = (settings.get("base_url") or OPENAI_COMPATIBLE[preset][0]).rstrip("/")
+        settings["base_url"] = resolve_base_url(preset, settings.get("base_url"))
     if not policy.provider_allowed(preset, settings.get("base_url")):
         raise policy.LockdownError(f"Text model provider '{preset}' is disabled by enterprise lockdown.")
     return TextModel(_adapter(preset, model, settings), provider=preset, model=model)
@@ -166,6 +173,78 @@ def _adapter(preset: str, model: str, settings: dict[str, Any]) -> Any:
     if kind == "gemini":
         return GeminiText(model, settings.get("client"))
     return OpenAICompatibleText(preset, settings["base_url"], settings.get("api_key") or "", model)
+
+
+# ---- listing a provider's models (Settings -> "Load models") -------------------
+
+MODELS_TIMEOUT_S = 10
+
+
+class ModelListError(RuntimeError):
+    """A provider's model list could not be read. The message is safe to show:
+    it never carries the provider's response body or the key."""
+
+
+ANTHROPIC_API = "https://api.anthropic.com/v1"
+ANTHROPIC_VERSION = "2023-06-01"
+
+
+def candidate_connection(preset: str, *, base_url: Optional[str] = None,
+                         api_key: Optional[str] = None) -> dict[str, str]:
+    """What Settings entered, completed from what is saved: {base_url, api_key}
+    for an OpenAI-compatible preset or Anthropic. A blank key means "keep the
+    saved key", but only for the saved base URL, so a saved key is never sent
+    to a newly typed host. Raises ValueError for an unsafe base URL."""
+    saved = _saved(preset)
+    key = (api_key or "").strip()
+    if preset == "anthropic":
+        return {"base_url": ANTHROPIC_API, "api_key": key or saved.get("api_key") or ""}
+    if preset not in OPENAI_COMPATIBLE:
+        raise ValueError(f"Unknown OpenAI-compatible preset: {preset}")
+    saved_url = resolve_base_url(preset, saved.get("base_url"))
+    url = resolve_base_url(preset, base_url) if (base_url or "").strip() else saved_url
+    if not url:
+        raise ValueError("Base URL cannot be empty.")
+    import credentials
+    url = credentials.validate_llm_base_url(url)
+    if not key and url == saved_url:
+        key = saved.get("api_key") or ""
+    return {"base_url": url, "api_key": key}
+
+
+def list_models(preset: str, *, base_url: Optional[str] = None, api_key: Optional[str] = None) -> list[str]:
+    """Model ids a provider offers (GET {base_url}/models), using the entered
+    key/base URL completed from the saved ones (candidate_connection).
+    Raises policy.LockdownError, ValueError (bad URL) or ModelListError."""
+    import requests
+    from urllib.parse import urlparse
+    conn = candidate_connection(preset, base_url=base_url, api_key=api_key)
+    url, key = conn["base_url"], conn["api_key"]
+    if not policy.provider_allowed(preset, url):
+        raise policy.LockdownError(f"Provider '{preset}' is disabled by enterprise lockdown.")
+    host = urlparse(url).hostname or "the endpoint"
+    if preset == "anthropic":
+        headers = {"x-api-key": key, "anthropic-version": ANTHROPIC_VERSION} if key else {}
+    else:
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
+    try:
+        res = requests.get(f"{url}/models", headers=headers, timeout=MODELS_TIMEOUT_S)
+    except requests.Timeout:
+        raise ModelListError(f"{host} did not answer in {MODELS_TIMEOUT_S}s.") from None
+    except requests.RequestException:
+        raise ModelListError(f"Could not reach {host}. Is it running?") from None
+    if res.status_code in (401, 403):
+        raise ModelListError("The provider rejected the API key.")
+    if res.status_code == 404:
+        raise ModelListError("This endpoint has no model list; type the model name.")
+    if res.status_code >= 400:
+        raise ModelListError(f"The provider returned HTTP {res.status_code}.")
+    try:
+        data = res.json()
+    except ValueError:
+        raise ModelListError("The provider's model list was not JSON.") from None
+    items = data.get("data") if isinstance(data, dict) else None
+    return sorted({str(m["id"]) for m in items or [] if isinstance(m, dict) and m.get("id")})
 
 
 # ---- retries --------------------------------------------------------------------
@@ -247,7 +326,7 @@ class OpenAICompatibleText(_Remote):
 
 class AnthropicText(_Remote):
     trace_provider = "anthropic"
-    URL = "https://api.anthropic.com/v1/messages"
+    URL = f"{ANTHROPIC_API}/messages"
 
     def __init__(self, model: str, api_key: str) -> None:
         self.model, self.api_key = model, api_key
@@ -255,7 +334,7 @@ class AnthropicText(_Remote):
     def complete(self, prompt: str, *, system: str, max_tokens: int, trace: str) -> tuple[str, dict[str, Any]]:
         if not self.api_key:
             raise ProviderAuthError("anthropic", "Anthropic API key is not configured. Check the key in Settings -> Models.")
-        headers = {"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+        headers = {"x-api-key": self.api_key, "anthropic-version": ANTHROPIC_VERSION, "content-type": "application/json"}
         payload: dict[str, Any] = {"model": self.model, "max_tokens": max_tokens}
         if system:
             payload["system"] = system

@@ -324,10 +324,13 @@ def _compute_public_status() -> dict[str, Any]:
         "custom_llm_url": custom_url,
         "anthropic_model": file_cfg.get("anthropic_model") or text_model.ANTHROPIC_DEFAULT,
         "openai_model": file_cfg.get("openai_model") or text_model.default_model("openai"),
-        "openai_base_url": file_cfg.get("openai_base_url") or text_model.OPENAI_COMPATIBLE["openai"][0],
+        "openai_base_url": text_model.resolve_base_url("openai", file_cfg.get("openai_base_url")),
         "custom_llm_model": file_cfg.get("custom_llm_model") or text_model.default_model("custom"),
         # Other OpenAI-compatible presets: which ones have a saved base URL.
         "openai_compatible_presets": {p: bool(file_cfg.get(f"{p}_base_url")) for p in ("openrouter", "groq", "ollama", "lmstudio")},
+        # Every text-model preset Settings can configure: saved model/base URL
+        # and whether a key is saved. Never the key itself.
+        "presets": _presets_status(has_ai_studio_key or (provider == "vertex" and is_configured)),
         "detected_gcloud_project": detected_project,
         "is_configured": is_configured,
         "storage_mode": "macOS Keychain (Secure Enclave) + 0600 file",
@@ -366,6 +369,28 @@ def provider_settings(provider: str) -> dict[str, Any]:
     return {"api_key": api_key, "model": file_cfg.get(model_field) or "", "base_url": base_url}
 
 
+_HOSTED_PRESETS = frozenset({"openai", "openrouter", "groq", "anthropic"})
+
+
+def _presets_status(gemini_configured: bool) -> dict[str, dict[str, Any]]:
+    """Public, key-free status per preset. A hosted preset is configured once it
+    has a key; a local one (Ollama, LM Studio, custom) once it was saved."""
+    from pipeline import text_model
+    out: dict[str, dict[str, Any]] = {}
+    for preset in (*OPENAI_COMPATIBLE_PRESETS, "anthropic"):
+        saved = provider_settings(preset)
+        has_key = bool(saved.get("api_key"))
+        out[preset] = {
+            "has_key": has_key,
+            "model": saved.get("model") or text_model.default_model(preset),
+            "base_url": text_model.ANTHROPIC_API if preset == "anthropic"
+            else text_model.resolve_base_url(preset, saved.get("base_url")),
+            "configured": has_key if preset in _HOSTED_PRESETS else bool(saved.get("base_url")),
+        }
+    out["gemini"] = {"has_key": gemini_configured, "configured": gemini_configured}
+    return out
+
+
 def save_anthropic_credentials(api_key: str, model: str = "") -> None:
     from pipeline.text_model import ANTHROPIC_DEFAULT
     api_key = api_key.strip()
@@ -399,11 +424,11 @@ def validate_llm_base_url(base_url: str) -> str:
 def save_openai_compatible_credentials(preset: str, base_url: str = "", api_key: str = "", model: str = "") -> None:
     """Save an OpenAI-compatible preset (openai, openrouter, groq, ollama,
     lmstudio, custom). The key goes to the Keychain like every other key."""
-    from pipeline.text_model import OPENAI_COMPATIBLE
+    from pipeline import text_model
     if preset not in OPENAI_COMPATIBLE_PRESETS:
         raise ValueError(f"Unknown OpenAI-compatible preset: {preset}")
-    default_url, default_model = OPENAI_COMPATIBLE[preset]
-    base_url = (base_url or default_url).strip()
+    default_model = text_model.default_model(preset)
+    base_url = text_model.resolve_base_url(preset, base_url)
     if not base_url:
         raise ValueError("Base URL cannot be empty.")
     base_url = validate_llm_base_url(base_url)
@@ -666,7 +691,7 @@ def test_credentials(
     from pipeline import text_model
     k = (api_key or "").strip()
     if provider in OPENAI_COMPATIBLE_PRESETS:
-        base_url = (base_url or "").strip() or text_model.OPENAI_COMPATIBLE[provider][0]
+        base_url = text_model.resolve_base_url(provider, base_url)
         if not base_url:
             return False, "Custom API Base URL cannot be empty (e.g. http://localhost:11434/v1)."
         try:
