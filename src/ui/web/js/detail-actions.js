@@ -9,19 +9,15 @@ $('#notepadPauseBtn')?.addEventListener('click', async () => {
   if(!record) return;
   const isCurrentlyPaused = record.status === 'paused' || record.analysis_stage === 'paused';
   try {
+    // Capture is driven only by the Electron Recording session.
+    if(!window.electronAPI) throw new Error('Recording controls are only available in the Cora app.');
     if(isCurrentlyPaused){
-      if(window.electronAPI?.resumeRecording){
-        await window.electronAPI.resumeRecording();
-      } else {
-        await api('/api/recording/resume', { method: 'POST', body: JSON.stringify({ id: record.id }) });
-      }
+      const result = await window.electronAPI.resumeRecording();
+      if(result && result.ok === false) throw new Error(result.error || 'Could not resume.');
       toast('Recording resumed.');
     } else {
-      if(window.electronAPI?.pauseRecording){
-        await window.electronAPI.pauseRecording();
-      } else {
-        await api('/api/recording/pause', { method: 'POST', body: JSON.stringify({ id: record.id }) });
-      }
+      const result = await window.electronAPI.pauseRecording();
+      if(result && result.ok === false) throw new Error(result.error || 'Could not pause.');
       toast('Recording paused — chunk saved to disk.');
     }
     await load();
@@ -32,12 +28,7 @@ $('#notepadPauseBtn')?.addEventListener('click', async () => {
 });
 
 $('#notepadSnapBtn')?.addEventListener('click', async () => {
-  const record = selectedRecording();
-  if (window.electronAPI?.snapScreenshot) {
-    await window.electronAPI.snapScreenshot();
-    toast('Slide captured with local Apple Vision OCR');
-  } else if (record) {
-    await api('/api/recording/screenshot', { method: 'POST', body: JSON.stringify({ id: record.id }) });
+  if (window.electronAPI?.snapScreenshot && await window.electronAPI.snapScreenshot()) {
     toast('Slide captured with local Apple Vision OCR');
   }
 });
@@ -233,19 +224,10 @@ $('#notepadContinueBtn')?.addEventListener('click', async () => {
   const record = selectedRecording();
   if(!record) return;
   try {
-    if(window.electronAPI?.startRecording){
-      const result = await window.electronAPI.startRecording(record.id);
-      if(!result?.ok){
-        throw new Error(result?.error || 'Could not start continuation recording.');
-      }
-    } else {
-      const result = await api('/api/recording/trigger-start', {
-        method: 'POST',
-        body: JSON.stringify({ continues_recording_id: record.id })
-      });
-      if(!result?.ok){
-        throw new Error(result?.error || 'Could not start continuation recording.');
-      }
+    if(!window.electronAPI?.startRecording) throw new Error('Recording is only available in the Cora app.');
+    const result = await window.electronAPI.startRecording(record.id);
+    if(!result?.ok){
+      throw new Error(result?.error || 'Could not start continuation recording.');
     }
     toast('Recording started — it will merge into this meeting\'s transcript and notes when finished.');
     await load();

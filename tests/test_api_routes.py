@@ -129,3 +129,18 @@ def test_people_can_be_created_without_overwriting_namesakes(port):
     stored = json.loads(call(port, 'GET', '/api/person?id='+first['id'])[1])['person']
     assert stored['role'] == 'Engineer' and stored['organization'] == 'Example'
     assert call(port,'POST','/api/people/create',{'name':None})[0] == 400
+
+
+def test_capture_is_driven_only_by_the_electron_recording_session():
+    # The old HTTP start/pause/resume/stop fallbacks were a second, divergent
+    # capture state machine (pkill/pgrep, no speaker-watch, no processing).
+    routes = set(router.registered())
+    for gone in [("POST", "/api/recording/trigger-start"), ("POST", "/api/recording/pause"),
+                 ("POST", "/api/recording/resume"), ("POST", "/api/recording/stop"),
+                 ("POST", "/api/recording/screenshot"), ("GET", "/api/unprocessed-recording")]:
+        assert gone not in routes, gone
+    # Still used by the Recording session's API client (src/recording/backend.js).
+    for kept in [("POST", "/api/recording/start"), ("POST", "/api/recording/status"),
+                 ("POST", "/api/recording/live-entry"), ("POST", "/api/recording/notes/append"),
+                 ("POST", "/api/recording/title")]:
+        assert kept in routes, kept

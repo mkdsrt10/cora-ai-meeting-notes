@@ -38,11 +38,14 @@ COMMAND = [
     str(paths.venv_python()),
     str(paths.PYTHON_DIR / "voice_memo_pipeline.py"),
     "--once",
+    # e.g. --recording-id <id> from the Processing queue; the exit code is
+    # passed back so the queue can retry or report.
+    *sys.argv[1:],
 ]
 
 stamp = dt.datetime.now().astimezone().isoformat()
 with LOG.open("a") as stdout, ERR.open("a") as stderr:
-    stdout.write(f"\n[{stamp}] cron scan\n")
+    stdout.write(f"\n[{stamp}] cron scan {' '.join(sys.argv[1:])}\n")
     stdout.flush()
     result = subprocess.run(COMMAND, cwd=ROOT, stdout=stdout, stderr=stderr, timeout=900)
 

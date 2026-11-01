@@ -4,9 +4,11 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Recording**: one captured meeting: a DB row plus a folder under `recordings/` holding audio tracks, transcript, notes and artifacts. Identified by its recording id.
 
-**Recording session**: the live capture of a Recording, from start to stop. Owns the capture state (idle, recording, finishing), the capture helper processes, mute, notes typed during the call and slide snaps. Lives in the Electron main process.
+**Recording session**: the live capture of a Recording, from start to stop. Owns the capture state (idle, recording, paused, finishing), the capture helper processes, mute, notes typed during the call and slide snaps. Lives in the Electron main process.
 
 **Continuation**: a Recording that extends an earlier one ("Continue meeting"). Its segments merge into the root Recording after processing.
+
+**Chunk**: one uninterrupted stretch of capture inside a Recording session, with its own recording id. Pausing ends a chunk; resuming starts a new chunk that is a Continuation of the session's first chunk. _Avoid_: segment (that is a stretch of transcript).
 
 **Capture helper**: a native Swift process (`dual-capture`, `speaker-watch`, `mic-watch`) driven over stdin/stdout. Its stdout lines are a small grammar parsed in one place.
 

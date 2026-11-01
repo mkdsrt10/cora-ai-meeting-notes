@@ -216,7 +216,14 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
     # it runs local processing by default, not Gemini — the
     # confusing name is exactly why /api/process-recording
     # exists now).
-    folder = safe_folder(body.get("id", ""))
+    rec_id = str(body.get("id", ""))
+    # The Electron Processing queue sends the live id it recorded under
+    # (meeting_<timestamp>); archiving gave the Recording its folder id.
+    if not db.get_recording(rec_id):
+        archived = db.get_recording_by_live_id(rec_id)
+        if archived:
+            rec_id = archived["id"]
+    folder = safe_folder(rec_id)
     engine = str(body.get("engine", "")).lower()
     # The legacy whole-file Gemini diarization runs only on an explicit,
     # per-request ask. The Settings "Transcription engine" choice is handled

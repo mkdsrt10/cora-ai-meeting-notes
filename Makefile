@@ -30,11 +30,12 @@ install-app:  ## refresh the code inside /Applications/Cora.app (quit it first)
 
 lint:
 	uv run ruff check python plugins tools tests
-	npx --no-install eslint src
+	npx --no-install eslint src test/js
 	node scripts/lint-ui.js
 
 test:
 	uv run pytest -m "not mlx"
+	npm run --silent test:js
 
 clean:
 	rm -f $(NATIVE)

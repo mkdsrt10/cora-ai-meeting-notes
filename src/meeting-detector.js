@@ -219,7 +219,7 @@ function checkOnce() {
 
 /**
  * Polls for an active meeting and calls back on state transitions. This is a
- * fallback for when mic-watch (see mic-watcher.js) isn't available — the mic
+ * fallback for when mic-watch (see recording/capture-helper.js) isn't available — the mic
  * going active is the fast, primary signal; this polls independently so a
  * meeting is still caught even if the native mic-watch binary fails to
  * launch. onMeetingDetected(meeting) fires once when a meeting first
