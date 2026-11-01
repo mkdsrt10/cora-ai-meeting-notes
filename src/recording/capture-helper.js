@@ -3,7 +3,7 @@
 // detection), parses their stdout grammar into typed events, and writes
 // their stdin commands. The Recording session only ever sees a handle:
 //
-//   const helper = startCaptureHelper({ outFile, speakersOut, logPath, selfName });
+//   const helper = startCaptureHelper({ recordingId, selfName });
 //   helper.on('event', (ev) => ...)   // see parseHelperLine for event shapes
 //   helper.on('exit', ({ code, signal }) => ...)  // dual-capture exited
 //   helper.setMuted(true)            // MUTE_MIC / UNMUTE_MIC over stdin
@@ -13,6 +13,7 @@
 const { spawn } = require('child_process');
 const { EventEmitter } = require('events');
 const fs = require('fs');
+const path = require('path');
 const readline = require('readline');
 
 const LEVEL = /^AUDIO_LEVEL mic=(-?[\d.]+) sys=(-?[\d.]+)/;
@@ -44,7 +45,7 @@ const EXIT_TIMEOUT_MS = 15000;
 
 function waitForExit(proc, label, timeoutMs) {
   return new Promise((resolve) => {
-    if (!proc || proc.exitCode !== null || proc.signalCode !== null) return resolve();
+    if (!proc || !proc.pid || proc.exitCode !== null || proc.signalCode !== null) return resolve();
     const timer = setTimeout(() => {
       console.error(`[Cora] ${label} did not exit within ${timeoutMs}ms of SIGINT; continuing anyway.`);
       resolve();
@@ -54,9 +55,16 @@ function waitForExit(proc, label, timeoutMs) {
 }
 
 // Real adapter. `bins` = { captureBin, speakerWatchBin } (speaker-watch is
-// optional: skipped when the binary is missing).
-function createCaptureHelperFactory(bins, { exitTimeoutMs = EXIT_TIMEOUT_MS } = {}) {
-  return function startCaptureHelper({ outFile, speakersOut, logPath, selfName }) {
+// optional: skipped when the binary is missing); `dirs` = { inboxDir, logsDir }.
+// Audio goes to <inbox>/<recordingId>.mov, the Speaker timeline to
+// <inbox>/<recordingId>_speakers.json.
+function createCaptureHelperFactory(bins, dirs, { exitTimeoutMs = EXIT_TIMEOUT_MS } = {}) {
+  return function startCaptureHelper({ recordingId, selfName }) {
+    fs.mkdirSync(dirs.inboxDir, { recursive: true });
+    fs.mkdirSync(dirs.logsDir, { recursive: true });
+    const outFile = path.join(dirs.inboxDir, `${recordingId}.mov`);
+    const speakersOut = path.join(dirs.inboxDir, `${recordingId}_speakers.json`);
+    const logPath = path.join(dirs.logsDir, `speaker-watch-${recordingId}.log`);
     const handle = new EventEmitter();
     const log = logPath ? fs.createWriteStream(logPath, { flags: 'a' }) : null;
     const emitLine = (line, source) => {
@@ -66,12 +74,20 @@ function createCaptureHelperFactory(bins, { exitTimeoutMs = EXIT_TIMEOUT_MS } = 
       if (ev) handle.emit('event', ev);
     };
 
+    // 'exit' is emitted exactly once, including when the binary never started.
+    let exited = false;
+    const emitExit = (code, signal) => {
+      if (exited) return;
+      exited = true;
+      handle.emit('exit', { code, signal });
+    };
     const capture = spawn(bins.captureBin, [outFile]);
     capture.on('error', (err) => {
       handle.emit('event', { type: 'error', message: err.message });
+      if (!capture.pid) emitExit(-1, null);
     });
     readline.createInterface({ input: capture.stdout }).on('line', (line) => emitLine(line, 'capture'));
-    capture.once('exit', (code, signal) => handle.emit('exit', { code, signal }));
+    capture.once('exit', (code, signal) => emitExit(code, signal));
 
     let speaker = null;
     if (bins.speakerWatchBin && fs.existsSync(bins.speakerWatchBin)) {
