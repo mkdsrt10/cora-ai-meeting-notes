@@ -50,6 +50,7 @@ async function loadSettingsView(){
     if (c.custom_llm_url && $('#settingsCustomUrl')) $('#settingsCustomUrl').value = c.custom_llm_url;
     if (c.anthropic_model && $('#settingsAnthropicModel')) $('#settingsAnthropicModel').value = c.anthropic_model;
     if (c.openai_model && $('#settingsOpenAIModel')) $('#settingsOpenAIModel').value = c.openai_model;
+    if (c.openai_base_url && $('#settingsOpenAIBaseUrl')) $('#settingsOpenAIBaseUrl').value = c.openai_base_url;
     if (c.gemini_model && $('#settingsGeminiModel')) $('#settingsGeminiModel').value = c.gemini_model;
   } catch (e) {}
 }
@@ -208,11 +209,12 @@ $('#settingsCredTestBtn')?.addEventListener('click', async () => {
   } else if (p === 'openai') {
     payload.api_key = $('#settingsOpenAIKey')?.value.trim();
     payload.model = $('#settingsOpenAIModel')?.value;
+    payload.base_url = $('#settingsOpenAIBaseUrl')?.value.trim();
   } else if (p === 'gemini') {
     payload.api_key = $('#settingsGeminiKey')?.value.trim();
     payload.model = $('#settingsGeminiModel')?.value;
   } else if (p === 'custom') {
-    payload.location = $('#settingsCustomUrl')?.value.trim();
+    payload.base_url = $('#settingsCustomUrl')?.value.trim();
     payload.api_key = $('#settingsCustomKey')?.value.trim();
     payload.model = $('#settingsCustomModel')?.value.trim();
   }
@@ -244,6 +246,7 @@ $('#settingsCredSaveBtn')?.addEventListener('click', async () => {
   } else if (p === 'openai') {
     payload.api_key = $('#settingsOpenAIKey')?.value.trim();
     payload.model = $('#settingsOpenAIModel')?.value;
+    payload.base_url = $('#settingsOpenAIBaseUrl')?.value.trim();
   } else if (p === 'gemini') {
     payload.api_key = $('#settingsGeminiKey')?.value.trim();
     payload.model = $('#settingsGeminiModel')?.value;

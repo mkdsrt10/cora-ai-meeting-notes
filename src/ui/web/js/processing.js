@@ -12,7 +12,7 @@ async function loadProcessingControls(hostId, { manual = false } = {}) {
     ${field('template', 'Notes template', option('auto','Auto-select with AI',pref.template) + data.templates.map(t=>option(t.id,t.name,pref.template)).join(''))}
     <details ${manual ? 'open' : ''}><summary>Models and engine overrides</summary>
     ${field('transcription','Transcription',option('local','Local MLX Whisper',pref.transcription)+option('gemini','Cloud · Google Gemini',pref.transcription))}
-    ${field('provider','Notes provider',[['local_mlx','Local MLX'],['gemini','Google Gemini'],['openai','OpenAI'],['anthropic','Anthropic'],['custom','Custom endpoint']].map(([id,name])=>option(id,name,pref.provider)).join(''))}
+    ${field('provider','Notes provider',[['local_mlx','Local MLX'],['gemini','Google Gemini'],['openai','OpenAI'],['anthropic','Anthropic'],['openrouter','OpenRouter'],['groq','Groq'],['ollama','Ollama (this Mac)'],['lmstudio','LM Studio (this Mac)'],['custom','Custom endpoint']].map(([id,name])=>option(id,name,pref.provider)).join(''))}
     <label>Notes model (blank uses configured default)<input class="auth-input" data-processing="model" value="${esc(pref.model)}" placeholder="MLX repo/path or cloud model ID"></label>
     <button type="button" class="button secondary small" data-processing-credentials>Configure Google credentials</button>
     <p class="muted">Configure other credentials in Cloud LLMs & APIs. Gemini credentials are required for cloud transcription. Thorough uses your selected MLX model; it does not download a larger model automatically.</p>
