@@ -231,7 +231,7 @@
       <div class="filters-bar">
         <input id="sessionSearch" class="filters-search" type="search" placeholder="Search sessions & summaries…">
         <select id="folderFilterSelect" title="Folder"><option value="">All folders</option></select>
-        <select id="stageFilter" title="Stage"><option value="">All stages</option><option value="needs_diarization">Needs diarization</option><option value="needs_speaker_confirmation">Needs my identity</option><option value="ready_for_coaching">Ready to coach</option><option value="coached">Coached</option></select>
+        <select id="stageFilter" title="Stage"><option value="">All stages</option></select>
         <select id="meetingTypeFilter" title="Meeting type"><option value="">All meeting types</option></select>
         <select id="personFilter" title="Person"><option value="">Anyone</option></select>
         <span class="filters-date-range">
@@ -706,6 +706,8 @@
 <script src="/js/onboarding.js"></script>
 <script src="/js/title-editor.js"></script>
 <script src="/js/search.js"></script>
+<script src="/js/plugin-host.js"></script>
+<!-- Enabled plugins' page scripts (src/ui/web/plugins/<id>.js) are loaded by plugin-host.js here, before init runs load(). -->
 <script src="/js/init.js"></script>
 </body>
 </html>

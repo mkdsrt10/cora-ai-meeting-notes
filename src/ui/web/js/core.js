@@ -6,24 +6,26 @@ const $$ = (q, root=document) => [...root.querySelectorAll(q)];
 let data = null;
 let selectedDetail = null;
 
-const titles = {
-  recordings: 'Home',
-  'recording-detail': 'Detail',
-  people: 'People',
-  memory: 'Memory',
-  settings: 'Settings',
-  'person-detail': 'Person'
-};
-const subtitles = {
-  recordings: 'Click a recording to view its analysis.',
-  people: 'Everyone Cora has recognized across your recordings — auto-matched from voice, editable anytime.',
-  memory: 'Names, terms, and context Cora has picked up from your own meetings, used to bias transcription toward the words you actually say.'
-};
-const stageLabels = {
-  recording: 'Recording…', processing: 'Processing…',
-  needs_diarization: 'Needs diarization', needs_speaker_confirmation: 'Identify me',
-  ready_for_coaching: 'Ready to coach', coached: 'Coached'
-};
+// Views: every page in the window registers here by id. Core pages register
+// below; plugin pages register from src/ui/web/plugins/<id>.js (see plugin-host.js).
+const views = {};
+function registerView(id, {title, subtitle, onShow} = {}){
+  const view = views[id] || {title: id, subtitle: '', onShow: null};
+  views[id] = {
+    title: title ?? view.title,
+    subtitle: subtitle ?? view.subtitle,
+    onShow: onShow ?? view.onShow,
+  };
+}
+registerView('recordings', {title: 'Home', subtitle: 'Click a recording to view its analysis.'});
+registerView('recording-detail', {title: 'Detail'});
+registerView('people', {title: 'People', subtitle: 'Everyone Cora has recognized across your recordings — auto-matched from voice, editable anytime.', onShow: () => renderPeople()});
+registerView('person-detail', {title: 'Person'});
+registerView('memory', {title: 'Memory', subtitle: 'Names, terms, and context Cora has picked up from your own meetings, used to bias transcription toward the words you actually say.', onShow: () => loadMemory()});
+registerView('settings', {title: 'Settings', onShow: () => loadSettingsView()});
+
+// Stage id -> label, from GET /api/plugins (core stages plus enabled plugins').
+let stageLabels = {};
 const PENDING_STAGES = new Set(['recording', 'processing', 'paused']);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtDate = value => value ? new Date(value).toLocaleString([], {dateStyle:'medium', timeStyle:'short'}) : 'Unknown date';
@@ -47,18 +49,21 @@ let currentView = 'recordings';
 let selectedRecordingId = null;
 
 function showView(name){
+  if(!views[name] || !$(`#view-${name}`)){
+    console.warn(`Unknown view "${name}", showing Home instead.`);
+    name = 'recordings';
+  }
+  const view = views[name];
   currentView = name;
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
   $$('.nav-item').forEach(v => v.classList.toggle('active', v.dataset.view === name));
-  $('#viewTitle').textContent = titles[name];
-  $('#viewSubtitle').textContent = subtitles[name] || '';
+  $('#viewTitle').textContent = view.title;
+  $('#viewSubtitle').textContent = view.subtitle || '';
   if(name !== 'recording-detail') {
     stopLiveFeedPolling();
     selectedRecordingId = null;
   }
-  if(name === 'people') renderPeople();
-  if(name === 'memory') loadMemory();
-  if(name === 'settings') loadSettingsView();
+  if(view.onShow) Promise.resolve(view.onShow($(`#view-${name}`))).catch(error => toast(error.message, true));
 }
 
 async function renderPeople(){
