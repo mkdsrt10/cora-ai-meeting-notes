@@ -572,6 +572,14 @@ def get_todo_states():
     with get_db() as conn:
         return [dict(row) for row in conn.execute("SELECT * FROM todo_state").fetchall()]
 
+def set_todo_state(recording_id, item_index, done, done_at):
+    with get_db() as conn:
+        conn.execute('''
+            INSERT INTO todo_state (recording_id, item_index, done, done_at) VALUES (?, ?, ?, ?)
+            ON CONFLICT(recording_id, item_index) DO UPDATE SET done=excluded.done, done_at=excluded.done_at
+        ''', (recording_id, int(item_index), int(bool(done)), done_at))
+        conn.commit()
+
 def upsert_vocabulary_term(term, source, now_iso):
     """Record or reinforce a transcription vocabulary term (a name, product, or
     system word worth biasing Whisper toward). Repeated sightings raise its

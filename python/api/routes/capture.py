@@ -10,7 +10,7 @@ import datetime as dt
 import db
 import paths
 import subprocess
-from api.core import ARCHETYPES, INBOX, safe_folder, safe_id
+from api.core import archetypes, INBOX, safe_folder, safe_id
 from api.views import PENDING_TITLES
 
 
@@ -29,7 +29,7 @@ def post_api_recording_start(req, path: str, body: dict) -> None:
     if archetype_id is not None:
         try:
             aid = int(archetype_id)
-            archetype = ARCHETYPES.get(aid)
+            archetype = archetypes().get(aid)
         except (ValueError, TypeError):
             pass
     meeting_tool = str(body.get("meeting_tool") or "").strip() or None

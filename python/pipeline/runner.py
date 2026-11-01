@@ -439,6 +439,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         print(f"[Local Pipeline] Continuation merged directly into parent {parent_folder.name} and child removed.", flush=True)
 
     print(f"[Local Pipeline] All artifacts saved for {folder.name}", flush=True)
+    import plugin_host  # after_meeting Hook; a continuation reports its merged parent
+    plugin_host.run_hook("after_meeting", folder.name if folder.is_dir() else parent_id)
     return {
         "diarization": diarization_payload,
         "call_summary": call_summary_payload,
