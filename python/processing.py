@@ -88,11 +88,11 @@ def resolve(overrides=None):
 
 
 def _text_provider_allowed(provider):
-    from pipeline.text_model import OPENAI_COMPATIBLE, base_url
+    from pipeline.text_model import OPENAI_COMPATIBLE, resolve_base_url
     if provider not in OPENAI_COMPATIBLE:
         return policy.provider_allowed(provider)
     import credentials
-    return policy.provider_allowed(provider, base_url(provider, credentials.provider_settings(provider).get('base_url')))
+    return policy.provider_allowed(provider, resolve_base_url(provider, credentials.provider_settings(provider).get('base_url')))
 
 
 @contextmanager

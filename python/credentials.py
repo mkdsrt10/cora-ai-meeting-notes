@@ -324,7 +324,7 @@ def _compute_public_status() -> dict[str, Any]:
         "custom_llm_url": custom_url,
         "anthropic_model": file_cfg.get("anthropic_model") or text_model.ANTHROPIC_DEFAULT,
         "openai_model": file_cfg.get("openai_model") or text_model.default_model("openai"),
-        "openai_base_url": text_model.base_url("openai", file_cfg.get("openai_base_url")),
+        "openai_base_url": text_model.resolve_base_url("openai", file_cfg.get("openai_base_url")),
         "custom_llm_model": file_cfg.get("custom_llm_model") or text_model.default_model("custom"),
         # Other OpenAI-compatible presets: which ones have a saved base URL.
         "openai_compatible_presets": {p: bool(file_cfg.get(f"{p}_base_url")) for p in ("openrouter", "groq", "ollama", "lmstudio")},
@@ -403,7 +403,7 @@ def save_openai_compatible_credentials(preset: str, base_url: str = "", api_key:
     if preset not in OPENAI_COMPATIBLE_PRESETS:
         raise ValueError(f"Unknown OpenAI-compatible preset: {preset}")
     default_model = text_model.default_model(preset)
-    base_url = text_model.base_url(preset, base_url)
+    base_url = text_model.resolve_base_url(preset, base_url)
     if not base_url:
         raise ValueError("Base URL cannot be empty.")
     base_url = validate_llm_base_url(base_url)
@@ -666,7 +666,7 @@ def test_credentials(
     from pipeline import text_model
     k = (api_key or "").strip()
     if provider in OPENAI_COMPATIBLE_PRESETS:
-        base_url = text_model.base_url(provider, base_url)
+        base_url = text_model.resolve_base_url(provider, base_url)
         if not base_url:
             return False, "Custom API Base URL cannot be empty (e.g. http://localhost:11434/v1)."
         try:

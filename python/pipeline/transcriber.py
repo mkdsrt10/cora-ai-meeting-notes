@@ -110,7 +110,7 @@ def _make(profile: dict[str, Any]) -> Transcriber:
                            engine=engine, model=model)
     import credentials
     import db
-    from .text_model import OPENAI_COMPATIBLE, base_url as resolve_base_url
+    from .text_model import OPENAI_COMPATIBLE, resolve_base_url
     preset = profile.get("provider") if profile.get("provider") in OPENAI_COMPATIBLE else "openai"
     settings = credentials.provider_settings(preset)
     base_url = resolve_base_url(preset, settings.get("base_url"))
