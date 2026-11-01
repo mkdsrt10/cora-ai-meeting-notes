@@ -1,4 +1,4 @@
-"""Structure checks for the API package: every endpoint registered once,
+"""Structure checks for the API package: core endpoints registered once,
 the server imports without the ML stack, and core routes answer."""
 import http.client
 import json
@@ -22,7 +22,13 @@ def test_expected_endpoints_are_registered():
                      ("GET", "/api/logs"), ("GET", "/api/logs/file"), ("POST", "/api/logs/bundle"),
                      ("POST", "/api/recording/continuation-status"), ("GET", "/api/recording/live-audio")]:
         assert expected in routes, expected
-    assert len(routes) >= 70
+
+
+def test_plugin_namespace_is_owned_by_the_plugin_host():
+    """Plugins add routes under /api/plugins/<id>/ through plugin_host, never
+    as core router entries, so adding a plugin never changes this table."""
+    under = {r for r in router.registered() if r[1].startswith("/api/plugins")}
+    assert under == {("GET", "/api/plugins"), ("GET", "/api/plugins/"), ("POST", "/api/plugins/")}
 
 
 def test_duplicate_routes_are_rejected():

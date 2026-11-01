@@ -22,10 +22,14 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **OpenAI-compatible preset**: a named `openai_compatible` endpoint a Processing profile can choose: `openai`, `openrouter`, `groq`, `ollama`, `lmstudio`, or `custom` (any base URL, e.g. a LiteLLM proxy). One preset serves both the profile's text and, when its transcription is `openai_compatible`, its audio. _Avoid_: custom LLM (that is only one preset).
 
-**Plugin**: a bundled extension that declares a View, data for a Recording, and Hooks. Bundled plugins at v1: Coaching, Todo/Planner.
+**Plugin**: a bundled extension that declares, in one place, its View, its data for a Recording, its Stages and its Hooks. Each is enabled or disabled on its own; a disabled Plugin is absent everywhere (no page, no data, no Hooks). Bundled plugins at v1: Coaching (off by default), Todo/Planner (on by default).
 
-**View**: a page in the Cora window, registered by id with a title and a render function. Plugins add Views without editing core files.
+**View**: a page in the Cora window, registered by id with a title, a subtitle and what to render when shown. Core pages and Plugin pages register the same way; a Plugin adds a View without editing core files.
 
-**Hook**: a point where the host calls plugins: `after_meeting` (once a Recording's notes are ready), `daily`.
+**Hook**: a point where the host calls plugins: `after_meeting` (once a Recording's notes are ready, whichever engine processed it), `daily`. One Plugin failing in a Hook never stops the others.
+
+**Stage**: where a Recording stands: recording, processing, paused, needs diarization, needs speaker confirmation, ready. A Plugin may refine "ready" into its own Stages (Coaching: ready to coach, coached). _Avoid_: status (that is only the capture/processing part).
+
+**Action item**: a follow-up written into a Recording's notes. Todo/Planner lists them across Recordings and tracks which are done.
 
 **Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript.

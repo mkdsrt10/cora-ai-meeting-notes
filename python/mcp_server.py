@@ -28,6 +28,7 @@ RECORDINGS = paths.RECORDINGS_DIR
 
 import db
 import credentials
+import recording_stage
 
 
 def _recording_folder(recording_id: str) -> Optional[Path]:
@@ -135,8 +136,9 @@ def cora_list_recordings(
 
     Args:
         limit: Maximum number of recordings to return (1-100, default 20).
-        stage: Optional filter by analysis stage ('recording', 'needs_diarization',
-               'needs_speaker_confirmation', 'ready_for_coaching', 'coached').
+        stage: Optional filter by analysis stage ('recording', 'processing', 'paused',
+               'needs_diarization', 'needs_speaker_confirmation', 'ready'; with the
+               coaching plugin enabled, 'ready_for_coaching' or 'coached' instead of 'ready').
         archetype: Optional substring filter for archetype (e.g. 'Technical Steering',
                    'Strategic L10', 'Client Solutioning', 'Standup', '1:1').
         meeting_tool: Optional exact-ish filter for which app the meeting was in
@@ -163,18 +165,7 @@ def cora_list_recordings(
         meta = r.get("metadata") or {}
         labels = r.get("speaker_labels") or {}
 
-        # Determine stage
-        rec_status = r.get("status")
-        if rec_status in {"recording", "processing"}:
-            current_stage = rec_status
-        elif not diarization or not diarization.get("segments"):
-            current_stage = "needs_diarization"
-        elif not identity.get("speaker_id"):
-            current_stage = "needs_speaker_confirmation"
-        elif not coaching or not coaching.get("executive_assessment"):
-            current_stage = "ready_for_coaching"
-        else:
-            current_stage = "coached"
+        current_stage = recording_stage.stage(r)
 
         if stage and current_stage.lower() != stage.lower():
             continue

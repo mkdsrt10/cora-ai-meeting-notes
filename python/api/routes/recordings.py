@@ -15,7 +15,7 @@ import db
 import json
 import re
 import time
-from api.core import ARCHETYPES, RECORDINGS, current_self_name, safe_folder
+from api.core import archetypes, RECORDINGS, current_self_name, safe_folder
 from api.views import participant_capture_payload, PENDING_TITLES, dashboard_payload, key_phrases_payload, live_transcript_payload, participants_payload, pending_recording_item, recording_item
 
 
@@ -120,9 +120,9 @@ def post_api_recording_archetype(req, path: str, body: dict) -> None:
     if archetype_key.lower() not in ["auto", "none", ""]:
         try:
             aid = int(archetype_key)
-            arch_data = ARCHETYPES.get(aid)
+            arch_data = archetypes().get(aid)
         except (ValueError, TypeError):
-            for a in ARCHETYPES.values():
+            for a in archetypes().values():
                 if a["archetype_name"].lower() == archetype_key.lower():
                     arch_data = a
                     break

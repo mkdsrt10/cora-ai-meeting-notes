@@ -4,15 +4,6 @@
 function renderStorage(){ $('#storageFree').textContent=fmtBytes(data.storage.disk_free_bytes); $('#archiveSize').textContent=fmtBytes(data.storage.archive_bytes); $('#audioSize').textContent=fmtBytes(data.storage.recordings_bytes); $('#storageDays').textContent=`${data.storage.estimated_days_at_four_hours} days`; }
 
 addEventListener('click', async event=>{
-  const seek=event.target.closest('[data-seek]'); if(seek){
-    const dashboard=seek.closest('.delivery-dashboard'), player=dashboard?.querySelector('.delivery-audio'), detail=dashboard?.querySelector('.delivery-event-detail');
-    if(player){player.currentTime=Number(seek.dataset.seek)||0;player.play().catch(()=>{});}
-    if(detail){
-      const source=seek.dataset.alternativeSource==='gemini_coaching'?'Recommended phrasing':'Tighter alternative';
-      detail.innerHTML=`<span class="kicker">${esc((seek.dataset.eventType||'moment').replaceAll('_',' '))} · ${fmtDuration(seek.dataset.seek)}</span><h4>${esc(seek.dataset.excerpt||'Delivery evidence')}</h4><p>${esc(seek.dataset.explanation||'Listen to this moment in context.')}</p><div class="event-alternative"><b>${source}</b><p>${esc(seek.dataset.alternative||'No rewrite is required for this moment.')}</p></div>`;
-    }
-    return;
-  }
   const copyPath=event.target.closest('[data-copy-path]'); if(copyPath){try{await copyText(copyPath.dataset.copyPath);toast('Recording folder path copied.');}catch(error){toast(error.message,true);}return;}
   const openFolder=event.target.closest('[data-open-recording-folder]'); if(openFolder){try{await api('/api/open-recording-folder',{method:'POST',body:JSON.stringify({id:openFolder.dataset.openRecordingFolder})});}catch(error){toast(error.message,true);}return;}
   const view=event.target.closest('[data-view]'); if(view){event.preventDefault();showView(view.dataset.view);return;}

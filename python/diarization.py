@@ -6,8 +6,8 @@ coaching plugin (plugins/coaching/) is installed or enabled — the Granola-equi
 "record it, transcribe it, summarize it, tell me who said what" pipeline.
 
 Executive coaching, delivery scoring, and archetype rubrics live in
-plugins/coaching/engine.py instead, and are reached only through
-plugin_registry.get_coaching_plugin() so this module never hard-depends on them.
+plugins/coaching/ instead; this module only fires the after_meeting Hook
+(plugin_host.run_hook) and never depends on any plugin.
 """
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from typing import Any
 import db
 import credentials
 from people_matcher import extract_reference_clip, run_voice_match, PEOPLE_DIR
-from plugin_registry import get_coaching_plugin
 
 LATEST_AUDIO_MODEL = credentials.get_default_model()
 AUDIO_SUFFIXES = {".m4a", ".mp3", ".wav", ".aiff", ".aif", ".mp4", ".caf", ".mov"}
@@ -562,7 +561,10 @@ def render_call_summary_markdown(summary: dict[str, Any]) -> str:
 def diarize(folder: Path, model: str = LATEST_AUDIO_MODEL, client=None) -> dict[str, Any]:
     import ai_trace
     with ai_trace.run("gemini_diarization", recording_id=folder.name, model=model):
-        return _diarize(folder, model, client)
+        result = _diarize(folder, model, client)
+    import plugin_host
+    plugin_host.run_hook("after_meeting", folder.name)
+    return result
 
 
 def _diarize(folder: Path, model: str = LATEST_AUDIO_MODEL, client=None) -> dict[str, Any]:
@@ -631,9 +633,7 @@ def _diarize(folder: Path, model: str = LATEST_AUDIO_MODEL, client=None) -> dict
         run_voice_match(folder.name, audio, result.get("segments", []), top_speakers, client)
 
         # AUTO-PILOT: if we found a high-confidence match for the user, auto-confirm
-        # identity — and, only when the coaching plugin is installed and enabled,
-        # auto-generate a coaching report. With the plugin absent/disabled this
-        # block still auto-confirms identity but never touches coaching.
+        # identity. Plugins (e.g. coaching) act on it in the after_meeting Hook.
         matches = db.get_speaker_matches(folder.name)
         for m in matches:
             if m.get("confidence") in ["high", "medium"]:
@@ -649,12 +649,6 @@ def _diarize(folder: Path, model: str = LATEST_AUDIO_MODEL, client=None) -> dict
                     }
                     atomic_json(folder / "self_speaker.json", identity_payload)
                     db.update_recording_data(folder.name, "identity", identity_payload)
-
-                    coaching_plugin = get_coaching_plugin()
-                    if coaching_plugin is not None:
-                        print("AUTO-PILOT: Coaching plugin enabled — auto-generating coaching report...")
-                        goals = db.get_setting("goals")
-                        coaching_plugin.coach(folder, mode="free", speaker_id=m["speaker_id"], model=model, client=client, goals=goals)
                     break
 
     except Exception as e:
