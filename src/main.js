@@ -7,7 +7,7 @@ const {
   MAC_OCR_BIN, PYTHON_SCRIPT, PIPELINE_SCRIPT, ICON_PATH, PYTHON_BIN,
 } = require('./main/paths');
 const {
-  DASHBOARD_PORT, DASHBOARD_URL, API_TOKEN, PYTHON_ENV, postJson, fetchJson, fetchSetting, verifyOwnServer,
+  DASHBOARD_PORT, DASHBOARD_URL, API_TOKEN, PYTHON_ENV, postJson, fetchJson, verifyOwnServer,
 } = require('./main/api-client');
 const { handleTrusted, installNavigationGuards } = require('./main/security');
 const { startMeetingWatcher, detectActiveMeeting } = require('./meeting-detector');
@@ -25,7 +25,6 @@ if (app.setName) app.setName(APP_NAME);
 
 let tray = null;
 let mainWindow = null;
-let currentArchetypeId = null;
 let pythonProcess = null;
 let stopMeetingWatcher = null;
 let stopMicWatcher = null;
@@ -209,7 +208,7 @@ recording.on('stopped', ({ recordingId, reason, warning }) => {
   if (warning) {
     notify({ title: 'Cora', body: warning, icon: ICON_PATH }, { level: 'error', recordingId });
   } else if (reason !== 'quit') {
-    notify({ title: 'Cora', body: 'Meeting ended. Processing coaching report...' }, { recordingId });
+    notify({ title: 'Cora', body: 'Meeting ended. Processing your meeting…' }, { recordingId });
   }
 });
 
@@ -226,14 +225,18 @@ recording.on('level', (levels) => {
 
 processingQueue.on('job', (job) => {
   if (job.state === 'done') {
-    const coached = job.recording && job.recording.analysis_stage === 'coached';
-    notify({
+    const notification = notify({
       title: 'Cora',
-      body: coached
-        ? 'Executive coaching report ready. Click to view your insights.'
-        : 'Speaker separation complete. Open dashboard to select your voice.',
+      body: 'Notes ready.',
       icon: ICON_PATH,
-    }, { recordingId: job.id });
+    }, { recordingId: (job.recording && job.recording.id) || job.id, show: false });
+    notification.on('click', () => {
+      if (mainWindow) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+    notification.show();
   } else if (job.state === 'failed') {
     // Only the code goes to the log; job.error is the user-facing message.
     console.error(`[Cora queue] ${job.id} failed (${job.code || 'unknown'}) after ${job.attempts} attempt(s)`);
@@ -248,12 +251,10 @@ processingQueue.on('job', (job) => {
 
 function onCaptureStarted(s) {
   refreshSelfName();
-  currentArchetypeId = null;
   notify({
     title: 'Cora',
     body: 'Recording meeting audio...'
   }, { recordingId: s.recordingId });
-  promptMeetingType();
 }
 
 // Start from the tray or the meeting-detected prompt; the reason a start
@@ -411,109 +412,10 @@ function createWindow() {
   });
 }
 
-// Meeting Archetypes from the Executive Ontology Spec (ranked by frequency across last 20 meetings)
-const MEETING_ARCHETYPES = [
-  {
-    id: 1,
-    label: 'Tech Steering & Arch',
-    hat: 'Chief Architect',
-    tip: 'Chief Architect: State verdict in first 15s. Bound by hard SLAs & token constraints. Assign single spec owner with deadline.'
-  },
-  {
-    id: 4,
-    label: 'Strategic L10 & Roadmap',
-    hat: 'Strategic Lead',
-    tip: 'Strategic Lead: Keep airtime <15%. Translate technical bottlenecks into business impact. Strict IDS (Identify, Discuss, Solve).'
-  },
-  {
-    id: 5,
-    label: 'Client Solutioning',
-    hat: 'Solution Strategist',
-    tip: 'Solution Strategist: Anchor on client ROI. Frame tech complexity as value. Zero uncosted scope creep (push to Phase 2).'
-  },
-  {
-    id: 2,
-    label: 'Standup & Blocker Sweep',
-    hat: 'Operating Lead',
-    tip: 'Operating Lead: Target <15m. Airtime 20-30%. 30s Parking Lot rule on rabbit holes. Rule of 4 action items (Owner+Verb+Time+Done).'
-  },
-  {
-    id: 3,
-    label: '1:1 Mentoring',
-    hat: 'Player-Coach',
-    tip: 'Player-Coach: Socratic questions > lecture (2:1 ratio). Don\'t solve the code. End with Synthesis Test: have them recap the plan.'
-  },
-  {
-    id: 7,
-    label: 'Solo Ideation / Memo',
-    hat: 'Thought Partner',
-    tip: 'Thought Partner: Unconstrained flow. Fillers & pacing ignored. Cora will auto-structure your audio into a clean spec document.'
-  },
-];
-
-async function selectMeetingArchetype(arch) {
-  currentArchetypeId = arch ? arch.id : null;
-  updateTrayMenu();
-  const { recordingId } = recording.state();
-  if (recordingId && arch) {
-    try {
-      await postJson('/api/recording/archetype', { id: recordingId, archetype_id: arch.id });
-    } catch (e) {
-      console.error('Failed to set recording archetype:', e.message);
-    }
-  }
-  if (arch) {
-    notify({
-      title: `Cora — Hat: ${arch.hat}`,
-      body: arch.tip,
-      icon: ICON_PATH,
-    });
-  } else {
-    notify({
-      title: 'Cora — Auto-detect Archetype',
-      body: 'Cora will analyze conversational dynamics and classify the meeting archetype after diarization.',
-      icon: ICON_PATH,
-    });
-  }
-}
-
-function promptMeetingType() {
-  const notification = notify({
-    title: 'Cora',
-    body: 'What kind of meeting is this? Select an archetype for real-time executive coaching:',
-    actions: MEETING_ARCHETYPES.map(a => ({ type: 'button', text: `${a.id}·${a.label}` })),
-    closeButtonText: 'Auto-detect',
-  }, { show: false });
-  let handled = false;
-  notification.on('action', (_event, index) => {
-    handled = true;
-    const arch = MEETING_ARCHETYPES[index];
-    if (arch) selectMeetingArchetype(arch);
-  });
-  notification.on('click', () => {
-    handled = true;
-    if (mainWindow) {
-      mainWindow.show();
-      mainWindow.focus();
-    }
-  });
-  notification.on('close', () => {
-    if (!handled && currentArchetypeId === null) {
-      notify({
-        title: 'Cora — Auto-detect Active',
-        body: 'Say the main point early and end with a clear next action. Cora will classify your meeting archetype automatically.',
-      });
-    }
-  });
-  notification.show();
-}
-
 function updateTrayMenu() {
   const { phase, recordingId } = recording.state();
   const capturing = phase === 'recording';
   const paused = phase === 'paused';
-  const currentArchObj = MEETING_ARCHETYPES.find(a => a.id === currentArchetypeId);
-  const archLabel = currentArchObj ? currentArchObj.label : 'Auto-detect';
 
   const template = [
     {
@@ -552,24 +454,6 @@ function updateTrayMenu() {
             }, { recordingId });
           }
         }
-      },
-      { type: 'separator' },
-      {
-        label: `Meeting Archetype: ${archLabel}`,
-        submenu: MEETING_ARCHETYPES.map(arch => ({
-          label: `${arch.label} (${arch.hat})`,
-          type: 'radio',
-          checked: currentArchetypeId === arch.id,
-          click: () => selectMeetingArchetype(arch)
-        })).concat([
-          { type: 'separator' },
-          {
-            label: 'Auto-detect Archetype',
-            type: 'radio',
-            checked: currentArchetypeId === null,
-            click: () => selectMeetingArchetype(null)
-          }
-        ])
       }
     );
   }
@@ -627,56 +511,6 @@ async function handleMicActive() {
   const meeting = await detectActiveMeeting();
   console.log(`[debug ${new Date().toISOString()}] detectActiveMeeting result:`, JSON.stringify(meeting));
   if (meeting) notifyMeetingDetected(meeting);
-}
-
-async function checkDailyReviewNotification() {
-  const now = new Date();
-  const dateStr = now.toISOString().split('T')[0];
-  
-  try {
-    const lastNotified = await fetchSetting('last_review_notification_date');
-    if (lastNotified === dateStr) return; // Already notified today
-    
-    // Have we passed 6:30 PM today?
-    const target = new Date();
-    target.setHours(18, 30, 0, 0);
-    
-    if (now >= target) {
-      // It's after 6:30 PM and we haven't notified today - fire the catch-up notification
-      const rawData = await fetchJson('/api/dashboard');
-      const data = JSON.parse(rawData);
-      
-      const hasCallsToday = data.home?.timeline?.length > 0;
-      
-      const notification = notify({
-        title: 'Cora',
-        body: hasCallsToday
-          ? "Time to review today's calls — 1 practice moment waiting."
-          : "No calls today — want to practice from a past recording instead?",
-        icon: ICON_PATH
-      }, { show: false });
-      
-      notification.on('click', () => {
-        if (mainWindow) {
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      });
-      
-      notification.show();
-      await postJson('/api/settings', { key: 'last_review_notification_date', value: dateStr });
-    }
-  } catch (err) {
-    console.error('Daily review notification check failed:', err.message);
-  }
-}
-
-function setupDailyReviewTimer() {
-  // Check immediately in case we need a catch-up notification
-  checkDailyReviewNotification();
-  
-  // Set up the interval to check every 15 minutes to see if we've crossed the 6:30PM threshold
-  setInterval(checkDailyReviewNotification, 15 * 60 * 1000);
 }
 
 app.whenReady().then(async () => {
@@ -738,8 +572,6 @@ app.whenReady().then(async () => {
       if (isCapturing()) recording.stop('meeting-ended');
     },
   });
-
-  setupDailyReviewTimer();
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
