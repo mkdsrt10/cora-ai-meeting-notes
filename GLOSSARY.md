@@ -28,10 +28,12 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **View**: a page in the Cora window, registered by id with a title, a subtitle and what to render when shown. Core pages and Plugin pages register the same way; a Plugin adds a View without editing core files.
 
-**Hook**: a point where the host calls plugins: `after_meeting` (once a Recording's notes are ready, whichever engine processed it), `daily`. One Plugin failing in a Hook never stops the others.
+**Hook**: a point where the host calls plugins: `after_meeting` (once per processed Recording, after its notes and Action items are saved and while its audio still exists, whichever engine processed it; a merged Continuation reports its root Recording), `daily`. One Plugin failing in a Hook never stops the others.
 
 **Stage**: where a Recording stands: recording, processing, paused, needs diarization, needs speaker confirmation, ready. A Plugin may refine "ready" into its own Stages (Coaching: ready to coach, coached). _Avoid_: status (that is only the capture/processing part).
 
-**Action item**: a follow-up written into a Recording's notes. Todo/Planner lists them across Recordings and tracks which are done.
+**Action item**: a follow-up written into a Recording's notes. Todo/Planner keeps each as a To-do.
+
+**To-do**: an Action item as Todo/Planner tracks it: done or not. It keeps its identity (and done mark) when its Recording is reprocessed and the same Action item comes back; one that no longer appears is superseded, not listed. _Avoid_: task.
 
 **Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript.
