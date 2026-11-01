@@ -38,6 +38,15 @@ class SourceNotReady(RuntimeError):
     """The source changed while being archived and should be retried later."""
 
 
+# Exit codes for --recording-id, read by the Electron Processing queue
+# (src/recording/processing-queue.js): 0 archived (or already archived),
+# EXIT_TEMPFAIL retry later, EXIT_NO_INPUT nothing to archive, 1 failed.
+EXIT_USAGE = 64
+EXIT_NO_INPUT = 66
+EXIT_TEMPFAIL = 75
+LIVE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
+
 DEFAULT_CONFIG = {
     "voice_memos_source": str(INBOX),
     "whisper_model": "mlx-community/whisper-small-mlx",
@@ -442,7 +451,7 @@ def process(path: Path, key: str, config: dict) -> Path:
         if pending_folder_id:
             metadata["folder_id"] = pending_folder_id
         if pending_continues_recording_id:
-            metadata["continues_recording_id"] = pending_continues_recording_id
+            metadata["continues_recording_id"] = resolve_continues_id(pending_continues_recording_id)
 
         # Companion Accessibility speaker timeline from speaker-watch
         speakers_source = path.parent / (path.stem + "_speakers.json")
@@ -587,38 +596,127 @@ def run_once(dry_run: bool = False) -> int:
         except Exception as exc:
             failures += 1
             print(f"ERROR processing {path}: {exc}", file=sys.stderr, flush=True)
-            # If the audio file is corrupted and unreadable (e.g. missing moov atom),
-            # quarantine it so future runs don't get stuck in an endless error loop.
-            if "Failed to probe audio" in str(exc) or "moov atom not found" in str(exc):
-                corrupted_dest = path.parent / f".{path.name}.corrupted"
-                try:
-                    path.rename(corrupted_dest)
-                    print(f"Quarantined corrupted file to {corrupted_dest}", file=sys.stderr, flush=True)
-                    state["processed"][key] = {
-                        "source": str(path),
-                        "status": "corrupted",
-                        "error": str(exc),
-                        "processed_at": dt.datetime.now().astimezone().isoformat(),
-                    }
-                    db.set_setting("state", state)
-                except Exception as rename_err:
-                    print(f"Failed to quarantine {path}: {rename_err}", file=sys.stderr, flush=True)
+            quarantine_if_corrupted(path, key, exc, state)
     return 1 if failures else 0
+
+
+def quarantine_if_corrupted(path: Path, key: str, exc: Exception, state: dict) -> None:
+    # If the audio file is corrupted and unreadable (e.g. missing moov atom),
+    # quarantine it so future runs don't get stuck in an endless error loop.
+    if "Failed to probe audio" not in str(exc) and "moov atom not found" not in str(exc):
+        return
+    corrupted_dest = path.parent / f".{path.name}.corrupted"
+    try:
+        path.rename(corrupted_dest)
+        print(f"Quarantined corrupted file to {corrupted_dest}", file=sys.stderr, flush=True)
+        state["processed"][key] = {
+            "source": str(path),
+            "status": "corrupted",
+            "error": str(exc),
+            "processed_at": dt.datetime.now().astimezone().isoformat(),
+        }
+        db.set_setting("state", state)
+    except Exception as rename_err:
+        print(f"Failed to quarantine {path}: {rename_err}", file=sys.stderr, flush=True)
+
+
+def resolve_continues_id(continues_id: str) -> str:
+    """A pause/resume chunk continues its root by the root's live id
+    (meeting_<timestamp>); once the root is archived its real id is the
+    folder name, which is what the continuation merge in pipeline/runner.py
+    looks for. Already-archived ids pass through unchanged."""
+    archived = db.get_recording_by_live_id(continues_id)
+    return archived["id"] if archived else continues_id
+
+
+def archive_recording(recording_id: str) -> int:
+    """Archive the one inbox file captured for this live Recording id.
+
+    Called by the Processing queue only after the capture helper process
+    has exited, i.e. after the file is closed, so there is no
+    minimum_age_seconds wait. process() still refuses a source that changes
+    during the copy (SourceNotReady -> EXIT_TEMPFAIL, retried by the queue).
+    Pending-row status is ignored: the caller is the one that ended capture."""
+    if not LIVE_ID_PATTERN.match(recording_id or ""):
+        print(f"Invalid recording id: {recording_id!r}", file=sys.stderr)
+        return EXIT_USAGE
+    config = ensure_layout()
+    candidates = [
+        p for p in INBOX.glob(f"{recording_id}.*")
+        if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES and p.stem == recording_id
+    ]
+    if not candidates:
+        print(f"No audio in the inbox for {recording_id}", file=sys.stderr)
+        return EXIT_NO_INPUT
+    path = candidates[0]
+    state = db.get_setting("state", {"processed": {}})
+    state.setdefault("processed", {})
+    try:
+        key = file_key(path)
+    except FileNotFoundError:
+        # Archived by a concurrent scan between glob and stat.
+        return 0 if db.get_recording_by_live_id(recording_id) else EXIT_TEMPFAIL
+    if key in state["processed"]:
+        print(f"Already archived: {path}", flush=True)
+        return 0
+    runtime_config = config | {"_voice_memo_titles": load_voice_memo_titles(config)}
+    print(f"Processing: {path}", flush=True)
+    try:
+        folder = process(path, key, runtime_config)
+    except SourceNotReady as exc:
+        print(f"Deferred until stable: {exc}", flush=True)
+        return EXIT_TEMPFAIL
+    except Exception as exc:
+        print(f"ERROR processing {path}: {exc}", file=sys.stderr, flush=True)
+        quarantine_if_corrupted(path, key, exc, state)
+        return 1
+    state["processed"][key] = {
+        "source": str(path),
+        "output": str(folder),
+        "processed_at": dt.datetime.now().astimezone().isoformat(),
+    }
+    db.set_setting("state", state)
+    print(f"Saved: {folder}", flush=True)
+    return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true", help="Scan once (default behavior).")
     parser.add_argument("--dry-run", action="store_true", help="List new recordings without processing.")
+    parser.add_argument(
+        "--recording-id",
+        help="Archive only this live recording (inbox/<id>.*) now, without the minimum-age wait. "
+        "For callers that know capture has ended. Exit codes: 0 ok, 66 no audio, 75 retry later, 1 failed.",
+    )
     args = parser.parse_args()
     ensure_layout()
     with LOCK_PATH.open("w") as lock:
+        if args.recording_id:
+            # A scan holding the lock is short; wait for it rather than
+            # reporting success for a file nobody archived.
+            if not acquire_lock(lock, timeout_seconds=60):
+                print("Another pipeline run is active; try again.", file=sys.stderr)
+                return EXIT_TEMPFAIL
+            return archive_recording(args.recording_id)
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             print("Another pipeline run is active; exiting.")
             return 0
         return run_once(dry_run=args.dry_run)
+
+
+def acquire_lock(lock, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.5)
 
 
 if __name__ == "__main__":
