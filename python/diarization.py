@@ -7,7 +7,7 @@ coaching plugin (plugins/coaching/) is installed or enabled — the Granola-equi
 
 Executive coaching, delivery scoring, and archetype rubrics live in
 plugins/coaching/ instead; this module only fires the after_meeting Hook
-(plugin_host.run_hook) and never depends on any plugin.
+(post_processing.finish) and never depends on any plugin.
 """
 from __future__ import annotations
 
@@ -560,10 +560,11 @@ def render_call_summary_markdown(summary: dict[str, Any]) -> str:
 
 def diarize(folder: Path, model: str = LATEST_AUDIO_MODEL, client=None) -> dict[str, Any]:
     import ai_trace
+    import post_processing
+    source_audio = [find_audio(folder)]
     with ai_trace.run("gemini_diarization", recording_id=folder.name, model=model):
         result = _diarize(folder, model, client)
-    import plugin_host
-    plugin_host.run_hook("after_meeting", folder.name)
+    post_processing.finish(folder.name, source_audio)
     return result
 
 
