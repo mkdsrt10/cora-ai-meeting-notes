@@ -114,3 +114,108 @@ def test_anthropic_models_use_its_own_header(saved, gets):
     call = gets.calls[0]
     assert call["url"] == "https://api.anthropic.com/v1/models"
     assert call["headers"]["x-api-key"] == "sk-ant-saved" and "Authorization" not in call["headers"]
+
+
+# ---- routes Settings calls ------------------------------------------------------
+
+def call_route(fn, body):
+    out = {}
+    req = SimpleNamespace(send_json=lambda payload, status=200: out.update(payload=payload, status=status))
+    fn(req, "", body)
+    return out["status"], out["payload"]
+
+
+def test_models_route_returns_the_list(saved, gets):
+    from api.routes import settings
+    gets.replies.append(Response({"data": [{"id": "b"}, {"id": "a"}]}))
+    status, payload = call_route(settings.post_api_credentials_models,
+                                 {"provider": "openrouter", "api_key": "or-key"})
+    assert (status, payload) == (200, {"ok": True, "models": ["a", "b"]})
+
+
+def test_models_route_errors_carry_no_key_or_body(saved, gets, monkeypatch):
+    from api.routes import settings
+    gets.replies.append(Response({}, 401, text="invalid key or-secret"))
+    status, payload = call_route(settings.post_api_credentials_models,
+                                 {"provider": "openrouter", "api_key": "or-secret"})
+    assert status == 400 and payload["ok"] is False and "rejected the API key" in payload["error"]
+    assert "or-secret" not in str(payload)
+    monkeypatch.setenv("VOICECOACH_ENTERPRISE_LOCKDOWN", "1")
+    status, payload = call_route(settings.post_api_credentials_models, {"provider": "groq", "api_key": "g"})
+    assert status == 403 and "lockdown" in payload["error"]
+
+
+@pytest.fixture
+def store(monkeypatch):
+    """In-memory Keychain + 0600 file; connection tests always pass and are recorded."""
+    keychain, files, tests = {}, {}, []
+    monkeypatch.setattr(credentials, "_keychain_set", lambda account, secret: keychain.__setitem__(account, secret) or True)
+    monkeypatch.setattr(credentials, "_keychain_get", lambda account, *a: keychain.get(account))
+    monkeypatch.setattr(credentials, "_keychain_delete", lambda account, *a: keychain.pop(account, None) or True)
+    monkeypatch.setattr(credentials, "_read_secure_file", lambda: dict(files))
+    monkeypatch.setattr(credentials, "_write_secure_file", lambda data: files.clear() or files.update(data) or True)
+    monkeypatch.setattr(credentials, "_sanitize_db", lambda: None)
+    monkeypatch.setattr(credentials, "detect_gcloud_project", lambda: "")
+    monkeypatch.setattr(credentials, "has_gcloud_adc", lambda: False)
+    credentials._invalidate_public_status_cache()
+    monkeypatch.setattr(credentials, "test_credentials", lambda **kw: tests.append(kw) or (True, "ok"))
+    return SimpleNamespace(keychain=keychain, files=files, tests=tests)
+
+
+@pytest.mark.parametrize("preset, body, expected_url", [
+    ("openai", {"api_key": "sk-1", "model": "gpt-4o-mini"}, "https://api.openai.com/v1"),
+    ("openrouter", {"api_key": "or-1", "model": "anthropic/claude"}, "https://openrouter.ai/api/v1"),
+    ("groq", {"api_key": "gsk-1", "model": "llama-3.3-70b-versatile"}, "https://api.groq.com/openai/v1"),
+    ("ollama", {"model": "qwen3"}, "http://localhost:11434/v1"),
+    ("lmstudio", {"model": "local", "base_url": "http://127.0.0.1:1235/v1/"}, "http://127.0.0.1:1235/v1"),
+    ("custom", {"api_key": "lite-1", "model": "proxy", "base_url": "https://litellm.example.com/v1"},
+     "https://litellm.example.com/v1"),
+])
+def test_save_route_stores_each_openai_compatible_preset(store, preset, body, expected_url):
+    from api.routes import settings
+    status, payload = call_route(settings.post_api_credentials_save, {"provider": preset, **body})
+    assert status == 200 and payload["ok"]
+    assert store.tests[-1]["base_url"] == expected_url and "location" not in store.tests[-1]
+    assert credentials.provider_settings(preset) == {"api_key": body.get("api_key", ""), "model": body["model"],
+                                                     "base_url": expected_url}
+    assert payload["credentials"]["presets"][preset]["configured"] is True
+    assert "sk-1" not in str(payload) and "lite-1" not in str(payload)
+
+
+def test_save_route_keeps_the_saved_key_when_the_field_is_left_blank(store):
+    from api.routes import settings
+    call_route(settings.post_api_credentials_save, {"provider": "groq", "api_key": "gsk-1", "model": "a"})
+    status, _ = call_route(settings.post_api_credentials_save, {"provider": "groq", "api_key": "", "model": "b"})
+    assert status == 200 and store.tests[-1]["api_key"] == "gsk-1"
+    assert credentials.provider_settings("groq")["model"] == "b" and store.keychain["groq_api_key"] == "gsk-1"
+
+
+def test_save_route_stores_anthropic_and_gemini(store):
+    from api.routes import settings
+    assert call_route(settings.post_api_credentials_save,
+                      {"provider": "anthropic", "api_key": "sk-ant-1", "model": "claude-opus-5-5"})[0] == 200
+    assert credentials.provider_settings("anthropic")["api_key"] == "sk-ant-1"
+    assert call_route(settings.post_api_credentials_save,
+                      {"provider": "ai_studio", "api_key": "AIza-1", "model": "gemini-3.7-flash"})[0] == 200
+    assert store.keychain["gemini_api_key"] == "AIza-1" and store.files["gemini_model"] == "gemini-3.7-flash"
+
+
+def test_save_route_stores_the_transcription_model(store, monkeypatch):
+    from api.routes import settings
+    import db
+    saved = {}
+    monkeypatch.setattr(db, "set_setting", lambda key, value: saved.update({key: value}))
+    call_route(settings.post_api_credentials_save,
+               {"provider": "groq", "api_key": "gsk-1", "model": "m", "asr_model": "whisper-large-v3"})
+    assert saved == {"openai_asr_model": "whisper-large-v3"}
+
+
+def test_test_route_sends_the_entered_base_url_and_falls_back_to_the_saved_key(store):
+    from api.routes import settings
+    call_route(settings.post_api_credentials_save,
+               {"provider": "custom", "api_key": "lite-1", "model": "m", "base_url": "https://proxy.example.com/v1"})
+    call_route(settings.post_api_credentials_test,
+               {"provider": "custom", "base_url": "https://proxy.example.com/v1", "location": "us-central1"})
+    assert store.tests[-1]["base_url"] == "https://proxy.example.com/v1" and store.tests[-1]["api_key"] == "lite-1"
+    call_route(settings.post_api_credentials_test, {"provider": "custom", "base_url": "https://other.example.com/v1"})
+    assert store.tests[-1]["api_key"] == ""

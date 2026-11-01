@@ -328,6 +328,9 @@ def _compute_public_status() -> dict[str, Any]:
         "custom_llm_model": file_cfg.get("custom_llm_model") or text_model.default_model("custom"),
         # Other OpenAI-compatible presets: which ones have a saved base URL.
         "openai_compatible_presets": {p: bool(file_cfg.get(f"{p}_base_url")) for p in ("openrouter", "groq", "ollama", "lmstudio")},
+        # Every text-model preset Settings can configure: saved model/base URL
+        # and whether a key is saved. Never the key itself.
+        "presets": _presets_status(has_ai_studio_key or (provider == "vertex" and is_configured)),
         "detected_gcloud_project": detected_project,
         "is_configured": is_configured,
         "storage_mode": "macOS Keychain (Secure Enclave) + 0600 file",
@@ -364,6 +367,28 @@ def provider_settings(provider: str) -> dict[str, Any]:
         if provider == "custom":
             base_url = _keychain_get("custom_llm_url") or base_url or os.environ.get("CUSTOM_LLM_URL", "")
     return {"api_key": api_key, "model": file_cfg.get(model_field) or "", "base_url": base_url}
+
+
+_HOSTED_PRESETS = frozenset({"openai", "openrouter", "groq", "anthropic"})
+
+
+def _presets_status(gemini_configured: bool) -> dict[str, dict[str, Any]]:
+    """Public, key-free status per preset. A hosted preset is configured once it
+    has a key; a local one (Ollama, LM Studio, custom) once it was saved."""
+    from pipeline import text_model
+    out: dict[str, dict[str, Any]] = {}
+    for preset in (*OPENAI_COMPATIBLE_PRESETS, "anthropic"):
+        saved = provider_settings(preset)
+        has_key = bool(saved.get("api_key"))
+        out[preset] = {
+            "has_key": has_key,
+            "model": saved.get("model") or text_model.default_model(preset),
+            "base_url": text_model.ANTHROPIC_API if preset == "anthropic"
+            else text_model.resolve_base_url(preset, saved.get("base_url")),
+            "configured": has_key if preset in _HOSTED_PRESETS else bool(saved.get("base_url")),
+        }
+    out["gemini"] = {"has_key": gemini_configured, "configured": gemini_configured}
+    return out
 
 
 def save_anthropic_credentials(api_key: str, model: str = "") -> None:

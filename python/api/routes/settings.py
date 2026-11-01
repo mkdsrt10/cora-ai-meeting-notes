@@ -144,22 +144,50 @@ def post_api_memory_terms_merge(req, path: str, body: dict) -> None:
     return req.send_json({"ok": True})
 
 
+def _candidate(provider: str, body: dict) -> dict:
+    """Entered api_key/base_url completed from the saved ones, for the
+    OpenAI-compatible presets and Anthropic (blank key = keep the saved key)."""
+    from pipeline import text_model
+    if provider == "anthropic" or provider in credentials.OPENAI_COMPATIBLE_PRESETS:
+        conn = text_model.candidate_connection(provider, base_url=body.get("base_url"), api_key=body.get("api_key"))
+        return {"api_key": conn["api_key"], "base_url": None if provider == "anthropic" else conn["base_url"]}
+    return {"api_key": body.get("api_key"), "base_url": body.get("base_url")}
+
+
 @route("POST", '/api/credentials/test')
 def post_api_credentials_test(req, path: str, body: dict) -> None:
     provider = body.get("provider", "vertex")
-    ok, msg = credentials.test_credentials(
-        provider=provider,
-        project=body.get("project"),
-        location=body.get("location", "us-central1"),
-        auth_type=body.get("auth_type", "adc"),
-        service_account_json=body.get("service_account_json"),
-        api_key=body.get("api_key"),
-        model=body.get("model"),
-        base_url=body.get("base_url"),
-    )
+    if provider in credentials.OPENAI_COMPATIBLE_PRESETS or provider == "anthropic":
+        ok, msg = credentials.test_credentials(provider=provider, model=body.get("model"), **_candidate(provider, body))
+    else:
+        ok, msg = credentials.test_credentials(
+            provider=provider,
+            project=body.get("project"),
+            location=body.get("location", "us-central1"),
+            auth_type=body.get("auth_type", "adc"),
+            service_account_json=body.get("service_account_json"),
+            api_key=body.get("api_key"),
+            model=body.get("model"),
+        )
     if not ok:
         return req.send_json({"ok": False, "error": msg}, 400)
     return req.send_json({"ok": True, "message": msg})
+
+
+@route("POST", '/api/credentials/models')
+def post_api_credentials_models(req, path: str, body: dict) -> None:
+    """Settings' "Load models": the provider's model ids, fetched here so the
+    saved key never reaches the renderer. Errors never echo the provider body."""
+    import policy
+    from pipeline import text_model
+    preset = str(body.get("provider") or body.get("preset") or "")
+    try:
+        models = text_model.list_models(preset, base_url=body.get("base_url"), api_key=body.get("api_key"))
+    except policy.LockdownError as exc:
+        return req.send_json({"ok": False, "error": str(exc)}, 403)
+    except (text_model.ModelListError, ValueError) as exc:
+        return req.send_json({"ok": False, "error": str(exc)}, 400)
+    return req.send_json({"ok": True, "models": models})
 
 
 @route("POST", '/api/credentials/save', '/api/onboarding/api-key')
@@ -172,6 +200,10 @@ def post_api_credentials_save(req, path: str, body: dict) -> None:
     auth_type = str(body.get("auth_type", "adc")).strip()
     sa_json = body.get("service_account_json")
     base_url = str(body.get("base_url", "")).strip()
+
+    if provider == "anthropic" or provider in credentials.OPENAI_COMPATIBLE_PRESETS:
+        candidate = _candidate(provider, body)
+        raw_key, base_url = candidate["api_key"], candidate["base_url"] or ""
 
     if provider == "anthropic":
         ok, msg = credentials.test_credentials(provider="anthropic", api_key=raw_key, model=model or None)
@@ -221,6 +253,10 @@ def post_api_credentials_save(req, path: str, body: dict) -> None:
             file_cfg["notes_llm_provider"] = "gemini"
             credentials._write_secure_file(file_cfg)
             credentials._invalidate_public_status_cache()
+
+    asr_model = str(body.get("asr_model") or "").strip()
+    if asr_model and provider in credentials.OPENAI_COMPATIBLE_PRESETS:
+        db.set_setting("openai_asr_model", asr_model)
 
     return req.send_json({"ok": True, "credentials": credentials.get_public_status()})
 
