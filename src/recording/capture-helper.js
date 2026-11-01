@@ -8,6 +8,7 @@
 //   helper.on('exit', ({ code, signal }) => ...)  // dual-capture exited
 //   helper.setMuted(true)            // MUTE_MIC / UNMUTE_MIC over stdin
 //   await helper.stop()              // SIGINT both, resolve once both exit
+//                                    // (SIGKILL after exitTimeoutMs)
 //
 // Tests replace this with a fake handle; nothing else spawns these binaries.
 const { spawn } = require('child_process');
@@ -43,14 +44,20 @@ function parseHelperLine(raw) {
 
 const EXIT_TIMEOUT_MS = 15000;
 
+const KILL_GRACE_MS = 2000;
+
+// Resolve once proc exits. A helper still running timeoutMs after SIGINT is
+// SIGKILLed, so no stopped Recording leaves a stray capture process behind.
 function waitForExit(proc, label, timeoutMs) {
   return new Promise((resolve) => {
     if (!proc || !proc.pid || proc.exitCode !== null || proc.signalCode !== null) return resolve();
+    let grace = null;
     const timer = setTimeout(() => {
-      console.error(`[Cora] ${label} did not exit within ${timeoutMs}ms of SIGINT; continuing anyway.`);
-      resolve();
+      console.error(`[Cora] ${label} did not exit within ${timeoutMs}ms of SIGINT; killing it.`);
+      try { proc.kill('SIGKILL'); } catch {}
+      grace = setTimeout(resolve, KILL_GRACE_MS);
     }, timeoutMs);
-    proc.once('exit', () => { clearTimeout(timer); resolve(); });
+    proc.once('exit', () => { clearTimeout(timer); clearTimeout(grace); resolve(); });
   });
 }
 

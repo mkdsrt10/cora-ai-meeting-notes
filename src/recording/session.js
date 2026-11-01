@@ -1,23 +1,31 @@
 // Recording session: the live capture of a Recording, from start to stop.
 //
 // Interface
-//   session.state() -> { phase, recordingId, rootId, startedAt, elapsedMs, muted, meeting, warning }
-//     phase: 'idle' | 'recording' | 'paused' | 'finishing'
+//   session.state() -> { phase, recordingId, rootId, startedAt, elapsedMs, muted, meeting, finishing }
+//     phase: 'idle' | 'recording' | 'paused'
 //     recordingId: the chunk being captured (or the paused chunk); null when idle
 //     rootId: the Recording this one continues (pause/resume chain or "Continue meeting"), else null
+//     finishing: ids of stopped Recordings still being finalized in the background
 //   session.start({ meeting, continues }) -> { ok, id } | { ok: false, error }
-//   session.stop(reason) -> Promise   idempotent; resolves once back to idle
+//     never refused because an earlier Recording is still finishing
+//   session.stop(reason) -> Promise   idempotent; back to idle at once; the
+//     promise resolves once that Recording is handed to the Processing queue
+//   session.shutdown() -> Promise     stop, then wait for every finishing Recording
 //   session.pause() -> { ok, id, status } | { ok: false, error }
 //   session.resume() -> Promise<{ ok, status } | { ok: false, error }>
 //   session.setMuted(bool) -> { ok, isMuted }
 //   session.appendNote(text) -> Promise<bool>
 //   'state' event: emitted with state() on every change (mute included)
 //   'level' event: { mic, sys } meter readings, not state
+//   'stopped' event: { recordingId, reason, warning } once per stop
 //
 // Invariants: recordingId is null whenever idle; a capture helper exiting on
-// its own while recording moves to finishing with a warning and is processed
-// like a stop; stop is idempotent; every chunk of a pause/resume chain is
-// handed to the Processing queue, root first, once the session ends.
+// its own while recording stops with a warning and is processed like a stop;
+// stop is idempotent; finishing a stopped Recording (helper exit, status
+// updates) runs in the background, tracked by id, and never blocks the next
+// start; every chunk of a pause/resume chain is handed to the Processing
+// queue, root first, exactly once, and Recordings are handed over in the
+// order they were stopped.
 const { EventEmitter } = require('events');
 
 const SPEAKER_DEBOUNCE_MS = 1500;
@@ -38,10 +46,12 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
   let startedAt = null;     // ms, start of the current chunk
   let muted = false;
   let meeting = null;
-  let warning = null;
   let helper = null;
   let flushing = null;      // helper.stop() of a paused chunk
-  let finishing = null;     // promise of an in-flight stop
+  const issued = new Set(); // every chunk id handed out by this session
+  let generation = 0;       // bumped per start, so a stale resume can tell
+  const finishing = new Map(); // first chunk id -> promise of its background finish
+  let handedOver = Promise.resolve(); // last finish in stop order
   let lastSpeaker = '';
   let lastSpeakerAt = 0;
 
@@ -56,7 +66,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
       elapsedMs: startedAt == null ? 0 : clock.now() - startedAt,
       muted,
       meeting,
-      warning,
+      finishing: [...finishing.keys()],
     };
   }
 
@@ -94,16 +104,17 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
 
   function onHelperExit(h, { code }) {
     if (h !== helper || h.expectedExit || phase !== 'recording') return;
-    warning = h.lastError
+    const warning = h.lastError
       ? `Recording stopped: ${h.lastError}`
       : `Recording stopped unexpectedly (capture helper exited with code ${code}).`;
-    stop('helper-exit');
+    stop('helper-exit', warning);
   }
 
   function startChunk(continues) {
     let id = newRecordingId(clock.now());
-    // Same-millisecond pause/resume must still get a distinct chunk id.
-    for (let n = 2; chunks.includes(id); n++) id = `${newRecordingId(clock.now())}-${n}`;
+    // Same-millisecond pause/resume or stop/start must still get a distinct id.
+    for (let n = 2; issued.has(id); n++) id = `${newRecordingId(clock.now())}-${n}`;
+    issued.add(id);
     recordingId = id;
     chunks.push(id);
     startedAt = clock.now();
@@ -128,52 +139,67 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
 
   function start({ meeting: tool = null, continues = null } = {}) {
     if (phase === 'recording' || phase === 'paused') return { ok: false, error: 'Already recording.' };
-    if (phase === 'finishing') return { ok: false, error: 'Still saving the last recording — try again in a moment.' };
+    generation += 1;
     chunks = [];
     rootId = continues || null;
     meeting = tool;
     muted = false;
-    warning = null;
     const id = startChunk(continues);
     emit();
     return { ok: true, id };
   }
 
-  function stop(reason) {
-    if (finishing) return finishing;
-    if (phase !== 'recording' && phase !== 'paused') return Promise.resolve();
-    const h = helper;
-    const pending = flushing;
-    phase = 'finishing';
-    emit();
-    finishing = (async () => {
+  // Finalize a stopped Recording in the background: wait for its helpers,
+  // mark it processing, then hand its chunks to the queue after every
+  // Recording stopped before it.
+  function finish({ h, pending, done, root }) {
+    const before = handedOver;
+    return (async () => {
       try {
-        if (h) {
-          h.expectedExit = true;
-          await h.stop();
-        }
+        if (h) await h.stop();
         if (pending) await pending;
-        const done = chunks.slice();
-        await Promise.all(done.map((id) => api.setStatus(id, 'processing').catch(log('status'))));
-        if (rootId && !done.includes(rootId)) {
-          await api.setContinuationStatus(rootId, 'processing').catch(log('continuation status'));
-        }
-        for (const id of done) queue.enqueue(id);
-      } finally {
-        helper = null;
-        flushing = null;
-        chunks = [];
-        recordingId = null;
-        rootId = null;
-        startedAt = null;
-        meeting = null;
-        muted = false;
-        phase = 'idle';
-        finishing = null;
-        emit();
+      } catch (err) {
+        log('helper stop')(err);
       }
+      await Promise.all(done.map((id) => api.setStatus(id, 'processing').catch(log('status'))));
+      if (root && !done.includes(root)) {
+        await api.setContinuationStatus(root, 'processing').catch(log('continuation status'));
+      }
+      await before;
+      for (const id of done) queue.enqueue(id);
     })();
-    return finishing;
+  }
+
+  function stop(reason, warning = null) {
+    if (phase !== 'recording' && phase !== 'paused') return handedOver;
+    const h = helper;
+    if (h) h.expectedExit = true;
+    const job = { h, pending: flushing, done: chunks.slice(), root: rootId };
+    const key = job.done[0];
+    helper = null;
+    flushing = null;
+    chunks = [];
+    recordingId = null;
+    rootId = null;
+    startedAt = null;
+    meeting = null;
+    muted = false;
+    phase = 'idle';
+
+    const p = finish(job).catch(log('finish')).finally(() => {
+      finishing.delete(key);
+      emit();
+    });
+    handedOver = p;
+    finishing.set(key, p);
+    events.emit('stopped', { recordingId: key, reason, warning });
+    emit();
+    return handedOver;
+  }
+
+  async function shutdown() {
+    stop('quit');
+    await Promise.all([...finishing.values()]);
   }
 
   function pause() {
@@ -196,9 +222,10 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
       return r.ok ? { ok: true, status: 'recording' } : r;
     }
     if (phase !== 'paused') return { ok: false, error: 'Not paused.' };
+    const gen = generation;
     if (flushing) await flushing;
-    // stop() may have finalized the session while the chunk was flushing.
-    if (phase !== 'paused') return { ok: false, error: 'Not paused.' };
+    // stop() (and maybe a new start) may have happened while the chunk was flushing.
+    if (phase !== 'paused' || gen !== generation) return { ok: false, error: 'Not paused.' };
     flushing = null;
     startChunk(rootId);
     emit();
@@ -227,6 +254,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
     state,
     start,
     stop,
+    shutdown,
     pause,
     resume,
     setMuted,

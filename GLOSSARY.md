@@ -4,7 +4,9 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Recording**: one captured meeting: a DB row plus a folder under `recordings/` holding audio tracks, transcript, notes and artifacts. Identified by its recording id.
 
-**Recording session**: the live capture of a Recording, from start to stop. Owns the capture state (idle, recording, paused, finishing), the capture helper processes, mute, notes typed during the call and slide snaps. Lives in the Electron main process.
+**Recording session**: the live capture of a Recording, from start to stop. Owns the capture state (idle, recording, paused), the capture helper processes, mute, notes typed during the call and slide snaps. Lives in the Electron main process. Stopping returns it to idle at once, so a new Recording can start straight away.
+
+**Finishing**: what happens to a Recording between stop and the Processing queue: its capture helpers exit (or are killed), it is marked processing, and it is handed to the queue, in the order Recordings were stopped. Runs in the background, per Recording; it never blocks the next start, and quitting waits for it.
 
 **Continuation**: a Recording that extends an earlier one ("Continue meeting"). Its segments merge into the root Recording after processing.
 

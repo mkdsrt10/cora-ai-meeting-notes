@@ -87,3 +87,16 @@ test('real adapter: a missing binary surfaces as an error and an exit', async ()
   await exited;
   assert.equal(events[0].type, 'error');
 });
+
+test('real adapter: a helper that ignores SIGINT is killed once the exit timeout passes', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cora-helper-'));
+  const captureBin = stubBin(dir, 'dual-capture', "process.on('SIGINT', () => {}); console.log('MIC_ON'); setInterval(() => {}, 1000);");
+  const start = createCaptureHelperFactory({ captureBin, speakerWatchBin: null }, { inboxDir: dir, logsDir: dir }, { exitTimeoutMs: 200 });
+  const handle = start({ recordingId: 'meeting_stuck', selfName: null });
+  const { exited } = collect(handle);
+  // Wait until the stub has installed its SIGINT handler.
+  await new Promise((resolve) => handle.on('event', resolve));
+  await handle.stop();
+  const info = await exited;
+  assert.equal(info.signal, 'SIGKILL');
+});
