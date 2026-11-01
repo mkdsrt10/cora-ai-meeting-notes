@@ -11,10 +11,11 @@ import subprocess
 import db
 import paths
 import policy
+from pipeline.text_model import PRESETS
 
 CURRENT = ContextVar('processing_options', default=None)
 MODES = ('local_light', 'local_thorough', 'cloud')
-PROVIDERS = ('local_mlx', 'gemini', 'openai', 'anthropic', 'custom')
+PROVIDERS = PRESETS  # Text model provider presets
 TEMPLATES = {
     'general': ('General meeting', 'Capture outcomes, discussion, decisions and unresolved questions.'),
     'one_on_one': ('1:1', 'Focus on feedback, concerns, development and mutual commitments.'),
@@ -76,11 +77,24 @@ def resolve(overrides=None):
         base.update(overrides)
     out = validate(base)
     if policy.lockdown_enabled():
-        if overrides and (out['provider'] != 'local_mlx' or out['transcription'] != 'local'):
+        # The same rule the Text model enforces: on-device models only, which
+        # includes an OpenAI-compatible endpoint on localhost (e.g. Ollama).
+        text_ok = _text_provider_allowed(out['provider'])
+        if overrides and (not text_ok or out['transcription'] != 'local'):
             raise policy.LockdownError('Cloud processing is disabled by enterprise lockdown')
-        out.update(mode='local_light' if out['mode'] == 'cloud' else out['mode'],
-                   transcription='local', provider='local_mlx', model='')
+        out.update(mode='local_light' if out['mode'] == 'cloud' else out['mode'], transcription='local')
+        if not text_ok:
+            out.update(provider='local_mlx', model='')
     return out
+
+
+def _text_provider_allowed(provider):
+    from pipeline.text_model import OPENAI_COMPATIBLE
+    if provider not in OPENAI_COMPATIBLE:
+        return policy.provider_allowed(provider)
+    import credentials
+    base_url = credentials.provider_settings(provider).get('base_url') or OPENAI_COMPATIBLE[provider][0]
+    return policy.provider_allowed(provider, base_url)
 
 
 @contextmanager

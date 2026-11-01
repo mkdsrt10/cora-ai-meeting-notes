@@ -14,14 +14,14 @@ import ai_trace
 import db
 import paths
 from .common import _parse_ts, _write_progress, format_ts
-from .config import LOCAL_LLM_MODEL_DEFAULT, resolve_whisper_model
-from .llm import _last_llm_stats
+from .config import resolve_whisper_model
+from .llm import UNTRUSTED, _last_llm_stats
 from .notes import _markdown_bullets
 from .speakers import _guess_remote_speakers, _load_continuation_segments, guess_speaker_from_tracks, load_accessibility_timeline, load_ax_participants, match_speaker_from_timeline, resolve_other_participant_name
 from .transcribe import transcribe_with_silence_removal
 from . import romanize
 from .context import build_context
-from .llm import LazyLLM
+from .text_model import text_model
 from .vocabulary import learn_from_transcript
 
 
@@ -97,11 +97,12 @@ def _archive_previous_outputs(folder: Path) -> None:
 
 def process_recording_local(folder: Path, options: dict | None = None) -> dict[str, Any]:
     import processing
-    with processing.scope(processing.resolve(options), wait=options is None):
-        return _process_recording_selected(folder)
+    profile = processing.resolve(options)
+    with processing.scope(profile, wait=options is None):
+        return _process_recording_selected(folder, profile)
 
 
-def _process_recording_selected(folder: Path) -> dict[str, Any]:
+def _process_recording_selected(folder: Path, profile: dict[str, Any]) -> dict[str, Any]:
     """Complete end-to-end local processing: MLX Whisper + AX Speakers + OCR Slides + Qwen3-4B."""
     audio_file = next((p for p in folder.iterdir() if p.is_file() and p.name.startswith("audio.")), None)
     if not audio_file:
@@ -111,7 +112,7 @@ def _process_recording_selected(folder: Path) -> dict[str, Any]:
     _write_progress(folder, "starting", "Initializing selected processing pipeline...", percent=5)
     try:
         with ai_trace.run("local_meeting_pipeline", recording_id=folder.name, audio_file=audio_file.name):
-            result = _process_recording_local_inner(folder, audio_file)
+            result = _process_recording_local_inner(folder, audio_file, profile)
         (folder / ".pipeline_progress.json").unlink(missing_ok=True)
         return result
     except Exception as exc:
@@ -119,7 +120,7 @@ def _process_recording_selected(folder: Path) -> dict[str, Any]:
         raise
 
 
-def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, Any]:
+def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict[str, Any]) -> dict[str, Any]:
     metadata = db.get_recording_data(folder.name, "metadata") or {}
     title = metadata.get("recording_name") or folder.name
 
@@ -217,28 +218,19 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         })
 
     # 2a. Name the remote turns the audio couldn't attribute (several other
-    # people on the call): conversational rules first, then the local LLM.
-    # One local model serves both text passes below, then is released
-    # before the notes stage loads its own.
-    import processing
-    options = processing.CURRENT.get()
-    if options and options['mode'] == 'cloud' and options['provider'] != 'local_mlx':
-        from .processing_notes import CloudLLM
-        text_llm = CloudLLM(options)
-    else:
-        text_llm = LazyLLM(db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT))
-    try:
+    # people on the call): conversational rules first, then the Text model.
+    # One Text model (a local model loads once) serves both text passes
+    # below, then is released before the notes stage opens its own.
+    with text_model(profile) as model:
         # 2a-i. Romanized Hinglish: convert any Devanagari the ASR produced
         # (see pipeline/romanize.py) before names and notes are derived.
         if any(romanize.DEVANAGARI.search(s["text"]) for s in aligned_segments):
             _write_progress(folder, "romanizing", "Converting to Romanized Hinglish...", percent=46)
-            stats = romanize.romanize_segments(aligned_segments, generate=lambda prompt: text_llm.generate(
-                prompt, name="romanize", prompt_template=romanize.INSTRUCTION, max_tokens=2000))
+            stats = romanize.romanize_segments(aligned_segments, generate=lambda prompt: model.complete(
+                prompt, system=UNTRUSTED, trace="romanize", template=romanize.INSTRUCTION, max_tokens=2000))
             print(f"[Local Pipeline] Romanization: {stats}", flush=True)
         # 2a-ii. Name remote turns the audio couldn't attribute.
-        _guess_remote_speakers(folder, aligned_segments, ax_participants, title, text_llm)
-    finally:
-        text_llm.release()
+        _guess_remote_speakers(folder, aligned_segments, ax_participants, title, model)
     assigned_speakers = {s["speaker_name"] for s in aligned_segments}
 
     # 2b. If this recording is linked as a continuation of an earlier one,
@@ -262,8 +254,9 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
     # structured-JSON ask — see generate_enhanced_notes() for why.
     full_transcript = "\n".join(f"[{s['start']} - {s['end']}] {s['speaker_name']}: {s['text']}" for s in aligned_segments)
     t0 = time.time()
+    import processing
     from .processing_notes import generate_notes, render
-    notes = generate_notes(full_transcript, slides_data, aligned_segments, folder=folder,
+    notes = generate_notes(full_transcript, slides_data, aligned_segments, options=profile, folder=folder,
                            user_notes=db.get_notes(folder.name) or '', context=processing.meeting_context(metadata, aligned_segments))
     stage_timings["summarization"] = time.time() - t0
     _write_progress(folder, "persisting", "Saving notes & updating Cora database...", percent=98)

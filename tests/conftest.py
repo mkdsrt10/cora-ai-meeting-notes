@@ -11,3 +11,25 @@ os.environ.pop("VOICECOACH_ENTERPRISE_LOCKDOWN", None)
 os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
 os.environ.pop("LANGFUSE_SECRET_KEY", None)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture
+def fake_text(monkeypatch):
+    """Every text_model(profile) built during the test uses one FakeText adapter.
+    Set `fake_text.reply` (str, list or callable) before the code under test runs."""
+    from pipeline import text_model
+
+    class Fake(text_model.FakeText):
+        reply = ""
+
+        def complete(self, prompt, **kwargs):
+            self._reply = self.reply
+            return super().complete(prompt, **kwargs)
+
+    fake = Fake()
+    monkeypatch.setattr(text_model, "_adapter", lambda preset, model, settings: fake)
+    monkeypatch.setattr(text_model, "_saved", lambda preset: {"model": "saved-" + preset})
+    return fake

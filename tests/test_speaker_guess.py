@@ -55,10 +55,23 @@ def test_nothing_to_do_without_roster():
 
 
 def test_truncated_llm_output_is_salvaged():
-    import json_repair
     raw = ('[{"turn": 1, "speaker": "Priya Shah", "confidence": 0.9, "evidence": "roadmap"}, '
            '{"turn": 2, "speaker": "Rahul Mehta", "confidence": 0.8, "evidence": "budget"}, {"turn": 3, "speak')
-    items = sg.parse_guess_list(raw, json_repair)
+    items = sg.parse_guess_list(raw)
     assert [i["turn"] for i in items] == [1, 2]
-    assert sg.parse_guess_list("no json here", json_repair) == []
-    assert [i["turn"] for i in sg.parse_guess_list('[{"turn": 5, "speaker": "X"}]', json_repair)] == [5]
+    assert sg.parse_guess_list("no json here") == []
+    assert [i["turn"] for i in sg.parse_guess_list('[{"turn": 5, "speaker": "X"}]')] == [5]
+
+
+def test_remote_speakers_are_named_through_the_runs_text_model(fake_text, tmp_path, monkeypatch):
+    import db
+    from pipeline import speakers, text_model
+    monkeypatch.setattr(db, "get_setting", lambda key, default=None: "Jane Doe" if key == "pending_self_name" else default)
+    segments = [seg("You", "Let's look at the budget numbers."), seg("Participant", "The budget is up ten percent.")]
+    fake_text.reply = json.dumps([{"turn": 1, "speaker": "Rahul Mehta", "confidence": 0.9,
+                                   "evidence": "The budget is up ten percent"}])
+    with text_model.text_model({"provider": "local_mlx", "model": ""}) as model:
+        speakers._guess_remote_speakers(tmp_path, segments, ROSTER, "Budget", model)
+    assert segments[1]["speaker_name"] == "Rahul Mehta"
+    assert segments[1]["speaker_guess"]["model"] == "saved-local_mlx"
+    assert fake_text.calls[0]["trace"] == "speaker_guess"
