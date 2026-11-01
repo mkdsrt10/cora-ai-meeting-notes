@@ -57,6 +57,13 @@ def provider_of(preset: str) -> str:
     raise ValueError(f"Unknown text model provider: {preset}")
 
 
+def base_url(preset: str, url: Optional[str] = None) -> str:
+    """The one base-URL rule for an OpenAI-compatible preset: the given
+    (saved or entered) URL, else the preset's default, without a trailing
+    slash. "" for `custom` with nothing entered."""
+    return ((url or "").strip() or OPENAI_COMPATIBLE[preset][0]).rstrip("/")
+
+
 def gemini_default(backend: Optional[str] = None) -> str:
     """Default Gemini model for a Gemini backend (vertex or ai_studio)."""
     if backend is None:
@@ -142,7 +149,7 @@ def text_model(profile: dict[str, Any], *, connection: Optional[dict[str, Any]] 
     settings = dict(connection) if connection is not None else _saved(preset)
     model = profile.get("model") or settings.get("model") or default_model(preset)
     if kind == "openai_compatible":
-        settings["base_url"] = (settings.get("base_url") or OPENAI_COMPATIBLE[preset][0]).rstrip("/")
+        settings["base_url"] = base_url(preset, settings.get("base_url"))
     if not policy.provider_allowed(preset, settings.get("base_url")):
         raise policy.LockdownError(f"Text model provider '{preset}' is disabled by enterprise lockdown.")
     return TextModel(_adapter(preset, model, settings), provider=preset, model=model)
