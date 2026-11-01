@@ -24,6 +24,15 @@ const CHILD_PATH = [BUNDLED_FFMPEG_DIR, process.env.PATH].filter(Boolean).join(p
 
 const PYTHON_ENV = { ...process.env, PATH: CHILD_PATH, PYTHONUNBUFFERED: '1', VOICECOACH_API_TOKEN: API_TOKEN, VOICECOACH_DATA_DIR: DATA_DIR };
 
+// The body stays off the message (it can hold transcript or notes text and
+// messages end up in logs); callers that understand it read `responseBody`.
+function httpError(pathName, statusCode, body) {
+  const err = new Error(`${pathName} failed (${statusCode})`);
+  err.statusCode = statusCode;
+  Object.defineProperty(err, 'responseBody', { value: body, enumerable: false });
+  return err;
+}
+
 function postJson(pathName, body) {
   return new Promise((resolve, reject) => {
     const payload = Buffer.from(JSON.stringify(body));
@@ -39,9 +48,7 @@ function postJson(pathName, body) {
         let data = '';
         res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
-          if (res.statusCode && res.statusCode >= 400) {
-            return reject(new Error(`${pathName} failed (${res.statusCode}): ${data}`));
-          }
+          if (res.statusCode && res.statusCode >= 400) return reject(httpError(pathName, res.statusCode, data));
           resolve(data);
         });
       }
@@ -66,9 +73,7 @@ function fetchJson(pathName) {
         let data = '';
         res.on('data', (chunk) => (data += chunk));
         res.on('end', () => {
-          if (res.statusCode && res.statusCode >= 400) {
-            return reject(new Error(`${pathName} failed (${res.statusCode}): ${data}`));
-          }
+          if (res.statusCode && res.statusCode >= 400) return reject(httpError(pathName, res.statusCode, data));
           resolve(data);
         });
       }

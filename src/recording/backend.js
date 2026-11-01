@@ -3,6 +3,36 @@
 // archive step (voice_memo_pipeline.py --recording-id via cron_runner.py).
 const { spawn } = require('child_process');
 
+// Parse a body as JSON, or null.
+function parseJson(text) {
+  try {
+    const v = JSON.parse(text);
+    return v && typeof v === 'object' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+// /api/process-recording failure -> { code, retryable, userMessage? }, per
+// the backend contract { error, code, retryable }. A request that never got
+// a response means the local server is unreachable: transient. The raw body
+// is never carried along (it can hold transcript or notes text).
+function classifyProcessError(err) {
+  const status = err && err.statusCode;
+  let out;
+  if (!status) {
+    out = { code: 'backend_unreachable', retryable: true };
+  } else {
+    const body = parseJson(err.responseBody) || {};
+    out = {
+      code: typeof body.code === 'string' ? body.code : 'internal',
+      retryable: typeof body.retryable === 'boolean' ? body.retryable : status >= 500,
+      ...(typeof body.error === 'string' && body.error ? { userMessage: body.error } : {}),
+    };
+  }
+  return Object.assign(new Error(`process-recording failed (${status || 'no response'}, ${out.code})`), { status: status || null }, out);
+}
+
 function createBackendApi({ postJson, fetchJson }) {
   return {
     createRecording: ({ id, startedAt, meetingTool, continues }) => postJson('/api/recording/start', {
@@ -18,7 +48,16 @@ function createBackendApi({ postJson, fetchJson }) {
     appendNote: (id, text) => postJson('/api/recording/notes/append', { id, text }),
     setTitle: (id, title) => postJson('/api/recording/title', { id, title }),
     addLiveEntry: (entry) => postJson('/api/recording/live-entry', entry),
-    processRecording: (id) => postJson('/api/process-recording', { id }),
+    processRecording: async (id) => {
+      let raw;
+      try {
+        raw = await postJson('/api/process-recording', { id });
+      } catch (err) {
+        throw classifyProcessError(err);
+      }
+      const body = parseJson(raw) || {};
+      return { ok: true, recordingId: typeof body.recording_id === 'string' && body.recording_id ? body.recording_id : id };
+    },
     getRecording: async (id) => JSON.parse(await fetchJson(`/api/recording?id=${encodeURIComponent(id)}`)),
   };
 }

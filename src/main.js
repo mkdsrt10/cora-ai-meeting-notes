@@ -235,10 +235,11 @@ processingQueue.on('job', (job) => {
       icon: ICON_PATH,
     }, { recordingId: job.id });
   } else if (job.state === 'failed') {
-    console.error(`[Cora queue] ${job.id} failed: ${job.error}`);
+    // Only the code goes to the log; job.error is the user-facing message.
+    console.error(`[Cora queue] ${job.id} failed (${job.code || 'unknown'}) after ${job.attempts} attempt(s)`);
     notify({
       title: 'Cora',
-      body: `Could not finish processing the recording. ${job.error || ''} Open the dashboard to retry; details in logs/cron-pipeline-error.log.`,
+      body: `Could not finish processing the recording. ${job.error || ''}`.trim(),
       icon: ICON_PATH,
     }, { level: 'error', recordingId: job.id });
   }
