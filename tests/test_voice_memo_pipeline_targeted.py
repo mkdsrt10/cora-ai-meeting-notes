@@ -34,6 +34,7 @@ def test_fresh_file_is_archived_without_waiting(inbox, monkeypatch):
 
     def fake_process(path, key, config):
         seen.append(path.name)
+        _archived_row(path.stem)
         return inbox / "archived_folder"
 
     monkeypatch.setattr(vmp, "process", fake_process)
@@ -42,6 +43,36 @@ def test_fresh_file_is_archived_without_waiting(inbox, monkeypatch):
     # Already archived: a retry is a success, not a second import.
     assert vmp.archive_recording(audio.stem) == 0
     assert seen == [audio.name]
+
+
+def _archived_row(live_id):
+    db.create_recording(f"2026-11-01_{live_id}_0000abcd", "/tmp/x", "t", "2026-11-01T09:00:00+00:00", 1.0, 1,
+                        {"live_recording_id": live_id})
+
+
+def test_already_archived_but_row_missing_is_no_input(inbox, monkeypatch, capsys):
+    (inbox / "meeting_gone.mov").write_bytes(b"g")
+    monkeypatch.setattr(vmp, "process", lambda p, k, c: inbox / "f")  # archives, but the row is later deleted
+    assert vmp.archive_recording("meeting_gone") == 0
+    assert vmp.archive_recording("meeting_gone") == vmp.EXIT_NO_INPUT
+    assert "no Recording" in capsys.readouterr().err
+
+
+def test_archived_and_inbox_file_gone_is_success(inbox):
+    _archived_row("meeting_moved")
+    assert vmp.archive_recording("meeting_moved") == 0
+
+
+def test_corrupted_audio_is_permanent_and_stays_so_on_retry(inbox, monkeypatch):
+    (inbox / "meeting_bad.mov").write_bytes(b"bad")
+
+    def corrupt(path, key, config):
+        raise RuntimeError("Failed to probe audio: moov atom not found")
+
+    monkeypatch.setattr(vmp, "process", corrupt)
+    assert vmp.archive_recording("meeting_bad") == vmp.EXIT_CORRUPTED
+    assert not (inbox / "meeting_bad.mov").exists()  # quarantined
+    assert vmp.archive_recording("meeting_bad") == vmp.EXIT_CORRUPTED
 
 
 def test_other_inbox_files_are_left_alone(inbox, monkeypatch):
