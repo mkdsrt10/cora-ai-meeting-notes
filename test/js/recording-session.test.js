@@ -44,17 +44,19 @@ test('stop is idempotent', async () => {
   assert.equal(helpers.last().stopCalls, 1);
 });
 
-test('capture helper dying mid-recording -> finishing with a warning, then idle (bug 2)', async () => {
-  const { session, helpers, states, enqueued } = setup();
+test('capture helper dying mid-recording -> stopped with a warning, then idle (bug 2)', async () => {
+  const { session, helpers, enqueued } = setup();
+  const stopped = [];
+  session.on('stopped', (s) => stopped.push(s));
   session.start({});
   const id = session.state().recordingId;
   helpers.last().send({ type: 'error', message: 'No microphone found.' });
   helpers.last().die(1);
-  const finishing = states.find((s) => s.phase === 'finishing');
-  assert.ok(finishing, 'went through finishing');
-  assert.match(finishing.warning, /No microphone found/);
-  await flush();
+  assert.equal(stopped.length, 1);
+  assert.equal(stopped[0].recordingId, id);
+  assert.match(stopped[0].warning, /No microphone found/);
   assert.equal(session.state().phase, 'idle');
+  await flush();
   assert.deepEqual(enqueued, [id]);
 });
 
@@ -151,19 +153,98 @@ test('continuing a finished Recording marks the root and enqueues only the new c
   ]);
 });
 
-test('starting twice is refused; starting while finishing is refused', async () => {
-  const { session, helpers } = setup();
+test('starting twice is refused', () => {
+  const { session } = setup();
   session.start({});
   assert.equal(session.start({}).ok, false);
-  // Hold the helper so stop() stays in finishing.
+});
+
+// Holds a helper's stop() open, like a capture helper slow to exit after SIGINT.
+function holdExit(h) {
   let release;
-  helpers.last().stop = () => new Promise((r) => { release = r; });
+  h.stop = () => {
+    h.stopCalls = (h.stopCalls || 0) + 1;
+    return new Promise((r) => { release = () => { h.die(0); r(); }; });
+  };
+  return () => release();
+}
+
+test('a new Recording starts immediately after stop, while the previous one is still finishing', async () => {
+  const { session, helpers, states } = setup();
+  session.start({});
+  const first = session.state().recordingId;
+  const release = holdExit(helpers.last());
   const stopping = session.stop('user');
-  assert.equal(session.state().phase, 'finishing');
-  assert.equal(session.start({}).ok, false);
+  assert.equal(session.state().phase, 'idle');
+  assert.deepEqual(session.state().finishing, [first]);
+  const r = session.start({});
+  assert.equal(r.ok, true);
+  assert.notEqual(r.id, first);
+  // What the UI sees is the new Recording, not the one being saved.
+  assert.equal(states.at(-1).phase, 'recording');
+  assert.equal(states.at(-1).recordingId, r.id);
   release();
   await stopping;
-  assert.equal(session.start({}).ok, true);
+  assert.deepEqual(session.state().finishing, []);
+  assert.equal(session.state().recordingId, r.id);
+});
+
+test('back-to-back Recordings are each enqueued exactly once, in order, even if the first helper exits last', async () => {
+  const { session, helpers, enqueued } = setup();
+  session.start({});
+  const first = session.state().recordingId;
+  const release = holdExit(helpers.last());
+  const stopFirst = session.stop('user');
+  await flush();
+  session.start({});
+  const second = session.state().recordingId;
+  const stopSecond = session.stop('user');
+  await flush();
+  // The second is finished but waits for the first, so order is kept.
+  assert.deepEqual(enqueued, []);
+  release();
+  await Promise.all([stopFirst, stopSecond]);
+  await session.stop('again');
+  assert.deepEqual(enqueued, [first, second]);
+});
+
+test('quitting stops the live Recording and waits for every finishing helper', async () => {
+  const { session, helpers, enqueued } = setup();
+  session.start({});
+  const first = session.state().recordingId;
+  const firstHelper = helpers.last();
+  const release = holdExit(firstHelper);
+  session.stop('user');
+  session.start({});
+  const second = session.state().recordingId;
+  const secondHelper = helpers.last();
+  let done = false;
+  const quitting = session.shutdown().then(() => { done = true; });
+  await flush();
+  assert.equal(secondHelper.stopCalls, 1);
+  assert.equal(done, false, 'still waiting for the first helper');
+  release();
+  await quitting;
+  assert.equal(firstHelper.exited && secondHelper.exited, true);
+  assert.deepEqual(enqueued, [first, second]);
+  assert.equal(session.state().phase, 'idle');
+});
+
+test('pause/resume still chains after a back-to-back start', async () => {
+  const { session, helpers, enqueued } = setup();
+  session.start({});
+  const prev = session.state().recordingId;
+  const release = holdExit(helpers.last());
+  session.stop('user');
+  session.start({});
+  const root = session.state().recordingId;
+  session.pause();
+  await session.resume();
+  const child = session.state().recordingId;
+  assert.equal(session.state().rootId, root);
+  release();
+  await session.stop('user');
+  assert.deepEqual(enqueued, [prev, root, child]);
 });
 
 test('meeting title and speaker changes are forwarded for the live recording', async () => {

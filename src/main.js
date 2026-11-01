@@ -153,10 +153,10 @@ function notify(opts, { level = 'info', recordingId = null, show = true } = {}) 
 }
 
 // What the renderer and floater call the state: the session phase, with
-// finishing or queued post-stop work shown as 'processing'.
+// stopped Recordings still finishing or queued shown as 'processing'.
 function rendererState(s = recording.state()) {
   if (s.phase === 'recording' || s.phase === 'paused') return s.phase;
-  if (s.phase === 'finishing' || processingQueue.busy()) return 'processing';
+  if (s.finishing.length || processingQueue.busy()) return 'processing';
   return 'idle';
 }
 
@@ -193,20 +193,24 @@ function publishState() {
 }
 
 let lastPhase = 'idle';
+let isQuitting = false;
 recording.on('state', (s) => {
-  // Heavy processing (MLX) waits while a meeting is being captured.
-  processingQueue.setDeferred(s.phase === 'recording');
+  // Heavy processing (MLX) waits while a meeting is being captured, and
+  // nothing new starts once Cora is quitting.
+  processingQueue.setDeferred(isQuitting || s.phase === 'recording');
   if (s.phase === 'recording' && lastPhase !== 'recording') {
     onCaptureStarted(s);
-  } else if (s.phase === 'finishing' && lastPhase !== 'finishing') {
-    if (s.warning) {
-      notify({ title: 'Cora', body: s.warning, icon: ICON_PATH }, { level: 'error', recordingId: s.recordingId });
-    } else if (lastPhase === 'recording') {
-      notify({ title: 'Cora', body: 'Meeting ended. Processing coaching report...' }, { recordingId: s.recordingId });
-    }
   }
   lastPhase = s.phase;
   publishState();
+});
+
+recording.on('stopped', ({ recordingId, reason, warning }) => {
+  if (warning) {
+    notify({ title: 'Cora', body: warning, icon: ICON_PATH }, { level: 'error', recordingId });
+  } else if (reason !== 'quit') {
+    notify({ title: 'Cora', body: 'Meeting ended. Processing coaching report...' }, { recordingId });
+  }
 });
 
 recording.on('level', (levels) => {
@@ -513,7 +517,6 @@ function updateTrayMenu() {
   const template = [
     {
       label: capturing ? 'Stop Recording' : (paused ? 'Resume Recording' : 'Start Recording'),
-      enabled: phase !== 'finishing',
       click: () => {
         if (capturing) recording.stop('user');
         else if (paused) recording.resume();
@@ -742,13 +745,28 @@ app.whenReady().then(async () => {
   });
 });
 
-let isQuitting = false;
-
-app.on('before-quit', () => {
+// Quitting stops the live Recording and waits for every stopped Recording
+// still finishing (each capture helper exits or is killed after its
+// timeout), so no dual-capture/speaker-watch outlives Cora. The Python
+// server stays up until then so the status updates land.
+let shutdownDone = false;
+let shutdownStarted = false;
+app.on('before-quit', (event) => {
   isQuitting = true;
-  // SIGINTs both capture helpers synchronously so neither outlives Cora.
-  recording.stop('quit');
-  if (pythonProcess) pythonProcess.kill();
+  if (shutdownDone) {
+    if (pythonProcess) pythonProcess.kill();
+    return;
+  }
+  event.preventDefault();
+  if (shutdownStarted) return;
+  shutdownStarted = true;
+  processingQueue.setDeferred(true);
   if (stopMeetingWatcher) stopMeetingWatcher();
   if (stopMicWatcher) stopMicWatcher();
+  recording.shutdown()
+    .catch((err) => console.error('[Cora] shutdown:', err && err.message))
+    .finally(() => {
+      shutdownDone = true;
+      app.quit();
+    });
 });
