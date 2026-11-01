@@ -1,4 +1,3 @@
-import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -53,10 +52,10 @@ def run_voice_match(recording_id: str, audio_path: Path, segments: list[dict[str
         return
         
     from google.genai import types
+
+    from pipeline.text_model import gemini_client, parse_json
     if not client:
-        client = credentials.get_client()
-        if not client:
-            return
+        client = gemini_client("gemini.people_matcher.run_voice_match")
 
     candidate_parts = []
     for c in candidates:
@@ -115,7 +114,7 @@ def run_voice_match(recording_id: str, audio_path: Path, segments: list[dict[str
                 contents=contents,
                 config=config,
             )
-            data = json.loads(res.text)
+            data = parse_json(res.text)
             match_id = data.get("matched_person_id")
             conf = data.get("confidence", "none")
             

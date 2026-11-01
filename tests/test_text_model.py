@@ -240,3 +240,23 @@ def test_settings_test_route_forwards_base_url(monkeypatch):
     req = SimpleNamespace(send_json=lambda payload, status=200: payload)
     settings.post_api_credentials_test(req, "", {"provider": "custom", "base_url": "http://localhost:11434/v1"})
     assert seen["base_url"] == "http://localhost:11434/v1"
+
+
+def test_gemini_audio_client_traces_under_its_name_and_respects_lockdown(monkeypatch):
+    import ai_trace
+    from contextlib import contextmanager
+    names = []
+
+    @contextmanager
+    def span(kind, name, **kwargs):
+        names.append(name)
+        yield SimpleNamespace(set_output=lambda *a, **k: None)
+    monkeypatch.setattr(ai_trace, "span", span)
+    raw = SimpleNamespace(models=SimpleNamespace(generate_content=lambda **kw: SimpleNamespace(text="{}")))
+    monkeypatch.setattr(credentials, "build_gemini_client", lambda: raw)
+    tm.gemini_client("gemini.people_matcher.run_voice_match").models.generate_content(model="m", contents=["clip"])
+    assert names == ["gemini.people_matcher.run_voice_match"]
+    monkeypatch.undo()  # restore the real client builder, which checks lockdown first
+    monkeypatch.setenv("VOICECOACH_ENTERPRISE_LOCKDOWN", "1")
+    with pytest.raises(policy.LockdownError):
+        tm.gemini_client("x")

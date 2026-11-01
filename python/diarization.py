@@ -338,8 +338,11 @@ def atomic_json(path: Path, value: Any) -> None:
     temporary.replace(path)
 
 
-def client_for_key():
-    return credentials.get_client()
+def client_for_key(trace: str | None = None):
+    """Gemini client for whole-file audio work, traced under `trace`
+    (default: the calling function, gemini.<module>.<function>)."""
+    from pipeline import text_model
+    return text_model.gemini_client(trace or text_model.caller_trace_name())
 
 
 def prepare_audio_for_gemini(audio: Path) -> tuple[bytes, str, Path | None]:
@@ -380,39 +383,13 @@ def prepare_audio_for_gemini(audio: Path) -> tuple[bytes, str, Path | None]:
 
 
 def safe_json_loads(text: str) -> dict[str, Any]:
-    """Safely decode JSON from Gemini, with automatic recovery for truncated output."""
-    clean = text.strip()
-    if clean.startswith("```"):
-        clean = re.sub(r"^```(?:json)?\n?", "", clean)
-        clean = re.sub(r"\n?```$", "", clean)
-    try:
-        return json.loads(clean)
-    except Exception as exc:
-        try:
-            import json_repair
-            repaired = json_repair.repair_json(clean, return_objects=True)
-            if isinstance(repaired, dict):
-                print("[diarization] Recovered truncated JSON response cleanly using json-repair.")
-                return repaired
-        except Exception:
-            pass
-        # Fallback to structural closing
-        last_obj_end = clean.rfind("},")
-        if last_obj_end != -1:
-            candidate = clean[:last_obj_end + 1]
-            open_brackets = candidate.count("[") - candidate.count("]")
-            open_braces = candidate.count("{") - candidate.count("}")
-            candidate += "\n" + ("]" * max(0, open_brackets)) + ("}" * max(0, open_braces))
-            try:
-                print("[diarization] Recovered truncated JSON response cleanly.")
-                return json.loads(candidate)
-            except Exception:
-                pass
-        raise exc
+    """Gemini's JSON reply, recovering fenced or truncated output (pipeline.text_model.parse_json)."""
+    from pipeline.text_model import parse_json
+    return parse_json(text)
 
 
 def interact_with_audio(audio: Path, prompt: str, response_schema: dict[str, Any], model: str | None = None, client=None) -> dict[str, Any]:
-    client = client or client_for_key()
+    client = client or client_for_key("gemini.diarization.interact_with_audio")
     model = model or credentials.get_default_model()
     from google.genai import types
 
@@ -590,7 +567,7 @@ def diarize(folder: Path, model: str = LATEST_AUDIO_MODEL, client=None) -> dict[
 
 def _diarize(folder: Path, model: str = LATEST_AUDIO_MODEL, client=None) -> dict[str, Any]:
     audio = find_audio(folder)
-    client = client or client_for_key()
+    client = client or client_for_key("gemini.diarization.interact_with_audio")
 
     try:
         duration = probe_audio_duration(audio)
