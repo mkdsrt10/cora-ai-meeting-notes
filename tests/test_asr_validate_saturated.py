@@ -1,7 +1,8 @@
 """validate_turns when the strict speech detector is saturated: a noisy mic
 can make it report one unbroken stretch of "speech" over a long Window. That
 is no evidence of continuous speech, so coverage is not held against the
-transcript; every other rule still applies."""
+transcript; every other rule still applies, and an empty transcript is still
+rejected."""
 import pytest
 
 from pipeline.asr_validate import WindowInvalid, validate_turns
@@ -28,8 +29,11 @@ def test_a_few_seconds_of_silence_keeps_the_coverage_check():
         validate_turns(FIRST_HALF_ONLY, WINDOW, paused, paused)
 
 
-def test_saturated_detector_allows_an_empty_transcript():
-    assert validate_turns([], WINDOW, SATURATED, SATURATED) == []
+def test_saturated_detector_still_rejects_an_empty_transcript():
+    # Saturation says nothing about whether there is speech, so an empty reply
+    # stays invalid: the ladder retries and the local fallback gets its turn.
+    with pytest.raises(WindowInvalid, match="no transcript for a saturated window"):
+        validate_turns([], WINDOW, SATURATED, SATURATED)
 
 
 def test_real_silence_keeps_the_coverage_check():

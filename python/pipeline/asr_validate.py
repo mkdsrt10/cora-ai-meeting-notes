@@ -92,7 +92,9 @@ def validate_turns(raw: Any, duration: float, strict: list[tuple[float, float]],
     speech_s = sum(e - s for s, e in strict)
     saturated = _saturated(strict, duration)
     if not turns:
-        if speech_s >= COVERAGE_MIN_SPEECH_S and not saturated:
+        if saturated:
+            raise WindowInvalid("no transcript for a saturated window")
+        if speech_s >= COVERAGE_MIN_SPEECH_S:
             raise WindowInvalid("no transcript for a window with speech")
         return []
     if sum(len(t["text"].split()) for t in turns) > MAX_WORDS_PER_SECOND * duration:
