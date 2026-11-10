@@ -43,10 +43,24 @@ def assert_gaps_at_burst_edges(speech):
         assert e == pytest.approx(be + PAD, abs=0.15)
 
 
-@pytest.mark.parametrize("noise_rms_db", [-40.0, -30.0])
+@pytest.mark.parametrize("noise_rms_db", [-50.0, -40.0])
 def test_speech_is_found_only_at_the_bursts_on_a_noise_bed(tmp_path, noise_rms_db):
     rec = make_recording(tmp_path / "rec.wav", noise_rms_db)
     assert_gaps_at_burst_edges(audio.find_speech_segments(rec, pad=PAD))
+
+
+def test_continuous_speech_with_no_quiet_frames_stays_one_stretch(tmp_path):
+    # A tone end to end at about -30 dBFS, louder at the bursts: there is no
+    # quiet frame, so the measured "floor" is the speech itself and floor +
+    # margin would cut the quieter speech out between the bursts. A floor above
+    # -45 dB is clamped, which keeps the threshold under all of it.
+    rec = tmp_path / "tone.wav"
+    gate = "+".join(f"between(t,{s},{e})" for s, e in BURSTS)
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    f"sine=frequency=440:sample_rate=16000:duration={DURATION}",
+                    "-af", f"volume='if({gate},2.4,0.3)':eval=frame", "-ac", "1", str(rec)], check=True)
+    assert audio.measure_noise_floor_db(rec) > -45.0
+    assert audio.find_speech_segments(rec, pad=PAD) == [(0.0, pytest.approx(DURATION, abs=0.05))]
 
 
 def test_configured_threshold_overrides_the_relative_one(tmp_path, monkeypatch):
@@ -88,7 +102,12 @@ def test_noise_floor_is_measured_from_the_recording(tmp_path):
 
 
 def test_threshold_never_goes_above_minus_20_db():
-    assert audio.relative_threshold_db(-42.0, 10.0) == "-32dB"
-    assert audio.relative_threshold_db(-42.0, 18.0) == "-24dB"
-    assert audio.relative_threshold_db(-25.0, 10.0) == "-20dB"
-    assert audio.relative_threshold_db(-10.0, 18.0) == "-20dB"
+    assert audio.relative_threshold_db(-52.0, 10.0) == "-42dB"
+    assert audio.relative_threshold_db(-52.0, 18.0) == "-34dB"
+    assert audio.relative_threshold_db(-60.0, 50.0) == "-20dB"
+
+
+def test_a_floor_above_minus_45_db_is_clamped_before_the_margin():
+    assert audio.relative_threshold_db(-42.0, 10.0) == "-35dB"
+    assert audio.relative_threshold_db(-25.0, 10.0) == "-35dB"
+    assert audio.relative_threshold_db(-10.0, 18.0) == "-27dB"
