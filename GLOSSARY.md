@@ -38,4 +38,6 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **To-do**: an Action item as Todo/Planner tracks it: done or not. It keeps its identity (and done mark) when its Recording is reprocessed and the same Action item comes back; one that no longer appears is superseded, not listed. _Avoid_: task.
 
+**Window**: one clip of a Recording's audio sent to a cloud Transcriber call and validated as a unit; a Window that the cloud engine keeps rejecting is transcribed locally instead. _Avoid_: chunk (that is capture), segment (that is transcript).
+
 **Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript.
