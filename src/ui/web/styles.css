@@ -399,6 +399,7 @@ mark.search-match.active {
 .audio-level-meters{display:flex;align-items:center;gap:10px}
 .audio-level-meter{display:flex;align-items:center;gap:6px}
 .audio-level-label{font-size:10px;color:var(--muted);white-space:nowrap}
+.audio-level-device{font-size:10px;color:var(--muted);white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis}
 .audio-level-track{width:48px;height:6px;border-radius:999px;background:var(--surface-2);border:1px solid var(--hairline);overflow:hidden}
 .audio-level-fill{height:100%;width:0%;background:var(--violet);border-radius:999px;transition:width .1s linear,background-color .15s linear}
 

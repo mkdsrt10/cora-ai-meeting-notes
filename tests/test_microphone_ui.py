@@ -264,3 +264,32 @@ def test_floater_mic_meter_is_addressable_for_its_tooltip():
     html = (ROOT / 'src/ui/floater.html').read_text()
     group = html[html.index('id="meterMicGroup"'):html.index('id="meterSys"')]
     assert 'id="meterMic"' in group
+
+
+@needs_node
+def test_recording_panel_names_the_microphone_beside_its_mic_meter(tmp_path):
+    run_node(tmp_path, PRELUDE + r'''
+let micDeviceCallback = null;
+const context = vm.createContext({console, setTimeout, setInterval: () => 0, clearInterval(){}, Promise, Date,
+  $: node, fmtDuration: String,
+  window: {electronAPI: {
+    onRecordingStateChange(){}, getRecordingState: async () => 'recording', onAudioLevel(){},
+    getMicDevice: async () => 'Shure MV7', onMicDevice: cb => { micDeviceCallback = cb; }}},
+});
+vm.runInContext(fs.readFileSync(ROOT+'/src/ui/web/js/recording.js', 'utf8'), context);
+run(async () => {
+  await new Promise(r => setTimeout(r));
+  assert.equal(node('#audioLevelMicDevice').textContent, 'Shure MV7');
+  micDeviceCallback('MacBook Pro Microphone');
+  assert.equal(node('#audioLevelMicDevice').textContent, 'MacBook Pro Microphone');
+  micDeviceCallback(null);
+  assert.equal(node('#audioLevelMicDevice').textContent, '');
+  assert.equal(node('#audioLevelMicDevice').hidden, true);
+});
+''')
+
+
+def test_recording_panel_puts_the_microphone_name_next_to_the_mic_meter():
+    html = (ROOT / 'src/ui/web/index.html').read_text()
+    mic_meter = html[html.index('id="audioLevelMic"'):html.index('id="audioLevelSys"')]
+    assert 'id="audioLevelMicDevice"' in mic_meter.split('<div class="audio-level-meter">')[0]
