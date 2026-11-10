@@ -67,7 +67,8 @@ async function resolveMicrophone(microphone) {
 
 // A helper handle whose process is spawned once its options resolve (the
 // Microphone lookup), so start() stays synchronous. Stopped before then, it
-// never spawns.
+// never spawns. A spawn that throws is reported like a helper that died at
+// once: an 'error' event, then 'exit' with code -1; stop() still resolves.
 function deferredHelper(startHelper, optsPromise) {
   const h = new EventEmitter();
   let real = null;
@@ -75,7 +76,13 @@ function deferredHelper(startHelper, optsPromise) {
   let muted = null;
   const ready = optsPromise.then((opts) => {
     if (stopped) return;
-    real = startHelper(opts);
+    try {
+      real = startHelper(opts);
+    } catch (err) {
+      h.emit('event', { type: 'error', message: (err && err.message) || String(err) });
+      h.emit('exit', { code: -1, signal: null });
+      return;
+    }
     real.on('event', (ev) => h.emit('event', ev));
     real.on('exit', (info) => h.emit('exit', info));
     if (muted !== null) real.setMuted(muted);

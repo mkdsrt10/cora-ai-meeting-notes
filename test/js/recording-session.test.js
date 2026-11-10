@@ -413,6 +413,38 @@ test('stopping before the Microphone is resolved never spawns a helper, and the 
   assert.deepEqual(enqueued, [id]);
 });
 
+test('a capture helper that fails to spawn after the Microphone lookup stops the Recording with a warning', async () => {
+  const clock = fakeClock();
+  const api = fakeApi();
+  const enqueued = [];
+  const microphone = fakeMicrophone({ chosen: { unique_id: WEBCAM.uniqueID, name: WEBCAM.name }, devices: [WEBCAM] });
+  const startHelper = () => { throw new Error('spawn dual-capture ENOENT'); };
+  const session = createRecordingSession({ startHelper, api, clock, queue: { enqueue: (id) => enqueued.push(id) }, microphone });
+  const stopped = [];
+  session.on('stopped', (s) => stopped.push(s));
+  session.start({});
+  const id = session.state().recordingId;
+  await flush();
+  assert.equal(session.state().phase, 'idle');
+  assert.equal(stopped.length, 1);
+  assert.equal(stopped[0].recordingId, id);
+  assert.match(stopped[0].warning, /spawn dual-capture ENOENT/);
+  await session.stop('user');
+  await flush();
+  assert.deepEqual(enqueued, [id]);
+});
+
+test('stop resolves even when the capture helper fails to spawn after the Microphone lookup', async () => {
+  const microphone = fakeMicrophone({ chosen: { unique_id: WEBCAM.uniqueID, name: WEBCAM.name }, devices: [WEBCAM] });
+  const startHelper = () => { throw new Error('spawn failed'); };
+  const enqueued = [];
+  const session = createRecordingSession({ startHelper, api: fakeApi(), clock: fakeClock(), queue: { enqueue: (id) => enqueued.push(id) }, microphone });
+  session.start({});
+  const id = session.state().recordingId;
+  await session.stop('user');
+  assert.deepEqual(enqueued, [id]);
+});
+
 test('mute set before the Microphone is resolved reaches the helper once it spawns', async () => {
   const { session, helpers } = setupMic({ unique_id: WEBCAM.uniqueID, name: WEBCAM.name });
   session.start({});
