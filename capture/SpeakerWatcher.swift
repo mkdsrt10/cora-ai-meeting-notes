@@ -397,7 +397,7 @@ func captureStatusURL() -> URL? {
     return participantFile.deletingLastPathComponent().appendingPathComponent("capture_status.json")
 }
 
-func recordBrowserCapture(_ browser: String, errorCode: Int?) {
+func recordBrowserCapture(_ browser: String, errorCode: Int?, detail: String? = nil) {
     let message: String
     if let code = errorCode {
         switch code {
@@ -406,7 +406,7 @@ func recordBrowserCapture(_ browser: String, errorCode: Int?) {
         case -1743:  // errAEEventNotPermitted
             message = "Participant names unavailable in \(browser): allow Cora under System Settings › Privacy & Security › Automation › \(browser)."
         default:
-            message = "Browser meeting capture unavailable in \(browser) (AppleScript \(code)). Accessibility capture is still attempted."
+            message = "Browser meeting capture unavailable in \(browser) (AppleScript \(code)\(detail.map { ": \($0)" } ?? "")). Accessibility capture is still attempted."
         }
     } else {
         message = ""
@@ -421,6 +421,9 @@ func recordBrowserCapture(_ browser: String, errorCode: Int?) {
 }
 
 // Raw JS avoids the previous nested newline/selector escaping errors.
+// NOTE: this script is flattened onto ONE line before it reaches the browser
+// (see scanBrowserGoogleMeet), so it must contain no `//` line comments; use
+// /* block comments */ only. tests/test_speaker_watch_js.py checks that.
 let googleMeetSnapshotJS = #"""
 (() => {
     const names = new Set();
@@ -439,12 +442,12 @@ let googleMeetSnapshotJS = #"""
         if (name) return clean(name);
         return clean((tile.innerText || '').split(/\n/)[0]);
     };
-    // Slack in a browser: accept only a huddle dialog/container with a leave
-    // control. A DM tab title and message authors are not call participants.
+    /* Slack in a browser: accept only a huddle dialog/container with a leave */
+    /* control. A DM tab title and message authors are not call participants. */
     const host = typeof location !== 'undefined' ? location.hostname : 'meet.google.com';
     const slack = host === 'app.slack.com' || host.endsWith('.slack.com');
-    // Zoom web client: names from video tiles and the participants panel;
-    // the active-speaker tile gives the current speaker.
+    /* Zoom web client: names from video tiles and the participants panel; */
+    /* the active-speaker tile gives the current speaker. */
     if (host === 'zoom.us' || host.endsWith('.zoom.us')) {
         const zoomName = el => clean(el && el.innerText).replace(/\s*\((?:host|co-host|me|guest)[^)]*\)\s*$/i, '');
         document.querySelectorAll('.participants-item__display-name, .video-avatar__avatar-name, [class*="avatar-name"]').forEach(el => {
@@ -527,7 +530,8 @@ func scanBrowserGoogleMeet(browserName: String) {
     let tabErrors = lines.filter { $0.hasPrefix("ERR:") }.compactMap { Int($0.dropFirst(4)) }
     let scriptError = error.map { $0["NSAppleScriptErrorNumber"] as? Int ?? 0 }
     let anySnapshot = lines.contains { $0.hasPrefix("{") }
-    recordBrowserCapture(browserName, errorCode: scriptError ?? (anySnapshot ? nil : tabErrors.first))
+    let scriptMessage = error.flatMap { $0["NSAppleScriptErrorMessage"] as? String }
+    recordBrowserCapture(browserName, errorCode: scriptError ?? (anySnapshot ? nil : tabErrors.first), detail: scriptMessage)
     guard error == nil else { return }
     let snapshots = lines.compactMap { line -> [String: Any]? in
         guard let data = line.data(using: .utf8) else { return nil }
@@ -652,7 +656,7 @@ func scanMeetingApps() {
                                 appName.localizedCaseInsensitiveContains("Edge") ||
                                 appName.localizedCaseInsensitiveContains("Safari")
 
-                let slack = appName == "Slack" || (isBrowser && title.localizedCaseInsensitiveContains("Slack"))
+                let slack = appName == "Slack" || (isBrowser && (title.localizedCaseInsensitiveContains("Slack") || title.localizedCaseInsensitiveContains("Huddle")))
                 if slack {
                     if let huddle = findSlackHuddleRoot(win),
                        let speaker = traverseElement(huddle, appName: appName, dumping: dumpingThisPass) {

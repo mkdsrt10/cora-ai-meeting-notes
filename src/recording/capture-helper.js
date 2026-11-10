@@ -82,8 +82,10 @@ function createCaptureHelperFactory(bins, dirs, { exitTimeoutMs = EXIT_TIMEOUT_M
     const log = logPath ? fs.createWriteStream(logPath, { flags: 'a' }) : null;
     const emitLine = (line, source) => {
       const ev = parseHelperLine(line);
-      // Speaker-watch output goes to its per-recording log, as before.
-      if (log && source === 'speaker' && ev && ev.type !== 'level') log.write(line + '\n');
+      // Every speaker-watch line goes to its per-recording log (not only the
+      // parsed events): the AX dumps and AppleScript warnings are how a
+      // participant-detection failure gets diagnosed after the fact.
+      if (log && source === 'speaker' && !(ev && ev.type === 'level')) log.write(line + '\n');
       if (ev) handle.emit('event', ev);
     };
 

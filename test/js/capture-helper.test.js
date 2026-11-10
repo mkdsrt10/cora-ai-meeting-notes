@@ -152,3 +152,24 @@ test('real adapter: a helper that ignores SIGINT is killed once the exit timeout
   const info = await exited;
   assert.equal(info.signal, 'SIGKILL');
 });
+
+test('real adapter: every speaker-watch line except level meters lands in the per-recording log', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cora-helper-'));
+  const captureBin = stubBin(dir, 'dual-capture', 'setTimeout(() => {}, 300);');
+  const speakerWatchBin = stubBin(dir, 'speaker-watch',
+    'console.log("Cora Native Accessibility Speaker Watcher active.");' +
+    'console.log("[AX-DUMP] --- scan at 00:00: 1 candidate app(s) ---");' +
+    'console.log("CAPTURE_WARNING: Browser meeting capture unavailable in Brave Browser (AppleScript -1719: Invalid index).");' +
+    'console.log("AUDIO_LEVEL mic=-20.0 sys=-30.0");' +
+    'console.log("[00:03] SPEAKER_ACTIVE: Jane Doe (Browser meeting)");');
+  const start = createCaptureHelperFactory({ captureBin, speakerWatchBin }, { inboxDir: dir, logsDir: dir });
+  const handle = start({ recordingId: 'meeting_log', selfName: null });
+  await new Promise((r) => setTimeout(r, 400));
+  await handle.stop();
+  const log = fs.readFileSync(path.join(dir, 'speaker-watch-meeting_log.log'), 'utf8');
+  assert.match(log, /Speaker Watcher active/, 'chatter lines are kept for diagnosis');
+  assert.match(log, /AX-DUMP/);
+  assert.match(log, /AppleScript -1719: Invalid index/);
+  assert.match(log, /SPEAKER_ACTIVE: Jane Doe/);
+  assert.doesNotMatch(log, /AUDIO_LEVEL/, 'level meters stay out of the log');
+});

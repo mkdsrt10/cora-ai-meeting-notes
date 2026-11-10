@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 — 2026-11-10
+
+- Fix: participant names in browser meetings (Meet, Zoom web, Slack huddles) were empty since 0.2.3. The page-snapshot script is flattened onto one line before it reaches the browser, and `//` comments added in 0.2.3 commented out the rest of it. Comments are now block comments and a test parses the flattened script.
+- The speaker watcher's full output is back in `logs/speaker-watch-*.log` (only level meters are left out), and an AppleScript failure is logged with its message, not just its number.
+- A browser Slack huddle popup (window titled "Huddle…") now counts as a Slack window for the Accessibility fallback.
+
 ## 0.3.0 — 2026-11-10
 
 - Microphone selector: Settings > Recording and the onboarding permissions step let you pick the microphone Cora records with. "System default" now follows the macOS default input (it previously followed AVFoundation's own idea of a default, which could be the webcam mic). The floating bar and recording panel name the microphone in use; a mic that is missing or disconnects mid-call falls back to the system default without stopping the recording, with a notification.
