@@ -1,6 +1,7 @@
 """ffmpeg helpers: probing, silence detection, clipping and mic/system mixing."""
 from __future__ import annotations
 
+import functools
 import json
 import re
 import shutil
@@ -33,13 +34,41 @@ def probe_duration(path: Path) -> float:
 MAIN_MARGIN_DB = 10.0  # speech starts this far above the recording's noise floor
 STRICT_MARGIN_DB = 18.0  # "clearly speech", for cloud Window coverage checks
 THRESHOLD_CAP_DB = -20.0  # a threshold never sits above this, however noisy the floor
+# A measured floor above this means the recording has no quiet frames (speech
+# end to end), so the "floor" is speech itself; clamp it before the margin.
+FLOOR_CLAMP_DB = -45.0
+# A muted mic writes exact zeros (floor -inf, clamped to _SILENT_FRAME_DB); a
+# threshold that low is under one 16-bit step and silencedetect never fires.
+FLOOR_MIN_DB = -80.0
 _FRAME_S = 0.1
 _SILENT_FRAME_DB = -120.0  # digital silence reports -inf; clamp it
+# config.example.json used to ship this exact value, and every new data dir
+# copied it, so it reads as "unset" rather than a deliberate override.
+_LEGACY_EXAMPLE_THRESHOLD = "-50dB"
+
+
+def _threshold_override(key: str) -> Optional[str]:
+    """The configured threshold at key, or None when unset, empty, or the
+    legacy example default for the main detector."""
+    value = _config().get(key) or None
+    if key == "silence_threshold_db" and value == _LEGACY_EXAMPLE_THRESHOLD:
+        print(f"[Local MLX] Ignoring legacy example {key}={value!r}; using the relative threshold.", flush=True)
+        return None
+    return value
 
 
 def measure_noise_floor_db(audio_path: Path) -> float:
     """The recording's noise floor in dBFS: the 10th percentile of RMS over
-    100 ms frames (mono-downmixed). Raises on ffmpeg failure or empty audio."""
+    100 ms frames (mono-downmixed). Raises on ffmpeg failure or empty audio.
+
+    Memoized on (path, size, mtime) so the main and strict detectors on the
+    same file share one ffmpeg pass; a rewritten file is measured again."""
+    stat = Path(audio_path).stat()
+    return _measure_noise_floor_db(str(audio_path), stat.st_size, stat.st_mtime_ns)
+
+
+@functools.lru_cache(maxsize=32)
+def _measure_noise_floor_db(audio_path: str, _size: int, _mtime_ns: int) -> float:
     ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
     rate = 16000
     chain = (f"aresample={rate},aformat=channel_layouts=mono,"
@@ -58,7 +87,9 @@ def measure_noise_floor_db(audio_path: Path) -> float:
 
 
 def relative_threshold_db(floor: float, margin_db: float, cap_db: float = THRESHOLD_CAP_DB) -> str:
-    """silencedetect threshold `floor + margin`, never above cap_db, e.g. "-30dB"."""
+    """silencedetect threshold `floor + margin`, the floor bounded to
+    [FLOOR_MIN_DB, FLOOR_CLAMP_DB], never above cap_db, e.g. "-35dB"."""
+    floor = min(max(floor, FLOOR_MIN_DB), FLOOR_CLAMP_DB)
     return f"{min(floor + margin_db, cap_db):.0f}dB"
 
 
@@ -76,7 +107,8 @@ def find_speech_segments(
 
     Threshold, first that applies: an explicit noise_db; the config value at
     override_key (`silence_threshold_db` for the main detector,
-    `strict_silence_threshold_db` for the strict one); else the recording's
+    `strict_silence_threshold_db` for the strict one; empty, or the legacy
+    example value "-50dB" for the main key, counts as unset); else the recording's
     noise floor + margin_db (MAIN_MARGIN_DB by default), capped at
     THRESHOLD_CAP_DB. Timestamps stay anchored to the ORIGINAL file —
     unlike trimming the whole file up front, each stretch is transcribed
@@ -91,7 +123,7 @@ def find_speech_segments(
     ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
     try:
         duration = probe_duration(audio_path)
-        noise_db = noise_db or _config().get(override_key) or relative_threshold_db(
+        noise_db = noise_db or _threshold_override(override_key) or relative_threshold_db(
             measure_noise_floor_db(audio_path), MAIN_MARGIN_DB if margin_db is None else margin_db)
         cmd = [
             ffmpeg, "-i", str(audio_path), "-af",

@@ -32,8 +32,9 @@ class AsrCallError(Exception):
 
 
 class AsrRefusedError(AsrCallError):
-    """The provider declined this audio (content block, safety stop, no
-    candidates): retrying or splitting the same audio won't change that."""
+    """The provider declined this audio (a blocked prompt or a refusal
+    finish reason): retrying or splitting the same audio won't change that.
+    No candidates alone is not a refusal; it stays a retryable AsrCallError."""
 
 
 REFUSAL_FINISH = ("SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII")
@@ -122,7 +123,7 @@ def transcribe_window(clip: Path, duration: float, context: str, client: Optiona
             raise AsrCallError("Gemini ran out of output tokens for this window")
         text = (getattr(response, "text", None) or "").strip()
         if not text:
-            refused = bool(blocked) or not candidates or any(r in reason for r in REFUSAL_FINISH)
+            refused = bool(blocked) or any(r in reason for r in REFUSAL_FINISH)
             raise (AsrRefusedError if refused else AsrCallError)(f"Gemini returned no text (finish_reason={reason or 'unknown'}, candidates={len(candidates)}, block_reason={blocked or 'none reported'})")
         try:
             parsed = parse_json(text)

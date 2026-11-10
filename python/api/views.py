@@ -361,6 +361,8 @@ def recording_item(folder: Path | dict, detailed: bool = False) -> dict[str, Any
         "call_summary": call_summary,
         "plugins": plugin_data,
         "size_bytes": audio.stat().st_size if audio else 0,
+        # Minutes the cloud engine did not transcribe (pipeline/windowed.py engine_summary).
+        "transcription_engines": metadata.get("transcription_engines"),
     }
     failure = metadata.get("processing_failure") or {}
     if stage == "failed":

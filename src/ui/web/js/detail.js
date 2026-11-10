@@ -323,7 +323,7 @@ const fmtMinutes = seconds => seconds < 60 ? 'Under 1 min' : `${Math.round(secon
 
 // Two banners above the notes: "Processing failed" with its reason and Retry,
 // and, when the cloud engine rejected some Windows, how many minutes were
-// transcribed on this Mac or left as gaps (metadata.transcription_engines).
+// transcribed on this Mac or left as gaps (the item's transcription_engines).
 function renderProcessingNotices(record){
   const failureHost = $('#notepadFailureBanner');
   if(failureHost){
@@ -333,7 +333,7 @@ function renderProcessingNotices(record){
   }
   const enginesHost = $('#notepadEnginesBanner');
   if(!enginesHost) return;
-  const engines = record?.metadata?.transcription_engines || {};
+  const engines = record?.transcription_engines || {};
   const local = Number(engines.local_s) || 0, gap = Number(engines.gap_s) || 0;
   if(local + gap <= 0){
     enginesHost.style.display = 'none';

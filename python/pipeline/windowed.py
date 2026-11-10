@@ -40,6 +40,7 @@ REJECTED = "the cloud engine kept rejecting this stretch"
 REFUSED = "the cloud engine refused this stretch"
 NO_LOCAL_MODEL = "no local model is installed"
 LOCAL_FAILED = "local transcription failed"
+LOCAL_SILENT = "no speech found on this Mac"
 
 Segment = dict[str, Any]
 Fallback = Callable[[Path, float, float], list[Segment]]
@@ -78,7 +79,10 @@ def transcribe_windows(audio_path: Path, speech: list[tuple[float, float]], cont
             try:
                 with fallback_lock:
                     produced = fallback(audio_path, window.start, window.end)
-                segments = [{**seg, "engine": "local", "reason": reason} for seg in produced]
+                if produced:
+                    segments = [{**seg, "engine": "local", "reason": reason} for seg in produced]
+                else:
+                    reason = f"{reason}; {LOCAL_SILENT}"
             except Exception as exc:
                 print(f"[Cloud ASR] local transcription of {window.start:.0f}-{window.end:.0f}s failed: {exc}", flush=True)
                 reason = f"{reason}; {LOCAL_FAILED}"

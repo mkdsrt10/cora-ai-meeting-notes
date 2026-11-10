@@ -37,9 +37,14 @@ another engine.
 The speech detector (`pipeline/audio.py` `find_speech_segments`, shared by local Whisper chunking and cloud
 windows) works relative to each recording's own noise floor: the 10th percentile of RMS over 100 ms frames of
 the audio it is given. Speech is anything at least 10 dB above that floor; the strict detector used for the
-coverage check needs 18 dB. Neither threshold ever goes above -20 dBFS, so a very noisy floor cannot hide
-loud speech. Setting `silence_threshold_db` (main) or `strict_silence_threshold_db` (strict) in config.json,
-e.g. `"-45dB"`, pins a fixed threshold instead.
+coverage check needs 18 dB. A measured floor above -45 dBFS is clamped to -45 before the margin is added:
+such a recording has no quiet frames (speech end to end), so its "floor" is speech and would otherwise cut out
+the quieter half of it. A floor below -80 dBFS (exact digital silence from a muted mic) is raised to -80, since
+a threshold under one 16-bit step never detects silence. Neither threshold ever goes above -20 dBFS. Both overrides are optional and absent from config.example.json: setting
+`silence_threshold_db` (main) or `strict_silence_threshold_db` (strict) in config.json, e.g. `"-45dB"`, pins a
+fixed threshold instead. An empty string counts as unset, and so does `"-50dB"` for `silence_threshold_db`:
+older builds copied that value from the example into every data dir, so it is ignored (with a log line) to let
+existing installs use the relative detector. Pin a different value, e.g. `"-51dB"`, to keep a fixed threshold.
 
 The model defaults to your configured Gemini model; set the `cloud_asr_model` setting to pin one.
 
