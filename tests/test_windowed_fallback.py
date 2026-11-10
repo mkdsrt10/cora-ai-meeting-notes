@@ -293,3 +293,12 @@ def test_transcript_segments_keep_their_engine_marks(fake_text, fake_transcriber
                      ("local", "the cloud engine refused this stretch", "local words about the budget"),
                      ("gap", "the cloud engine kept rejecting this stretch; no local model is installed", "")]
     assert all(p["name"] for p in result["diarization"]["speakers"])    # a gap is nobody speaking
+
+
+def test_the_recording_item_carries_the_engine_summary(fake_text, fake_transcriber, monkeypatch):
+    import db
+    from api import views
+    _, metadata, _ = _process("engines-item", MIXED, fake_text, fake_transcriber, monkeypatch)
+    item = views.recording_item(db.get_recording("engines-item"))
+    assert item["transcription_engines"] == metadata["transcription_engines"]
+    assert item["transcription_engines"]["gap_s"] == 60.0

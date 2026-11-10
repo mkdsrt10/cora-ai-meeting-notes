@@ -103,8 +103,9 @@ def test_detail_page_shows_failure_and_affected_minutes(tmp_path):
  assert.match(failure.innerHTML,/data-retry-processing="rec-1"[^>]*>Retry</);
  assert.equal(node('#notepadEnginesBanner').style.display,'none');
 
- run(`renderProcessingNotices({{id:'rec-3',analysis_stage:'ready',metadata:{{transcription_engines:{{local_s:150,gap_s:40,windows:[
-   {{start:0,end:150,engine:'local',reason:'window rejected'}},{{start:200,end:240,engine:'gap',reason:'content <blocked>'}}]}}}}}})`);
+ // The item shape from api/views.recording_item: transcription_engines at the top level.
+ run(`renderProcessingNotices({{id:'rec-3',analysis_stage:'ready',transcription_engines:{{local_s:150,gap_s:40,windows:[
+   {{start:0,end:150,engine:'local',reason:'window rejected'}},{{start:200,end:240,engine:'gap',reason:'content <blocked>'}}]}}}})`);
  assert.equal(failure.style.display,'none');
  const engines=node('#notepadEnginesBanner');
  assert.notEqual(engines.style.display,'none');
@@ -112,6 +113,6 @@ def test_detail_page_shows_failure_and_affected_minutes(tmp_path):
  assert.match(engines.innerHTML,/1 min could not be transcribed/);
  assert.match(engines.innerHTML,/content &lt;blocked&gt;/);
 
- run(`renderProcessingNotices({{id:'rec-4',analysis_stage:'ready',metadata:{{transcription_engines:{{local_s:0,gap_s:0,windows:[]}}}}}})`);
+ run(`renderProcessingNotices({{id:'rec-4',analysis_stage:'ready',transcription_engines:{{local_s:0,gap_s:0,windows:[]}}}})`);
  assert.equal(engines.style.display,'none');
 ''')
