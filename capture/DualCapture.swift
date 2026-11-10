@@ -95,16 +95,21 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
     var isMicMuted = false
 
     // Microphone in use. Session configuration and reconnect run on
-    // sessionQueue; the fields marked (lock) are shared with the sample
-    // delegate queues and guarded by `lock`.
+    // sessionQueue. `lock` guards the writer session (start, finish) for
+    // both delegate queues; mic-track appends and the reconnect padding run
+    // under `micLock` only, so a long silence pad never stalls the
+    // system-audio delegate. Lock order: lock, then micLock.
     let requestedDeviceID: String?
     let sessionQueue = DispatchQueue(label: "VoiceCoach.MicSessionQueue")
+    let micLock = NSLock()
     var currentMicDevice: AVCaptureDevice?
     var currentMicInput: AVCaptureDeviceInput?
     var stopping = false
     var reconnecting = false
-    var padNextMicBuffer = false          // (lock) fill the reconnect gap with silence
-    var lastMicEnd = CMTime.invalid       // (lock) end time of the last mic buffer written
+    var reattachedAfterErrorAt: Date?     // (sessionQueue) last same-device reattach on a session error
+    var inputsFinished = false            // (lock + micLock to write) writer inputs marked finished
+    var padNextMicBuffer = false          // (micLock) fill the reconnect gap with silence
+    var lastMicEnd = CMTime.invalid       // (micLock) end time of the last mic buffer written
     var observers: [NSObjectProtocol] = []
 
     init(requestedDeviceID: String?) {
@@ -141,34 +146,51 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
             FileHandle.standardError.write(Data("dual-capture: requested microphone \(id) unavailable; using the system default input\n".utf8))
         }
         if let device = Microphones.systemDefault(), attachMic(device) { return true }
-        for device in Microphones.connected() where attachMic(device) { return true }
+        for device in Microphones.connected() where attachMic(device) {
+            let name = device.localizedName.replacingOccurrences(of: "\n", with: " ")
+            print("CAPTURE_WARNING: Using \(name) because the system default microphone could not be opened")
+            fflush(stdout)
+            return true
+        }
         return false
     }
 
     /// The mic in use went away (unplugged, or the capture session failed).
-    /// Reopen the system default into the same session and keep writing the
-    /// same mic track; the gap is padded with silence when audio resumes.
-    /// Never exits and never ends the Chunk. See docs/adr/0001-mic-reconnect-in-helper.md.
-    func handleMicLoss(reason: String, device: AVCaptureDevice? = nil) {
+    /// After a session error the device in use is reattached first if it is
+    /// still connected; otherwise (and after a disconnect) the system default
+    /// is reopened. Either way into the same session, writing the same mic
+    /// track; the gap is padded with silence when audio resumes. Never exits
+    /// and never ends the Chunk. See docs/adr/0001-mic-reconnect-in-helper.md.
+    func handleMicLoss(reason: String, device: AVCaptureDevice? = nil, sessionError: Bool = false) {
         sessionQueue.async { [self] in
             guard !stopping, !reconnecting else { return }
             if let device = device, device.uniqueID != currentMicDevice?.uniqueID { return }
+            // A device that errors again within 5 s of being reattached is
+            // not retried, so a failing device cannot loop forever.
+            var retry: AVCaptureDevice?
+            if sessionError, let current = currentMicDevice {
+                let recentlyReattached = reattachedAfterErrorAt.map { Date().timeIntervalSince($0) < 5 } ?? false
+                if !recentlyReattached { retry = current }
+            }
             reconnecting = true
-            print("Microphone lost (\(reason)); reopening the system default input.")
+            print("Microphone lost (\(reason)); reopening \(retry == nil ? "the system default input" : "it, else the system default input").")
             fflush(stdout)
-            lock.lock(); padNextMicBuffer = true; lock.unlock()
-            reconnectMic(attempt: 0)
+            micLock.lock(); padNextMicBuffer = true; micLock.unlock()
+            reconnectMic(attempt: 0, retry: retry)
         }
     }
 
-    private func reconnectMic(attempt: Int) {
+    private func reconnectMic(attempt: Int, retry: AVCaptureDevice?) {
         guard !stopping else { reconnecting = false; return }
+        // The device in use first when a session error left it connected.
         // CoreAudio can take a moment to move its default off a device that
-        // just vanished: prefer the default, and after ~3 s accept any input.
+        // just vanished: then prefer the default, and after ~3 s accept any input.
         var candidates: [AVCaptureDevice] = []
+        if let device = retry, device.isConnected { candidates.append(device) }
         if let device = Microphones.systemDefault() { candidates.append(device) }
         if attempt >= 6 { candidates += Microphones.connected() }
         for device in candidates where attachMic(device) {
+            reattachedAfterErrorAt = device.uniqueID == retry?.uniqueID ? Date() : nil
             if !captureSession.isRunning { captureSession.startRunning() }
             reconnecting = false
             return
@@ -178,7 +200,7 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
             fflush(stdout)
         }
         sessionQueue.asyncAfter(deadline: .now() + (attempt < 6 ? 0.5 : 1.0)) { [self] in
-            reconnectMic(attempt: attempt + 1)
+            reconnectMic(attempt: attempt + 1, retry: retry)
         }
     }
 
@@ -190,7 +212,7 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
         })
         observers.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: captureSession, queue: nil) { [weak self] note in
             let error = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
-            self?.handleMicLoss(reason: "session error \(error?.code ?? 0)")
+            self?.handleMicLoss(reason: "session error \(error?.code ?? 0)", sessionError: true)
         })
     }
 
@@ -302,10 +324,13 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
             fflush(stdout)
         }
 
-        lock.lock()
-        micInput.markAsFinished()
-        sysInput.markAsFinished()
-        lock.unlock()
+        lock.withLock {
+            micLock.withLock {
+                inputsFinished = true
+                micInput.markAsFinished()
+                sysInput.markAsFinished()
+            }
+        }
 
         await assetWriter.finishWriting()
         print("Spike A: Recording stopped gracefully. Writer status: \(assetWriter.status.rawValue), error: \(String(describing: assetWriter.error))")
@@ -420,36 +445,46 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
     func writeBuffer(_ buffer: CMSampleBuffer, to input: AVAssetWriterInput, source: String) {
         checkAudioLevel(buffer, source: source)
         lock.lock()
-        defer { lock.unlock() }
-        
-        if assetWriter.status == .unknown { return }
-        
-        if assetWriter.status == .writing {
-            if !sessionStarted {
-                let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
-                assetWriter.startSession(atSourceTime: pts)
-                sessionStarted = true
-                print("Session timeline anchored by \(source) track.")
-                fflush(stdout)
-            }
-            if source == "Mic" {
-                let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
-                if padNextMicBuffer {
-                    padNextMicBuffer = false
-                    padMicGap(until: pts, like: buffer)
-                }
-                let duration = CMSampleBufferGetDuration(buffer)
-                lastMicEnd = duration.isValid ? CMTimeAdd(pts, duration) : pts
-            }
-            if input.isReadyForMoreMediaData {
-                input.append(buffer)
-            }
+        guard assetWriter.status == .writing, !inputsFinished else { lock.unlock(); return }
+        if !sessionStarted {
+            let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
+            assetWriter.startSession(atSourceTime: pts)
+            sessionStarted = true
+            print("Session timeline anchored by \(source) track.")
+            fflush(stdout)
+        }
+        guard source == "Mic" else {
+            if input.isReadyForMoreMediaData { input.append(buffer) }
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        writeMicBuffer(buffer)
+    }
+
+    /// Appends a mic buffer, first padding a reconnect gap with silence.
+    /// Runs on the mic delegate queue under `micLock` only: waiting for the
+    /// writer while padding delays mic buffers, never the system track.
+    private func writeMicBuffer(_ buffer: CMSampleBuffer) {
+        micLock.lock()
+        defer { micLock.unlock() }
+        guard !inputsFinished else { return }
+        let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
+        if padNextMicBuffer {
+            padNextMicBuffer = false
+            padMicGap(until: pts, like: buffer)
+        }
+        let duration = CMSampleBufferGetDuration(buffer)
+        lastMicEnd = duration.isValid ? CMTimeAdd(pts, duration) : pts
+        if micInput.isReadyForMoreMediaData {
+            micInput.append(buffer)
         }
     }
 
     /// Writes zero PCM on the mic track from the end of the last mic buffer
     /// up to `end`, in `template`'s format, so the mic and system tracks stay
-    /// time-aligned across a reconnect. Called with `lock` held.
+    /// time-aligned across a reconnect. Called with `micLock` held (never
+    /// `lock`), on the mic delegate queue.
     private func padMicGap(until end: CMTime, like template: CMSampleBuffer) {
         guard lastMicEnd.isValid, end.isValid,
               let format = CMSampleBufferGetFormatDescription(template),
