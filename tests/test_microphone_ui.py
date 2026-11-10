@@ -220,3 +220,47 @@ def test_onboarding_permissions_step_holds_the_picker_hidden_until_granted():
     assert 'id="onboardingMicrophoneRefresh"' in step
     field = step[step.index('id="onboardingMicrophoneField"') - 80:step.index('id="onboardingMicrophoneField"') + 80]
     assert 'hidden' in field
+
+
+# The floater's floater.js with the preload surface for the Microphone name.
+FLOATER = PRELUDE + r'''
+let micDeviceCallback = null;
+const floater = vm.createContext({console, setTimeout, setInterval: () => 0, Promise, Date,
+  document: {getElementById: id => node('#'+id)},
+  window: {electronAPI: {getMicDevice: async () => 'Shure MV7', onMicDevice: cb => { micDeviceCallback = cb; }}},
+});
+vm.runInContext(fs.readFileSync(ROOT+'/src/ui/floater.js', 'utf8'), floater);
+const publish = async name => { micDeviceCallback(name); await new Promise(r => setTimeout(r)); };
+'''
+
+
+@needs_node
+def test_floater_names_the_microphone_on_its_mic_meter_and_toasts_a_mid_call_switch(tmp_path):
+    run_node(tmp_path, FLOATER + r'''
+run(async () => {
+  await new Promise(r => setTimeout(r));
+  assert.match(node('#meterMicGroup').title, /Shure MV7/);  // known before the first publish
+  const startToast = node('#toast').textContent;
+
+  await publish('Shure MV7');            // every publish repeats the name: no toast
+  assert.equal(node('#toast').textContent, startToast);
+
+  await publish('MacBook Pro Microphone');  // disconnected mid-call, helper fell back
+  assert.match(node('#meterMicGroup').title, /MacBook Pro Microphone/);
+  assert.match(node('#toast').textContent, /MacBook Pro Microphone/);
+
+  node('#toast').textContent = '';
+  await publish(null);                    // recording over: no toast, no stale name
+  assert.equal(node('#toast').textContent, '');
+  assert.doesNotMatch(node('#meterMicGroup').title, /MacBook Pro Microphone/);
+  await publish('Logi C920 Webcam');      // first device of the next recording: no toast
+  assert.equal(node('#toast').textContent, '');
+  assert.match(node('#meterMicGroup').title, /Logi C920 Webcam/);
+});
+''')
+
+
+def test_floater_mic_meter_is_addressable_for_its_tooltip():
+    html = (ROOT / 'src/ui/floater.html').read_text()
+    group = html[html.index('id="meterMicGroup"'):html.index('id="meterSys"')]
+    assert 'id="meterMic"' in group
