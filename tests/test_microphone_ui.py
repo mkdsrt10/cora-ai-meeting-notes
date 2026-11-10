@@ -129,6 +129,30 @@ run(async () => {
 
 
 @needs_node
+def test_a_chosen_microphone_that_is_not_connected_shows_as_chosen_not_as_system_default(tmp_path):
+    run_node(tmp_path, WEB + r'''
+run(async () => {
+  savedMicrophone = {unique_id:'AirPods-1', name:'AirPods Pro'};
+  await showRecordingSection();
+  const options = optionsOf(node('#settingsMicrophone').innerHTML);
+  const missing = options.filter(o => o.label === 'AirPods Pro (not connected)');
+  assert.equal(missing.length, 1);
+  assert.equal(missing[0].selected, true);
+  assert.match(node('#settingsMicrophone').innerHTML, /<option value="AirPods-1"[^>]*\bdisabled\b[^>]*>AirPods Pro \(not connected\)/);
+  assert.equal(node('#settingsMicrophone').value, 'AirPods-1');
+  assert.equal(options.filter(o => o.selected).length, 1);
+  assert.equal(microphoneWrites().length, 0);  // showing it changes nothing
+
+  // Once it is plugged back in it is listed normally, with no stand-in.
+  devices = devices.concat([{name:'AirPods Pro', unique_id:'AirPods-1', is_default:false}]);
+  await fire('#settingsMicrophoneRefresh');
+  assert.doesNotMatch(node('#settingsMicrophone').innerHTML, /not connected/);
+  assert.equal(node('#settingsMicrophone').value, 'AirPods-1');
+});
+''')
+
+
+@needs_node
 def test_choosing_a_microphone_saves_it_and_system_default_clears_it(tmp_path):
     run_node(tmp_path, WEB + r'''
 run(async () => {

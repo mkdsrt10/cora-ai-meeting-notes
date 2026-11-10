@@ -26,11 +26,16 @@ async function loadMicrophonePicker(selector){
     microphoneDevices[selector] = devices;
     const chosen = saved.value || null;
     const match = chosen && (devices.find(d => d.unique_id === chosen.unique_id) || devices.find(d => d.name === chosen.name));
-    const options = [{value: '', label: 'System default'}].concat(devices.map(d => ({
+    // A saved choice that is not plugged in stays visibly chosen (recordings
+    // still ask for it and fall back to System default), not shown as System default.
+    const missing = chosen && !match && chosen.unique_id
+      ? [{value: chosen.unique_id, label: `${chosen.name || chosen.unique_id} (not connected)`, attrs: ' selected disabled'}]
+      : [];
+    const options = [{value: '', label: 'System default'}].concat(missing, devices.map(d => ({
       value: d.unique_id, label: d.name + (d.is_default ? ' (system default)' : ''),
     })));
-    select.innerHTML = options.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
-    select.value = match ? match.unique_id : '';
+    select.innerHTML = options.map(o => `<option value="${esc(o.value)}"${o.attrs || ''}>${esc(o.label)}</option>`).join('');
+    select.value = match ? match.unique_id : missing.length ? chosen.unique_id : '';
   }catch(error){ toast(error.message, true); }
 }
 
