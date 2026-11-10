@@ -112,21 +112,35 @@ def process_recording_local(folder: Path, options: dict | None = None) -> dict[s
 
 def _process_recording_selected(folder: Path, profile: dict[str, Any]) -> dict[str, Any]:
     """Complete end-to-end local processing: MLX Whisper + AX Speakers + OCR Slides + Qwen3-4B."""
-    audio_file = next((p for p in folder.iterdir() if p.is_file() and p.name.startswith("audio.")), None)
-    if not audio_file:
-        from .errors import NoAudioError
-        raise NoAudioError()
-
-    _archive_previous_outputs(folder)
-    _write_progress(folder, "starting", "Initializing selected processing pipeline...", percent=5)
     try:
+        audio_file = next((p for p in folder.iterdir() if p.is_file() and p.name.startswith("audio.")), None)
+        if not audio_file:
+            from .errors import NoAudioError
+            raise NoAudioError()
+        _archive_previous_outputs(folder)
+        _write_progress(folder, "starting", "Initializing selected processing pipeline...", percent=5)
         with ai_trace.run("local_meeting_pipeline", recording_id=folder.name, audio_file=audio_file.name):
             result = _process_recording_local_inner(folder, audio_file, profile)
-        (folder / ".pipeline_progress.json").unlink(missing_ok=True)
-        return result
     except Exception as exc:
-        _write_progress(folder, "error", str(exc), percent=0)
+        _record_failure(folder, exc)
         raise
+    (folder / ".pipeline_progress.json").unlink(missing_ok=True)
+    db.set_processing_failure(result["recording_id"], None)
+    return result
+
+
+def _record_failure(folder: Path, exc: BaseException) -> None:
+    """The "Processing failed" Stage: store the classified code and its fixed,
+    plain-language message (never exception text) on the Recording."""
+    from api.processing_errors import classify
+    _, payload = classify(exc)
+    if folder.is_dir():
+        _write_progress(folder, "error", payload["error"], percent=0)
+    db.set_processing_failure(folder.name, {
+        "code": payload["code"],
+        "message": payload["error"],
+        "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    })
 
 
 def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict[str, Any]) -> dict[str, Any]:
@@ -183,6 +197,11 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
     context.save(folder)
     stage_timings["transcription"] = time.time() - t0
     raw_segments.sort(key=lambda s: s["start"])
+    from .windowed import engine_notice, engine_summary
+    metadata["transcription_engines"] = engine_summary(raw_segments)
+    db.update_recording_data(folder.name, "metadata", metadata)
+    if notice := engine_notice(metadata["transcription_engines"]):
+        db.log_notification(f"Part of \"{title}\" was not transcribed in the cloud", notice, "warning", folder.name)
     _write_progress(folder, "aligning_speakers", "Aligning speakers and audio tracks...", percent=45)
 
     # 2. Align speakers from Accessibility timeline
@@ -196,6 +215,11 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
         start_sec = float(seg.get("start", 0.0))
         end_sec = float(seg.get("end", 0.0))
         text = seg.get("text", "").strip()
+        marks = {k: seg[k] for k in ("engine", "reason") if seg.get("engine") in ("local", "gap") and k in seg}
+        if marks.get("engine") == "gap":  # a Window nobody transcribed: kept so the transcript shows it
+            aligned_segments.append({"speaker_id": "", "speaker_name": "", "start": format_ts(start_sec),
+                                     "end": format_ts(end_sec), "text": "", "language": "en", "emotion": "neutral", **marks})
+            continue
         if not text or text in {"!", ".", "?", "...", ",", "-", "!!", "!!!"} or re.fullmatch(r"[!?. ,\-_]+", text):
             continue
 
@@ -224,6 +248,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
             "text": text,
             "language": "en",
             "emotion": "neutral",
+            **marks,
         })
 
     # 2a. Name the remote turns the audio couldn't attribute (several other
@@ -240,7 +265,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
             print(f"[Local Pipeline] Romanization: {stats}", flush=True)
         # 2a-ii. Name remote turns the audio couldn't attribute.
         _guess_remote_speakers(folder, aligned_segments, ax_participants, title, model)
-    assigned_speakers = {s["speaker_name"] for s in aligned_segments}
+    assigned_speakers = {s["speaker_name"] for s in aligned_segments if s["speaker_name"]}
 
     # 2b. If this recording is linked as a continuation of an earlier one,
     # shift this recording's own segments onto the end of that meeting's

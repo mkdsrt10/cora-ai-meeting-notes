@@ -202,6 +202,7 @@ function loadNotepad(){
   lastPolledKeyPhrasesKey = JSON.stringify(record?.key_phrases || []);
   renderKeyPhrases(record);
   renderCleanTranscript(record);
+  renderProcessingNotices(record);
   pollLiveFeedIfRecording();
 
   // Live recording actions & timer banner inside notepad
@@ -316,6 +317,35 @@ function loadNotepad(){
     if(record.archetype) chips.push(`<span class="chip">${esc(record.archetype)}</span>`);
     chipsHost.innerHTML = chips.join('');
   }
+}
+
+const fmtMinutes = seconds => seconds < 60 ? 'Under 1 min' : `${Math.round(seconds / 60)} min`;
+
+// Two banners above the notes: "Processing failed" with its reason and Retry,
+// and, when the cloud engine rejected some Windows, how many minutes were
+// transcribed on this Mac or left as gaps (the item's transcription_engines).
+function renderProcessingNotices(record){
+  const failureHost = $('#notepadFailureBanner');
+  if(failureHost){
+    const notice = failureNotice(record);
+    failureHost.innerHTML = notice ? `<strong>${esc(stageLabels.failed || 'Processing failed')}</strong>${notice}` : '';
+    failureHost.style.display = notice ? '' : 'none';
+  }
+  const enginesHost = $('#notepadEnginesBanner');
+  if(!enginesHost) return;
+  const engines = record?.transcription_engines || {};
+  const local = Number(engines.local_s) || 0, gap = Number(engines.gap_s) || 0;
+  if(local + gap <= 0){
+    enginesHost.style.display = 'none';
+    enginesHost.innerHTML = '';
+    return;
+  }
+  const parts = [];
+  if(local > 0) parts.push(`${fmtMinutes(local)} transcribed on this Mac`);
+  if(gap > 0) parts.push(`${fmtMinutes(gap)} could not be transcribed`);
+  const reasons = [...new Set((engines.windows || []).map(w => w.reason).filter(Boolean))];
+  enginesHost.innerHTML = `<span>${esc(parts.join(' · '))}${reasons.length ? ` (${esc(reasons.join('; '))})` : ''}. Affected lines are marked in the Clean Transcript.</span>`;
+  enginesHost.style.display = '';
 }
 
 $('#notepadFolder')?.addEventListener('change', async (e) => {

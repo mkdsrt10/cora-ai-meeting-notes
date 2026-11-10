@@ -40,4 +40,6 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Microphone**: the input device that feeds a Recording's mic track: "System default" (whatever macOS has as default input when recording starts) or one named device. The system-audio track is not a Microphone. _Avoid_: input device, audio source.
 
+**Window**: one clip of a Recording's audio sent to a cloud Transcriber call and validated as a unit; a Window that the cloud engine keeps rejecting is transcribed locally instead. _Avoid_: chunk (that is capture), segment (that is transcript).
+
 **Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript.

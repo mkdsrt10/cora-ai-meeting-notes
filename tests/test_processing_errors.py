@@ -55,6 +55,8 @@ def _caused(outer, inner):
     (HttpError(429), "provider_unavailable", True, 503),
     (HttpError(503), "provider_unavailable", True, 503),
     (_caused(RuntimeError(SECRET), errors.ProviderAuthError("gemini")), "provider_auth", False, 502),
+    (errors.WindowedTranscriptionError("gemini"), "cloud_transcription_rejected", False, 422),
+    (_caused(RuntimeError(SECRET), errors.WindowedTranscriptionError("gemini")), "cloud_transcription_rejected", False, 422),
 ])
 def test_each_failure_maps_to_one_code(exc, code, retryable, status):
     got_status, body = processing_errors.classify(exc)
@@ -66,6 +68,14 @@ def test_each_failure_maps_to_one_code(exc, code, retryable, status):
 def test_auth_message_names_the_provider_and_settings():
     _, body = processing_errors.classify(errors.ProviderAuthError("anthropic"))
     assert "Anthropic" in body["error"] and "Settings" in body["error"]
+
+
+def test_windowed_failure_has_a_plain_message_and_keeps_its_old_name():
+    from pipeline import windowed
+    _, body = processing_errors.classify(windowed.WindowedASRError("gemini"))
+    assert body["error"] == ("The cloud transcription engine rejected part of this recording "
+                             "and no local model was available to fill in.")
+    assert body["code"] == "cloud_transcription_rejected" and body["retryable"] is False
 
 
 def _folder(name):

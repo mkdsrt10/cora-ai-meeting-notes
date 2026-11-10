@@ -40,6 +40,13 @@ async function api(path, options={}) {
 }
 function toast(message, error=false){ const node=$('#toast'); node.textContent=message; node.classList.toggle('error', error); node.classList.add('show'); setTimeout(()=>node.classList.remove('show'), 3500); }
 function stagePill(stage){ return `<span class="stage-pill ${esc(stage)}">${esc(stageLabels[stage] || stage)}</span>`; }
+// "Processing failed": the plain-language reason and a Retry that reruns
+// processing (see retryProcessing in detail-actions.js). Empty otherwise.
+function failureNotice(record){
+  if(record?.analysis_stage !== 'failed') return '';
+  const message = record.failure?.message || 'Processing did not finish.';
+  return `<p class="failure-message">${esc(message)}</p><button type="button" class="button secondary small" data-retry-processing="${esc(record.id)}">Retry</button>`;
+}
 async function copyText(value){
   if(navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
   const node=document.createElement('textarea'); node.value=value; document.body.appendChild(node); node.select(); document.execCommand('copy'); node.remove();

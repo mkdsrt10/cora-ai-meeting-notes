@@ -9,7 +9,7 @@ import pytest
 
 from pipeline import gemini_asr, windowed
 from pipeline.context import MeetingContext
-from pipeline.windowed import WindowedASRError, transcribe_windows
+from pipeline.windowed import transcribe_windows
 
 pytestmark = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
 
@@ -138,12 +138,12 @@ def test_a_failing_window_is_split_and_the_halves_retried(audio, monkeypatch):
     assert len(segs) == 2
 
 
-def test_unfixable_window_fails_the_run_instead_of_dropping_it(audio, monkeypatch):
+def test_unfixable_window_is_kept_as_a_marked_gap_instead_of_dropped(audio, monkeypatch):
     monkeypatch.setattr(windowed, "_sleep", lambda s: None)
     def always_bad(clip_path, duration, block):
         raise gemini_asr.AsrCallError("blocked")
-    with pytest.raises(WindowedASRError, match="failed for"):
-        transcribe_windows(audio, [(0.0, 50.0)], CONTEXT, caller=always_bad, strict=[(0.0, 50.0)], workers=1)
+    segs = transcribe_windows(audio, [(0.0, 50.0)], CONTEXT, caller=always_bad, strict=[(0.0, 50.0)], workers=1)
+    assert [(s["start"], s["end"], s["engine"]) for s in segs] == [(0.0, 50.0, "gap")]
 
 
 def test_temp_clips_are_deleted(audio, tmp_path, monkeypatch):
@@ -181,7 +181,7 @@ def test_timestamp_overrun_in_continuous_speech_recovers_by_recursive_split(tmp_
     assert not any(p.exists() for p in clips)
 
 
-def test_continuous_invalid_windows_still_fail_with_bounded_requests(tmp_path, monkeypatch):
+def test_continuous_invalid_windows_become_gaps_with_bounded_requests(tmp_path, monkeypatch):
     monkeypatch.setattr(windowed, '_sleep', lambda _: None)
     calls = []
     def extract(*args):
@@ -192,9 +192,10 @@ def test_continuous_invalid_windows_still_fail_with_bounded_requests(tmp_path, m
     def invalid(clip, duration, block):
         calls.append(duration)
         return [{'start':duration+18.6,'end':duration+20,'text':'invalid turn'}]
-    with pytest.raises(WindowedASRError, match='failed for'):
-        transcribe_windows(tmp_path/'unused.wav',[(720,1004)],CONTEXT,caller=invalid,strict=[(720,1004)],workers=1)
-    assert calls == [284]*3 + [142]*3 + [71]*3
+    segs = transcribe_windows(tmp_path/'unused.wav',[(720,1004)],CONTEXT,caller=invalid,strict=[(720,1004)],workers=1)
+    assert calls == [284]*3 + [142]*3 + [71]*3 + [71]*3 + [142]*3 + [71]*3 + [71]*3
+    assert [(s['start'], s['end'], s['engine']) for s in segs] == [(720, 791, 'gap'), (791, 862, 'gap'),
+                                                                 (862, 933, 'gap'), (933, 1004, 'gap')]
 
 
 def test_parallel_asr_keeps_meeting_context_and_failed_attempt_history(audio, tmp_path, monkeypatch):
@@ -241,3 +242,29 @@ def test_empty_response_reports_candidate_and_block_diagnostics(tmp_path):
     client.models.generate_content = empty
     with pytest.raises(gemini_asr.AsrCallError,match='candidates=0, block_reason=SAFETY'):
         gemini_asr.transcribe_window(clip(tmp_path),3,'context',client=client,model='test-model')
+
+
+def _empty_reply(tmp_path, candidates, block_reason=None):
+    client = FakeClient('')
+    client.models.generate_content = lambda **kwargs: SimpleNamespace(
+        text=None, candidates=candidates, prompt_feedback=SimpleNamespace(block_reason=block_reason))
+    with pytest.raises(gemini_asr.AsrCallError) as raised:
+        gemini_asr.transcribe_window(clip(tmp_path), 3, 'context', client=client, model='test-model')
+    return raised.value
+
+
+def test_a_blocked_prompt_is_a_refusal(tmp_path):
+    assert isinstance(_empty_reply(tmp_path, [], block_reason='PROHIBITED_CONTENT'), gemini_asr.AsrRefusedError)
+
+
+def test_a_refusal_finish_reason_is_a_refusal(tmp_path):
+    refused = _empty_reply(tmp_path, [SimpleNamespace(finish_reason='FinishReason.SAFETY')])
+    assert isinstance(refused, gemini_asr.AsrRefusedError)
+
+
+def test_no_candidates_without_a_block_reason_stays_retryable(tmp_path):
+    # An empty candidate list with nothing blocked is a transient hiccup, not a
+    # refusal: the ladder should retry it before the Window goes local.
+    error = _empty_reply(tmp_path, [])
+    assert not isinstance(error, gemini_asr.AsrRefusedError)
+    assert 'candidates=0' in str(error)

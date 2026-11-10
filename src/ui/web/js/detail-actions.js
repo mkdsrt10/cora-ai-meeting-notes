@@ -116,6 +116,27 @@ async function triggerReprocess(processingOptions) {
 
 $('#notepadReprocessBtn')?.addEventListener('click', () => openSummarizeModal(true));
 
+// Retry on a "Processing failed" Recording (dashboard row or detail page):
+// rerun processing with the current Processing profile.
+async function retryProcessing(id, button){
+  if(!id || activeReprocess.has(id)) return;
+  activeReprocess.add(id);
+  reprocessStartTimes[id] = Date.now();
+  if(button){ button.disabled = true; button.textContent = 'Retrying…'; }
+  if(isSelectedMeeting(id)) pollLiveFeedIfRecording();
+  try{
+    await api('/api/process-recording', { method: 'POST', body: JSON.stringify({ id }) });
+    toast('Processing finished.');
+  }catch(error){
+    toast(error.message, true);
+  }finally{
+    activeReprocess.delete(id);
+    delete reprocessStartTimes[id];
+    try{ await load(); }catch(error){ console.warn('Reload after retry failed:', error.message); }
+    if(isSelectedMeeting(id)) await loadSelectedRecording(id);
+  }
+}
+
 async function openSummarizeModal(retranscribe = false) {
   const record = selectedRecording();
   if (!record) return;
