@@ -7,11 +7,11 @@ const {
   MAC_OCR_BIN, PYTHON_SCRIPT, PIPELINE_SCRIPT, ICON_PATH, PYTHON_BIN,
 } = require('./main/paths');
 const {
-  DASHBOARD_PORT, DASHBOARD_URL, API_TOKEN, PYTHON_ENV, postJson, fetchJson, verifyOwnServer,
+  DASHBOARD_PORT, DASHBOARD_URL, API_TOKEN, PYTHON_ENV, postJson, fetchJson, fetchSetting, verifyOwnServer,
 } = require('./main/api-client');
 const { handleTrusted, installNavigationGuards } = require('./main/security');
 const { startMeetingWatcher, detectActiveMeeting } = require('./meeting-detector');
-const { createCaptureHelperFactory, startMicWatch } = require('./recording/capture-helper');
+const { createCaptureHelperFactory, listAudioDevices, startMicWatch } = require('./recording/capture-helper');
 const { createRecordingSession } = require('./recording/session');
 const { createProcessingQueue } = require('./recording/processing-queue');
 const { createBackendApi, createArchiveStep } = require('./recording/backend');
@@ -77,6 +77,12 @@ const recording = createRecordingSession({
   clock,
   queue: processingQueue,
   people: { selfName: () => selfName, labelSpeaker },
+  // The Microphone setting ({ unique_id, name } or null = System default),
+  // resolved against the helper's own device list at each start.
+  microphone: {
+    chosen: () => fetchSetting('microphone'),
+    devices: () => listAudioDevices(CAPTURE_BIN),
+  },
 });
 
 const isCapturing = () => recording.state().phase === 'recording';
@@ -160,14 +166,21 @@ function rendererState(s = recording.state()) {
 }
 
 let publishedState = null;
+let publishedMicDevice = null;
 function publishState() {
   const s = recording.state();
   const state = rendererState(s);
   const changed = state !== publishedState;
   publishedState = state;
+  const micChanged = s.micDevice !== publishedMicDevice;
+  publishedMicDevice = s.micDevice;
 
   if (changed && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('recording-state', state);
+  }
+  // The Microphone the helper actually opened (null until it reports one).
+  if (micChanged && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('mic-device', s.micDevice);
   }
 
   if (state === 'recording' || state === 'paused') {
@@ -183,6 +196,7 @@ function publishState() {
       // Every state change carries mute, so the floater can never show
       // "Muted" for a recording that is capturing the mic.
       floaterWindow.webContents.send('mic-mute-state', s.muted);
+      floaterWindow.webContents.send('mic-device', s.micDevice);
     }
   } else if (floaterWindow && !floaterWindow.isDestroyed() && floaterWindow.isVisible()) {
     floaterWindow.hide();
@@ -210,6 +224,12 @@ recording.on('stopped', ({ recordingId, reason, warning }) => {
   } else if (reason !== 'quit') {
     notify({ title: 'Cora', body: 'Meeting ended. Processing your meeting…' }, { recordingId });
   }
+});
+
+// The opened Microphone is not the chosen one at start, or it changed
+// mid-call: the session supplies the text; recording carries on regardless.
+recording.on('device', ({ recordingId, notice }) => {
+  if (notice) notify({ title: 'Cora', body: notice, icon: ICON_PATH }, { level: 'warning', recordingId });
 });
 
 recording.on('level', (levels) => {
@@ -268,6 +288,8 @@ function startRecording(meetingTool = null) {
 }
 
 handleTrusted('get-recording-state', () => rendererState());
+
+handleTrusted('get-mic-device', () => recording.state().micDevice);
 
 handleTrusted('get-permission-status', () => ({
   microphone: systemPreferences.getMediaAccessStatus('microphone'),

@@ -3,7 +3,9 @@
 // detection), parses their stdout grammar into typed events, and writes
 // their stdin commands. The Recording session only ever sees a handle:
 //
-//   const helper = startCaptureHelper({ recordingId, selfName });
+//   const helper = startCaptureHelper({ recordingId, selfName, deviceId });
+//                                    // deviceId: Microphone uniqueID -> --device;
+//                                    // null = System default (no argument)
 //   helper.on('event', (ev) => ...)   // see parseHelperLine for event shapes
 //   helper.on('exit', ({ code, signal }) => ...)  // dual-capture exited
 //   helper.setMuted(true)            // MUTE_MIC / UNMUTE_MIC over stdin
@@ -11,7 +13,7 @@
 //                                    // (SIGKILL after exitTimeoutMs)
 //
 // Tests replace this with a fake handle; nothing else spawns these binaries.
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const { EventEmitter } = require('events');
 const fs = require('fs');
 const path = require('path');
@@ -19,6 +21,8 @@ const readline = require('readline');
 
 const LEVEL = /^AUDIO_LEVEL mic=(-?[\d.]+) sys=(-?[\d.]+)/;
 const SPEAKER = /^SPEAKER_ACTIVE:\s*(.+?)\s*\(([^)]*)\)\s*$/;
+// The Microphone the helper actually opened, printed on every (re)open.
+const MIC_DEVICE = /^STATUS: MIC_DEVICE (.+)$/;
 
 // One line of helper stdout -> a typed event, or null for chatter.
 function parseHelperLine(raw) {
@@ -35,6 +39,8 @@ function parseHelperLine(raw) {
   if (line.startsWith('CAPTURE_WARNING:')) return { type: 'warning', message: line.slice('CAPTURE_WARNING:'.length).trim() };
   if (line.startsWith('Error:')) return { type: 'error', message: line.slice('Error:'.length).trim() };
   if (line.startsWith('Failed:')) return { type: 'error', message: line.slice('Failed:'.length).trim() };
+  m = MIC_DEVICE.exec(line);
+  if (m) return { type: 'device', name: m[1] };
   if (line === 'STATUS: MIC_MUTED') return { type: 'muteStatus', muted: true };
   if (line === 'STATUS: MIC_UNMUTED') return { type: 'muteStatus', muted: false };
   if (line === 'MIC_ON') return { type: 'micOn' };
@@ -66,7 +72,7 @@ function waitForExit(proc, label, timeoutMs) {
 // Audio goes to <inbox>/<recordingId>.mov, the Speaker timeline to
 // <inbox>/<recordingId>_speakers.json.
 function createCaptureHelperFactory(bins, dirs, { exitTimeoutMs = EXIT_TIMEOUT_MS } = {}) {
-  return function startCaptureHelper({ recordingId, selfName }) {
+  return function startCaptureHelper({ recordingId, selfName, deviceId = null }) {
     fs.mkdirSync(dirs.inboxDir, { recursive: true });
     fs.mkdirSync(dirs.logsDir, { recursive: true });
     const outFile = path.join(dirs.inboxDir, `${recordingId}.mov`);
@@ -88,7 +94,7 @@ function createCaptureHelperFactory(bins, dirs, { exitTimeoutMs = EXIT_TIMEOUT_M
       exited = true;
       handle.emit('exit', { code, signal });
     };
-    const capture = spawn(bins.captureBin, [outFile]);
+    const capture = spawn(bins.captureBin, deviceId ? [outFile, '--device', deviceId] : [outFile]);
     capture.on('error', (err) => {
       handle.emit('event', { type: 'error', message: err.message });
       if (!capture.pid) emitExit(-1, null);
@@ -132,6 +138,29 @@ function createCaptureHelperFactory(bins, dirs, { exitTimeoutMs = EXIT_TIMEOUT_M
   };
 }
 
+const LIST_TIMEOUT_MS = 5000;
+
+// `dual-capture --list-devices` -> Promise<[{ name, uniqueID, isDefault }]>.
+// Never rejects: a missing, failing, hung or garbled helper yields [], which
+// resolves any chosen Microphone to System default.
+function listAudioDevices(captureBin, { timeoutMs = LIST_TIMEOUT_MS } = {}) {
+  return new Promise((resolve) => {
+    execFile(captureBin, ['--list-devices'], { timeout: timeoutMs, killSignal: 'SIGKILL' }, (err, stdout) => {
+      if (err) {
+        console.error('[Cora] listing microphones failed:', err.message);
+        return resolve([]);
+      }
+      try {
+        const list = JSON.parse(String(stdout).trim().split('\n').pop());
+        resolve(Array.isArray(list) ? list.filter((d) => d && typeof d.name === 'string' && typeof d.uniqueID === 'string') : []);
+      } catch {
+        console.error('[Cora] listing microphones: helper printed no device list');
+        resolve([]);
+      }
+    });
+  });
+}
+
 // mic-watch: MIC_ON / MIC_OFF lines -> callbacks. Returns a stop function.
 function startMicWatch(binPath, { onMicOn, onMicOff }) {
   let proc;
@@ -155,4 +184,4 @@ function startMicWatch(binPath, { onMicOn, onMicOff }) {
   };
 }
 
-module.exports = { parseHelperLine, createCaptureHelperFactory, startMicWatch };
+module.exports = { parseHelperLine, createCaptureHelperFactory, listAudioDevices, startMicWatch };
