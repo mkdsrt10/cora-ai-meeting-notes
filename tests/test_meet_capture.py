@@ -80,3 +80,28 @@ active=false;assert.deepEqual(run().participants,[]);assert.equal(run().active,f
 '''.replace('SOURCE',json.dumps(javascript)))
     result = subprocess.run(['node',str(script)],capture_output=True,text=True)
     assert result.returncode == 0,result.stderr
+
+
+@pytest.mark.skipif(not shutil.which('node'), reason='needs Node')
+def test_slack_collapsed_huddle_names_the_dm_party_from_the_mini_bar(tmp_path):
+    # Slack's bottom mini-bar (huddle minimised or popped out) has no tiles,
+    # only "Huddle with <Name>"; a channel huddle names nobody.
+    source = (Path(__file__).resolve().parents[1]/'capture/SpeakerWatcher.swift').read_text()
+    javascript = source.split('let googleMeetSnapshotJS = #"""\n',1)[1].split('\n"""#',1)[0]
+    script = tmp_path/'slack-mini-test.js'
+    script.write_text('''
+const vm=require('node:vm'), assert=require('node:assert/strict');
+let title='Huddle with Suraj Kumar';
+const mini={innerText:title,getAttribute:()=>'huddle_details_title',querySelectorAll:()=>[]};
+const leave={getAttribute:()=>"Leave Huddle"};
+const bar={getAttribute:a=>a==='data-qa'?'huddle_bottom_bar_content':null,querySelectorAll:s=>s==='button, [role="button"]'?[leave]:[]};
+const document={title:'Suraj Kumar (DM) - Sutra.AI - Slack',
+ querySelector:s=>s==='[data-qa="huddle_details_title"]'?{innerText:title}:null,
+ querySelectorAll:s=>s==='[role="dialog"], [data-qa*="huddle"], [data-testid*="huddle"]'?[bar]:[]};
+const run=()=>JSON.parse(vm.runInNewContext(SOURCE,{document,location:{hostname:'app.slack.com'}}));
+let r=run(); assert.deepEqual(r.participants,['Suraj Kumar']); assert.equal(r.active,true); assert.equal(r.meeting_title,'Huddle with Suraj Kumar');
+title='Huddle with Jane Doe, Ana Lima and Bo Li'; assert.deepEqual(run().participants,['Jane Doe','Ana Lima','Bo Li']);
+title='Huddle in #general'; r=run(); assert.deepEqual(r.participants,[]); assert.equal(r.active,true); assert.equal(r.meeting_title,'Huddle in #general');
+'''.replace('SOURCE',json.dumps(javascript)))
+    result = subprocess.run(['node',str(script)],capture_output=True,text=True)
+    assert result.returncode == 0,result.stderr

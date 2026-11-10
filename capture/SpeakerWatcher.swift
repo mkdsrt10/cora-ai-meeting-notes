@@ -482,7 +482,13 @@ let googleMeetSnapshotJS = #"""
         const container = document.querySelector('[data-qa="huddle_window_content_container"]')
             || (tiles[0] && typeof tiles[0].closest === 'function' ? tiles[0].closest('[data-qa="huddle_grid_component"], [class*="p-huddle_window_content"]') : null)
             || dialog || null;
-        if (!tiles.length && !container) return JSON.stringify({active: false, participants: [], speaking_names: [], meeting_title: ''});
+        /* Collapsed huddle (bottom mini-bar, or popped out to its own window):
+           no tiles in this tab, only data-qa="huddle_details_title" reading
+           "Huddle with <Name>[, <Name> and <Name>]". A DM huddle names the
+           other party there; "Huddle in #channel" names nobody. */
+        const miniEl = document.querySelector('[data-qa="huddle_details_title"]');
+        const miniTitle = clean(miniEl && miniEl.innerText);
+        if (!tiles.length && !container && !miniTitle) return JSON.stringify({active: false, participants: [], speaking_names: [], meeting_title: ''});
         scope = container || document;
         slackActive = tiles.length > 0 || !!dialog;
         const profileRe = /^(?:View )?(.+?)(?:['’]s)? profile$/i;
@@ -502,7 +508,14 @@ let googleMeetSnapshotJS = #"""
             }
         });
         const titleEl = document.querySelector('[data-qa="huddle_window_titlebar_title"]');
-        slackTitle = clean(titleEl && titleEl.innerText);
+        slackTitle = clean(titleEl && titleEl.innerText) || miniTitle;
+        if (!tiles.length && miniTitle) {
+            const withMatch = miniTitle.match(/^Huddle with (.+)$/i);
+            if (withMatch) {
+                withMatch[1].split(/,\s*|\s+and\s+/).map(clean).forEach(name => { if (name && name.length <= 60) names.add(name); });
+                slackActive = true;
+            }
+        }
     }
     scope.querySelectorAll('[data-participant-id]').forEach(tile => {
         const name = tileName(tile);

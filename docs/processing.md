@@ -63,7 +63,7 @@ Past meetings can display names already saved in `participants.json`, including 
 
 ## People creation and Slack huddles
 
-A participant can also be added to People straight from a meeting's Participants tab: the link dropdown on each row offers "Add <name> to People…", which creates the Person from the row's current (possibly edited) name, links that participant to it, and re-renders the rows so the new Person is selectable everywhere. Slack huddles in a browser are read from the huddle window's own participant tiles and title (0.3.2).
+A participant can also be added to People straight from a meeting's Participants tab: the link dropdown on each row offers "Add <name> to People…", which creates the Person from the row's current (possibly edited) name, links that participant to it, and re-renders the rows so the new Person is selectable everywhere. Slack huddles in a browser are read from the huddle window's own participant tiles and title (0.3.2). When the huddle is collapsed to Slack's bottom mini-bar, or popped out to its own window, the tab holds no tiles; the other party of a DM huddle is then taken from the mini-bar's "Huddle with <Name>" title, and a channel huddle contributes no names (0.3.3).
 
 The People page now has an Add person form. Creation validates names and assigns a unique ID, so namesakes cannot overwrite an existing person's identity or metadata. Generic labels such as Participant and You are not attendee names; audio/video controls are rejected by both roster cleaning and the native watcher.
 

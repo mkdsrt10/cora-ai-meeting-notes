@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.3 — 2026-11-10
+
+- Slack huddles in a browser: a huddle collapsed to Slack's bottom mini-bar (or popped out to its own window) has no participant tiles in the tab. The other party of a DM huddle is now read from the mini-bar's "Huddle with <Name>" title, and that title is used as the meeting title; a channel huddle still names nobody there.
+
 ## 0.3.2 — 2026-11-10
 
 - Slack huddles in a browser: participants are read from the huddle's own tiles and "Name's profile" labels (the previous selectors matched nothing in today's Slack), the huddle title comes from the huddle window, and a DM tab without a huddle is no longer treated as a live call.
