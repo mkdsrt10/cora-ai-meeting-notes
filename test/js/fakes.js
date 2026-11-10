@@ -108,14 +108,15 @@ function fakeArchive() {
 
 // The Microphone setting and the helper's device list, as the session reads
 // them at start: chosen() -> { unique_id, name } | null (System default),
-// devices() -> [{ name, uniqueID, isDefault }]. Tests change both between starts.
+// devices() -> [{ name, uniqueID, isDefault }], the last known list, read
+// synchronously. Tests change both between starts.
 function fakeMicrophone({ chosen = null, devices = [] } = {}) {
   const mic = {
     setting: chosen,
     list: devices,
     reads: 0,
     chosen: async () => { mic.reads += 1; return mic.setting; },
-    devices: async () => mic.list,
+    devices: () => mic.list,
   };
   return mic;
 }

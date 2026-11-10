@@ -308,12 +308,13 @@ test('the chosen Microphone opening shows its name on the state, with no notice'
   assert.equal(session.state().micDevice, null);
 });
 
-test('a chosen Microphone that is absent falls back to System default with exactly one notice naming the device used', async () => {
+test('a chosen Microphone that is absent is still asked for; the helper falls back and exactly one notice names the device used', async () => {
   const { session, helpers, notices } = setupMic({ unique_id: WEBCAM.uniqueID, name: WEBCAM.name }, [YETI, BUILT_IN]);
   session.start({});
   const id = session.state().recordingId;
   await flush();
-  assert.equal(helpers.last().opts.deviceId, null);
+  // The known list may be stale; the helper checks the id and falls back to System default.
+  assert.equal(helpers.last().opts.deviceId, WEBCAM.uniqueID);
   helpers.last().send({ type: 'device', name: YETI.name });
   assert.equal(session.state().phase, 'recording');
   assert.equal(session.state().micDevice, YETI.name);
@@ -365,6 +366,15 @@ test('a stored choice whose uniqueID is gone is matched by name', async () => {
   assert.deepEqual(notices(), []);
 });
 
+test('a chosen Microphone spawns the helper without waiting for a device listing', async () => {
+  const { session, helpers, microphone } = setupMic({ unique_id: WEBCAM.uniqueID, name: WEBCAM.name });
+  microphone.devices = () => new Promise(() => {});  // a --list-devices that never returns
+  session.start({});
+  await flush();
+  assert.equal(helpers.started.length, 1);
+  assert.equal(helpers.last().opts.deviceId, WEBCAM.uniqueID);
+});
+
 test('when the device listing fails, the stored choice is still passed to the helper', async () => {
   const { session, helpers, notices } = setupMic({ unique_id: WEBCAM.uniqueID, name: WEBCAM.name }, []);
   session.start({});
@@ -401,7 +411,7 @@ test('a Continuation records on the chosen Microphone', async () => {
 test('stopping before the Microphone is resolved never spawns a helper, and the Recording is still handed over', async () => {
   const { session, helpers, microphone, enqueued } = setupMic({ unique_id: WEBCAM.uniqueID, name: WEBCAM.name });
   let release;
-  microphone.devices = () => new Promise((r) => { release = () => r([WEBCAM]); });
+  microphone.chosen = () => new Promise((r) => { release = () => r({ unique_id: WEBCAM.uniqueID, name: WEBCAM.name }); });
   session.start({});
   const id = session.state().recordingId;
   session.setMuted(true);

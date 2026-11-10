@@ -28,9 +28,10 @@
 //     never changes the phase.
 //
 // Adapters: startHelper({ recordingId, selfName, deviceId }) -> helper handle;
-// optional microphone = { chosen() -> { unique_id, name } | null,
-// devices() -> [{ name, uniqueID, isDefault }] }. Without it every helper
-// spawns on System default.
+// optional microphone = { chosen() -> { unique_id, name } | null (may be a
+// promise), devices() -> [{ name, uniqueID, isDefault }], the last known
+// device list, read synchronously (anything else counts as no list) }.
+// Without it every helper spawns on System default.
 //
 // Invariants: recordingId is null whenever idle; a capture helper exiting on
 // its own while recording stops with a warning and is processed like a stop;
@@ -47,22 +48,32 @@ function recordingIdAt(ms) {
   return `meeting_${new Date(ms).toISOString().replace(/[:.]/g, '-')}`;
 }
 
-// The Microphone setting resolved against the listed devices: by uniqueID,
-// else by display name (a uniqueID can change with the USB port), else
-// System default. -> { chosenName, deviceId } with deviceId null = System
-// default (no --device). Never rejects.
+// The Microphone setting resolved for a start -> { chosenName, deviceId },
+// deviceId null = System default (no --device). Never rejects.
+//
+// Only the setting read is awaited; the spawn never waits for a fresh
+// --list-devices (up to 5 s). The stored unique_id is passed as is, and the
+// helper falls back to System default itself when that device is absent.
+// The last known device list (refreshed in the background by main.js) is
+// used only for the name fallback: when it shows the id gone but a device
+// with the same name present (a uniqueID can change with the USB port), that
+// device's id is used. Trade-off: a list older than a port change misses the
+// name match for one start, and the Recording falls back to System default
+// with a notice, rather than every chosen-mic start paying for a listing.
 async function resolveMicrophone(microphone) {
   const chosen = await Promise.resolve().then(() => microphone.chosen()).catch(() => null);
   const id = chosen && typeof chosen.unique_id === 'string' ? chosen.unique_id : null;
   const name = chosen && typeof chosen.name === 'string' ? chosen.name : null;
   if (!id && !name) return { chosenName: null, deviceId: null };
-  const devices = await Promise.resolve().then(() => microphone.devices()).catch(() => []);
-  const list = Array.isArray(devices) ? devices : [];
-  // No list (listing failed): pass the stored id through; the helper checks
-  // it and falls back to System default itself.
-  if (!list.length) return { chosenName: name, deviceId: id };
-  const hit = (id && list.find((d) => d.uniqueID === id)) || (name && list.find((d) => d.name === name));
-  return { chosenName: name || (hit && hit.name) || null, deviceId: hit ? hit.uniqueID : null };
+  let known = [];
+  try { known = microphone.devices(); } catch { known = []; }
+  const list = Array.isArray(known) ? known : [];
+  const byId = id && list.find((d) => d.uniqueID === id);
+  const byName = !byId && name && list.find((d) => d.name === name);
+  return {
+    chosenName: name || (byId && byId.name) || null,
+    deviceId: byId ? id : byName ? byName.uniqueID : id,
+  };
 }
 
 // A helper handle whose process is spawned once its options resolve (the
