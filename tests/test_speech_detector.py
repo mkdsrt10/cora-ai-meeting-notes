@@ -3,6 +3,7 @@
 Synthetic audio: a white-noise bed at a known RMS level with loud tone bursts.
 Speech stretches must start and end at the bursts' edges (within padding), not
 cover the whole file because the bed is louder than a fixed threshold."""
+import json
 import subprocess
 
 import pytest
@@ -50,18 +51,34 @@ def test_speech_is_found_only_at_the_bursts_on_a_noise_bed(tmp_path, noise_rms_d
 
 def test_configured_threshold_overrides_the_relative_one(tmp_path, monkeypatch):
     rec = make_recording(tmp_path / "rec.wav", -40.0)
-    # A hand-tuned -50 dB sits under the -40 dB bed, so nothing reads as silence.
-    monkeypatch.setattr(audio, "_config", lambda: {"silence_threshold_db": "-50dB"})
+    # A hand-tuned -55 dB sits under the -40 dB bed, so nothing reads as silence.
+    monkeypatch.setattr(audio, "_config", lambda: {"silence_threshold_db": "-55dB"})
     assert audio.find_speech_segments(rec, pad=PAD) == [(0.0, pytest.approx(DURATION, abs=0.05))]
+
+
+@pytest.mark.parametrize("value", ["", "-50dB"])
+def test_empty_or_legacy_example_override_means_relative(tmp_path, monkeypatch, value):
+    # "-50dB" was the value config.example.json shipped (and copied into every
+    # data dir), so it is not a deliberate override.
+    rec = make_recording(tmp_path / "rec.wav", -40.0)
+    monkeypatch.setattr(audio, "_config", lambda: {"silence_threshold_db": value})
+    assert_gaps_at_burst_edges(audio.find_speech_segments(rec, pad=PAD))
+
+
+def test_example_config_does_not_pin_a_threshold():
+    from paths import CONFIG_EXAMPLE
+    example = json.loads(CONFIG_EXAMPLE.read_text())
+    assert "silence_threshold_db" not in example
+    assert "strict_silence_threshold_db" not in example
 
 
 def test_strict_detector_uses_its_own_margin_and_override(tmp_path, monkeypatch):
     rec = make_recording(tmp_path / "rec.wav", -40.0)
     strict = dict(margin_db=audio.STRICT_MARGIN_DB, override_key="strict_silence_threshold_db", pad=PAD)
     assert_gaps_at_burst_edges(audio.find_speech_segments(rec, **strict))
-    monkeypatch.setattr(audio, "_config", lambda: {"silence_threshold_db": "-50dB"})
+    monkeypatch.setattr(audio, "_config", lambda: {"silence_threshold_db": "-55dB"})
     assert_gaps_at_burst_edges(audio.find_speech_segments(rec, **strict))  # main override does not leak in
-    monkeypatch.setattr(audio, "_config", lambda: {"strict_silence_threshold_db": "-50dB"})
+    monkeypatch.setattr(audio, "_config", lambda: {"strict_silence_threshold_db": "-55dB"})
     assert audio.find_speech_segments(rec, **strict) == [(0.0, pytest.approx(DURATION, abs=0.05))]
 
 

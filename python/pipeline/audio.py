@@ -35,6 +35,19 @@ STRICT_MARGIN_DB = 18.0  # "clearly speech", for cloud Window coverage checks
 THRESHOLD_CAP_DB = -20.0  # a threshold never sits above this, however noisy the floor
 _FRAME_S = 0.1
 _SILENT_FRAME_DB = -120.0  # digital silence reports -inf; clamp it
+# config.example.json used to ship this exact value, and every new data dir
+# copied it, so it reads as "unset" rather than a deliberate override.
+_LEGACY_EXAMPLE_THRESHOLD = "-50dB"
+
+
+def _threshold_override(key: str) -> Optional[str]:
+    """The configured threshold at key, or None when unset, empty, or the
+    legacy example default for the main detector."""
+    value = _config().get(key) or None
+    if key == "silence_threshold_db" and value == _LEGACY_EXAMPLE_THRESHOLD:
+        print(f"[Local MLX] Ignoring legacy example {key}={value!r}; using the relative threshold.", flush=True)
+        return None
+    return value
 
 
 def measure_noise_floor_db(audio_path: Path) -> float:
@@ -76,7 +89,8 @@ def find_speech_segments(
 
     Threshold, first that applies: an explicit noise_db; the config value at
     override_key (`silence_threshold_db` for the main detector,
-    `strict_silence_threshold_db` for the strict one); else the recording's
+    `strict_silence_threshold_db` for the strict one; empty, or the legacy
+    example value "-50dB" for the main key, counts as unset); else the recording's
     noise floor + margin_db (MAIN_MARGIN_DB by default), capped at
     THRESHOLD_CAP_DB. Timestamps stay anchored to the ORIGINAL file —
     unlike trimming the whole file up front, each stretch is transcribed
@@ -91,7 +105,7 @@ def find_speech_segments(
     ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
     try:
         duration = probe_duration(audio_path)
-        noise_db = noise_db or _config().get(override_key) or relative_threshold_db(
+        noise_db = noise_db or _threshold_override(override_key) or relative_threshold_db(
             measure_noise_floor_db(audio_path), MAIN_MARGIN_DB if margin_db is None else margin_db)
         cmd = [
             ffmpeg, "-i", str(audio_path), "-af",
