@@ -1,0 +1,77 @@
+"""Speech detector: speech is found relative to each recording's own noise floor.
+
+Synthetic audio: a white-noise bed at a known RMS level with loud tone bursts.
+Speech stretches must start and end at the bursts' edges (within padding), not
+cover the whole file because the bed is louder than a fixed threshold."""
+import subprocess
+
+import pytest
+
+from pipeline import audio
+
+BURSTS = [(2.0, 4.0), (8.0, 10.0), (14.0, 16.0)]
+DURATION = 18.0
+PAD = 0.3
+
+
+def make_recording(path, noise_rms_db: float):
+    # Uniform white noise of amplitude a has RMS a/sqrt(3).
+    amplitude = 10 ** (noise_rms_db / 20) * 3 ** 0.5
+    # sine's own amplitude is 1/8; x2.4 makes the bursts 0.3 peak (about -10.5 dBFS).
+    gate = "+".join(f"between(t,{s},{e})" for s, e in BURSTS)
+    graph = (
+        f"anoisesrc=color=white:amplitude={amplitude:.5f}:sample_rate=16000:duration={DURATION}:seed=7[n];"
+        f"sine=frequency=440:sample_rate=16000:duration={DURATION},"
+        f"volume='if({gate},2.4,0)':eval=frame[t];"
+        "[n][t]amix=inputs=2:normalize=0[a]"
+    )
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-filter_complex", graph, "-map", "[a]",
+                    "-ac", "1", "-ar", "16000", str(path)], check=True)
+    return path
+
+
+@pytest.fixture(autouse=True)
+def no_overrides(monkeypatch):
+    monkeypatch.setattr(audio, "_config", lambda: {})
+
+
+def assert_gaps_at_burst_edges(speech):
+    assert len(speech) == len(BURSTS), speech
+    for (s, e), (bs, be) in zip(speech, BURSTS):
+        assert s == pytest.approx(bs - PAD, abs=0.15)
+        assert e == pytest.approx(be + PAD, abs=0.15)
+
+
+@pytest.mark.parametrize("noise_rms_db", [-40.0, -30.0])
+def test_speech_is_found_only_at_the_bursts_on_a_noise_bed(tmp_path, noise_rms_db):
+    rec = make_recording(tmp_path / "rec.wav", noise_rms_db)
+    assert_gaps_at_burst_edges(audio.find_speech_segments(rec, pad=PAD))
+
+
+def test_configured_threshold_overrides_the_relative_one(tmp_path, monkeypatch):
+    rec = make_recording(tmp_path / "rec.wav", -40.0)
+    # A hand-tuned -50 dB sits under the -40 dB bed, so nothing reads as silence.
+    monkeypatch.setattr(audio, "_config", lambda: {"silence_threshold_db": "-50dB"})
+    assert audio.find_speech_segments(rec, pad=PAD) == [(0.0, pytest.approx(DURATION, abs=0.05))]
+
+
+def test_strict_detector_uses_its_own_margin_and_override(tmp_path, monkeypatch):
+    rec = make_recording(tmp_path / "rec.wav", -40.0)
+    strict = dict(margin_db=audio.STRICT_MARGIN_DB, override_key="strict_silence_threshold_db", pad=PAD)
+    assert_gaps_at_burst_edges(audio.find_speech_segments(rec, **strict))
+    monkeypatch.setattr(audio, "_config", lambda: {"silence_threshold_db": "-50dB"})
+    assert_gaps_at_burst_edges(audio.find_speech_segments(rec, **strict))  # main override does not leak in
+    monkeypatch.setattr(audio, "_config", lambda: {"strict_silence_threshold_db": "-50dB"})
+    assert audio.find_speech_segments(rec, **strict) == [(0.0, pytest.approx(DURATION, abs=0.05))]
+
+
+def test_noise_floor_is_measured_from_the_recording(tmp_path):
+    assert audio.measure_noise_floor_db(make_recording(tmp_path / "a.wav", -40.0)) == pytest.approx(-40.0, abs=1.0)
+    assert audio.measure_noise_floor_db(make_recording(tmp_path / "b.wav", -30.0)) == pytest.approx(-30.0, abs=1.0)
+
+
+def test_threshold_never_goes_above_minus_20_db():
+    assert audio.relative_threshold_db(-42.0, 10.0) == "-32dB"
+    assert audio.relative_threshold_db(-42.0, 18.0) == "-24dB"
+    assert audio.relative_threshold_db(-25.0, 10.0) == "-20dB"
+    assert audio.relative_threshold_db(-10.0, 18.0) == "-20dB"
