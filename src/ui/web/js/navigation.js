@@ -6,6 +6,8 @@ function renderStorage(){ $('#storageFree').textContent=fmtBytes(data.storage.di
 addEventListener('click', async event=>{
   const copyPath=event.target.closest('[data-copy-path]'); if(copyPath){try{await copyText(copyPath.dataset.copyPath);toast('Recording folder path copied.');}catch(error){toast(error.message,true);}return;}
   const openFolder=event.target.closest('[data-open-recording-folder]'); if(openFolder){try{await api('/api/open-recording-folder',{method:'POST',body:JSON.stringify({id:openFolder.dataset.openRecordingFolder})});}catch(error){toast(error.message,true);}return;}
+  // Before [data-open-id]: Retry sits inside a row that opens the meeting.
+  const retry=event.target.closest('[data-retry-processing]'); if(retry){retryProcessing(retry.dataset.retryProcessing,retry);return;}
   const view=event.target.closest('[data-view]'); if(view){event.preventDefault();showView(view.dataset.view);return;}
   const open=event.target.closest('[data-open-id]'); if(open){openInRecordings(open.dataset.openId);return;}
   const openPersonEl=event.target.closest('[data-open-person]'); if(openPersonEl){openPerson(openPersonEl.dataset.openPerson);return;}
@@ -57,6 +59,8 @@ $('#folderFilterSelect')?.addEventListener('change', e => {
 });
 addEventListener('keydown', event => {
   if(event.key !== 'Enter' && event.key !== ' ') return;
+  // A focused Retry button activates itself, not the row around it.
+  if(event.target.closest('[data-retry-processing]')) return;
   const target = event.target.closest('[role="button"][tabindex="0"]');
   if(!target) return;
   event.preventDefault();

@@ -112,21 +112,35 @@ def process_recording_local(folder: Path, options: dict | None = None) -> dict[s
 
 def _process_recording_selected(folder: Path, profile: dict[str, Any]) -> dict[str, Any]:
     """Complete end-to-end local processing: MLX Whisper + AX Speakers + OCR Slides + Qwen3-4B."""
-    audio_file = next((p for p in folder.iterdir() if p.is_file() and p.name.startswith("audio.")), None)
-    if not audio_file:
-        from .errors import NoAudioError
-        raise NoAudioError()
-
-    _archive_previous_outputs(folder)
-    _write_progress(folder, "starting", "Initializing selected processing pipeline...", percent=5)
     try:
+        audio_file = next((p for p in folder.iterdir() if p.is_file() and p.name.startswith("audio.")), None)
+        if not audio_file:
+            from .errors import NoAudioError
+            raise NoAudioError()
+        _archive_previous_outputs(folder)
+        _write_progress(folder, "starting", "Initializing selected processing pipeline...", percent=5)
         with ai_trace.run("local_meeting_pipeline", recording_id=folder.name, audio_file=audio_file.name):
             result = _process_recording_local_inner(folder, audio_file, profile)
-        (folder / ".pipeline_progress.json").unlink(missing_ok=True)
-        return result
     except Exception as exc:
-        _write_progress(folder, "error", str(exc), percent=0)
+        _record_failure(folder, exc)
         raise
+    (folder / ".pipeline_progress.json").unlink(missing_ok=True)
+    db.set_processing_failure(result["recording_id"], None)
+    return result
+
+
+def _record_failure(folder: Path, exc: BaseException) -> None:
+    """The "Processing failed" Stage: store the classified code and its fixed,
+    plain-language message (never exception text) on the Recording."""
+    from api.processing_errors import classify
+    _, payload = classify(exc)
+    if folder.is_dir():
+        _write_progress(folder, "error", payload["error"], percent=0)
+    db.set_processing_failure(folder.name, {
+        "code": payload["code"],
+        "message": payload["error"],
+        "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    })
 
 
 def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict[str, Any]) -> dict[str, Any]:
