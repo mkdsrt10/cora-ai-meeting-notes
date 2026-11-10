@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-11-10
+
+- Microphone selector: Settings > Recording and the onboarding permissions step let you pick the microphone Cora records with. "System default" now follows the macOS default input (it previously followed AVFoundation's own idea of a default, which could be the webcam mic). The floating bar and recording panel name the microphone in use; a mic that is missing or disconnects mid-call falls back to the system default without stopping the recording, with a notification.
+- Cloud transcription resilience: speech detection is relative to each recording's noise floor instead of fixed thresholds; a Window the cloud engine keeps rejecting or refuses is transcribed on this Mac (or kept as a marked gap on builds without a local model) instead of failing the meeting; affected lines are marked in the transcript and summarised in one notification.
+- A Recording whose processing failed now shows "Processing failed" with the reason and a Retry button, instead of "Needs diarization".
+- Architecture (v0.3): one Text model and one Transcriber behind every model call, a Plugin seam (Coaching and Todo as plugins), a Recording session and Processing queue in Electron, "Where models run" settings with OpenAI-compatible presets, typed processing errors.
+- Research: `docs/RESEARCH.md` gains a week-long local vs Gemini comparison with judge-graded accuracy, and `tools/compare_engine_reruns.py`.
+
 ## 0.2.3 — 2026-10-31
 
 - Team builds (`scripts/build-app.sh --team`): new installs default to Gemini for transcription and notes, skip local model downloads, and ask for the Gemini key after onboarding. `docs/TEAM_SETUP.md` walks a new member through it.
