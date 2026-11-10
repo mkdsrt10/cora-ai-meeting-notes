@@ -16,7 +16,7 @@ from typing import Any, Callable, Optional
 import db
 import ai_trace
 from .asr_validate import WindowInvalid, validate_turns
-from .audio import extract_clip_flac, find_speech_segments
+from .audio import STRICT_MARGIN_DB, extract_clip_flac, find_speech_segments
 from .gemini_asr import AsrCallError, context_block, transcribe_window
 from .windows import Window, plan_windows, split_window
 
@@ -24,7 +24,6 @@ ATTEMPTS = 3
 BACKOFF_S = (2.0, 6.0)
 WORKERS = 3
 MAX_SPLIT_DEPTH = 2  # At most 21 requests per original window, including retries.
-STRICT_NOISE_DB = "-35dB"  # louder than the main detector: real speech only, for coverage checks
 
 _sleep: Callable[[float], None] = time.sleep
 
@@ -50,7 +49,9 @@ def transcribe_windows(audio_path: Path, speech: list[tuple[float, float]], cont
     (only for matching screenshot text to the right moment)."""
     call = caller or transcribe_window
     if strict is None:
-        strict = find_speech_segments(audio_path, noise_db=STRICT_NOISE_DB, min_gap=0.6)
+        # Real speech only, for coverage checks: further above the floor than the main detector.
+        strict = find_speech_segments(audio_path, margin_db=STRICT_MARGIN_DB,
+                                      override_key="strict_silence_threshold_db", min_gap=0.6)
     self_name = _self_name()
     windows = plan_windows(speech)
     print(f"[Cloud ASR] {len(windows)} window(s) for {sum(w.duration for w in windows) / 60:.1f} min of speech", flush=True)
