@@ -399,6 +399,7 @@ mark.search-match.active {
 .audio-level-meters{display:flex;align-items:center;gap:10px}
 .audio-level-meter{display:flex;align-items:center;gap:6px}
 .audio-level-label{font-size:10px;color:var(--muted);white-space:nowrap}
+.audio-level-device{font-size:10px;color:var(--muted);white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis}
 .audio-level-track{width:48px;height:6px;border-radius:999px;background:var(--surface-2);border:1px solid var(--hairline);overflow:hidden}
 .audio-level-fill{height:100%;width:0%;background:var(--violet);border-radius:999px;transition:width .1s linear,background-color .15s linear}
 
@@ -467,6 +468,9 @@ mark.search-match.active {
 .byom-tabs .auth-tab{flex:0 1 auto}
 .byom-tabs .auth-tab small{font-weight:400;color:var(--muted);margin-left:4px}
 .byom-advanced{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.microphone-picker{display:flex;gap:8px;align-items:center}
+.onboarding-microphone{padding:0 0 14px}
+.microphone-picker select{flex:1;min-width:0;padding:10px 12px;border-radius:8px;border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);font-family:inherit;font-size:13px;cursor:pointer}
 .byom-model-row{display:flex;gap:8px;align-items:center}
 .byom-model-row input{flex:1}
 .settings-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;border-top:1px solid var(--hairline)}

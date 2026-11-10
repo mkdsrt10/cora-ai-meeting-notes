@@ -132,6 +132,20 @@ function setAudioLevelMeter(el, db){
   el.style.width = `${pct}%`;
   el.style.backgroundColor = db > -6 ? 'var(--coral)' : 'var(--violet)';
 }
+// Name of the Microphone the helper actually opened, beside the mic meter
+// (null until known and when idle). Notifications are posted by main.js.
+function showMicDevice(name){
+  const el = $('#audioLevelMicDevice');
+  if(!el) return;
+  el.textContent = name || '';
+  el.title = name ? `Recording your side with ${name}` : '';
+  el.hidden = !name;
+}
+if (window.electronAPI?.onMicDevice) {
+  let heard = false;
+  window.electronAPI.onMicDevice(name => { heard = true; showMicDevice(name); });
+  window.electronAPI.getMicDevice?.().then(name => { if (!heard) showMicDevice(name); }).catch(() => {});
+}
 if (window.electronAPI?.onAudioLevel) {
   window.electronAPI.onAudioLevel(({ mic, sys }) => {
     setAudioLevelMeter($('#audioLevelMic'), mic);

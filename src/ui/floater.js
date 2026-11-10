@@ -71,6 +71,21 @@ if (window.electronAPI) {
     });
   }
 
+  // Microphone in use: tooltip of the mic meter; toast on a mid-call switch
+  // (one non-null name to another). null = not known yet / recording over, so
+  // the first device of a recording never toasts. Notifications come from main.
+  let micDevice = null;
+  let micDeviceHeard = false;
+  const showMicDevice = (name) => {
+    micDeviceHeard = true;
+    const group = document.getElementById('meterMicGroup');
+    if (group) group.title = name ? `Microphone: ${name}` : 'Your microphone';
+    if (name && micDevice && name !== micDevice) showToast(`🎤 Now recording with ${name}`);
+    micDevice = name || null;
+  };
+  if (window.electronAPI.onMicDevice) window.electronAPI.onMicDevice(showMicDevice);
+  window.electronAPI.getMicDevice?.().then(name => { if (!micDeviceHeard) showMicDevice(name); }).catch(() => {});
+
   if (window.electronAPI.onRecordingInfo) {
     window.electronAPI.onRecordingInfo((info) => {
       if (info && info.started_at) {

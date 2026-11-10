@@ -5,11 +5,53 @@
 $$('.settings-nav-item').forEach(tab => tab.addEventListener('click', () => {
   $$('.settings-nav-item').forEach(t => t.classList.toggle('active', t === tab));
   $$('.settings-panel').forEach(p => p.hidden = p.dataset.settingsContent !== tab.dataset.settingsPanel);
+  if(tab.dataset.settingsPanel === 'recording') return loadMicrophonePicker('#settingsMicrophone');
 }));
+
+// --- Microphone picker (Settings > Recording, and the onboarding permissions step) ---
+// Options: "System default" (value '', saved as null), then every input
+// device by its macOS name, the current system default annotated. Re-listed
+// from the capture helper each time it is shown and on Refresh.
+const microphoneDevices = {};  // select selector -> devices last listed into it
+
+async function loadMicrophonePicker(selector){
+  const select = $(selector);
+  if(!select) return;
+  try{
+    const [list, saved] = await Promise.all([
+      api('/api/audio-devices'),
+      api('/api/settings?key=microphone'),
+    ]);
+    const devices = list.devices || [];
+    microphoneDevices[selector] = devices;
+    const chosen = saved.value || null;
+    const match = chosen && (devices.find(d => d.unique_id === chosen.unique_id) || devices.find(d => d.name === chosen.name));
+    const options = [{value: '', label: 'System default'}].concat(devices.map(d => ({
+      value: d.unique_id, label: d.name + (d.is_default ? ' (system default)' : ''),
+    })));
+    select.innerHTML = options.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+    select.value = match ? match.unique_id : '';
+  }catch(error){ toast(error.message, true); }
+}
+
+// Saves on change (System default clears the setting); Refresh re-lists.
+function wireMicrophonePicker(selector, refreshSelector){
+  $(selector)?.addEventListener('change', async (e) => {
+    const device = (microphoneDevices[selector] || []).find(d => d.unique_id === e.target.value);
+    try{
+      await saveSetting('microphone', device ? { unique_id: device.unique_id, name: device.name } : null);
+      toast('Saved — used from the next recording');
+    }catch(error){ toast(error.message, true); }
+  });
+  $(refreshSelector)?.addEventListener('click', () => loadMicrophonePicker(selector));
+}
+wireMicrophonePicker('#settingsMicrophone', '#settingsMicrophoneRefresh');
 
 let settingsSelectedMeetingTypes = new Set();
 
 async function loadSettingsView(){
+  const recordingPanel = $$('.settings-panel').find(p => p.dataset.settingsContent === 'recording');
+  if(recordingPanel && !recordingPanel.hidden) loadMicrophonePicker('#settingsMicrophone');
   try{
     const status = await api('/api/onboarding/status');
     if($('#settingsName')) $('#settingsName').value = status.self_name || '';

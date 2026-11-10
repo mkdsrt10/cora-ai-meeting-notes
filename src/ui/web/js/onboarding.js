@@ -106,7 +106,14 @@ async function refreshPermissionStatus(){
   paint($('#permMicStatus'), status.microphone);
   paint($('#permScreenStatus'), status.screen);
   if($('#permAccessibilityStatus')) paint($('#permAccessibilityStatus'), status.accessibility);
+  // Microphone picker appears once mic access is granted; optional (unset = System default).
+  const micField = $('#onboardingMicrophoneField');
+  if(micField){
+    micField.hidden = status.microphone !== 'granted';
+    if(!micField.hidden) await loadMicrophonePicker('#onboardingMicrophone');
+  }
 }
+wireMicrophonePicker('#onboardingMicrophone', '#onboardingMicrophoneRefresh');
 
 async function openOnboarding(){
   $('#onboardingOverlay').style.display = 'flex';
