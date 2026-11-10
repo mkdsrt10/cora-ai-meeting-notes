@@ -110,6 +110,15 @@ def test_microphone_setting_round_trips_and_clears_to_system_default(port):
     assert call(port, "GET", "/api/settings?key=microphone") == (200, {"value": None})
 
 
+def test_a_null_value_clears_only_the_microphone_and_reads_any_other_key(port):
+    """`value: null` means "clear" only where null is a meaningful value (the
+    Microphone: System default); for any other key it stays a read."""
+    assert call(port, "POST", "/api/settings", {"key": "retain_audio", "value": False}) == (200, {"ok": True})
+    assert call(port, "POST", "/api/settings", {"key": "retain_audio", "value": None}) == (200, {"value": False})
+    assert call(port, "GET", "/api/settings?key=retain_audio") == (200, {"value": False})
+    call(port, "POST", "/api/settings", {"key": "retain_audio", "value": True})
+
+
 @pytest.mark.parametrize("bad", ["Shure MV7", {"unique_id": "x"}, {"unique_id": "", "name": "Shure"},
                                  {"unique_id": "x", "name": "y", "extra": 1}])
 def test_a_malformed_microphone_value_is_rejected_and_the_choice_kept(port, bad):

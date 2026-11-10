@@ -276,14 +276,19 @@ def post_api_onboarding_complete(req, path: str, body: dict) -> None:
     return req.send_json({"ok": True})
 
 
+# Keys where a stored null means something (microphone: System default), so
+# {key, value: null} clears them. For every other key null stays a read.
+NULLABLE_SETTINGS = frozenset({"microphone"})
+
+
 @route("POST", '/api/settings')
 def post_api_settings(req, path: str, body: dict) -> None:
-    """{key, value} writes; {key, value: null} clears (reads back as unset,
-    e.g. microphone -> System default); {key} alone reads."""
+    """{key, value} writes; {key} alone, or {key, value: null}, reads; for a
+    key in NULLABLE_SETTINGS, {key, value: null} clears it instead."""
     key = str(body.get("key", ""))
-    if "value" not in body:
+    value = body.get("value")
+    if value is None and not ("value" in body and key in NULLABLE_SETTINGS):
         return req.send_json({"value": db.get_setting(key)})
-    value = body["value"]
     if key == "microphone" and value is not None:
         _validate_microphone(value)
     db.set_setting(key, value)
