@@ -34,6 +34,13 @@ speech detector. A rejected window is retried, then split at a balanced pause or
 transcription **fails with an error** (the previous transcript is kept). It never silently falls back to
 another engine.
 
+The speech detector (`pipeline/audio.py` `find_speech_segments`, shared by local Whisper chunking and cloud
+windows) works relative to each recording's own noise floor: the 10th percentile of RMS over 100 ms frames of
+the audio it is given. Speech is anything at least 10 dB above that floor; the strict detector used for the
+coverage check needs 18 dB. Neither threshold ever goes above -20 dBFS, so a very noisy floor cannot hide
+loud speech. Setting `silence_threshold_db` (main) or `strict_silence_threshold_db` (strict) in config.json,
+e.g. `"-45dB"`, pins a fixed threshold instead.
+
 The model defaults to your configured Gemini model; set the `cloud_asr_model` setting to pin one.
 
 ## Not for regulated data yet
