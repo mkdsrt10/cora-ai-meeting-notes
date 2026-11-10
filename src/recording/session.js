@@ -58,6 +58,9 @@ async function resolveMicrophone(microphone) {
   if (!id && !name) return { chosenName: null, deviceId: null };
   const devices = await Promise.resolve().then(() => microphone.devices()).catch(() => []);
   const list = Array.isArray(devices) ? devices : [];
+  // No list (listing failed): pass the stored id through; the helper checks
+  // it and falls back to System default itself.
+  if (!list.length) return { chosenName: name, deviceId: id };
   const hit = (id && list.find((d) => d.uniqueID === id)) || (name && list.find((d) => d.name === name));
   return { chosenName: name || (hit && hit.name) || null, deviceId: hit ? hit.uniqueID : null };
 }

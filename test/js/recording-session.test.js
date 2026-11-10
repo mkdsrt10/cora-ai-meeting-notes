@@ -365,6 +365,16 @@ test('a stored choice whose uniqueID is gone is matched by name', async () => {
   assert.deepEqual(notices(), []);
 });
 
+test('when the device listing fails, the stored choice is still passed to the helper', async () => {
+  const { session, helpers, notices } = setupMic({ unique_id: WEBCAM.uniqueID, name: WEBCAM.name }, []);
+  session.start({});
+  await flush();
+  assert.equal(helpers.last().opts.deviceId, WEBCAM.uniqueID);
+  helpers.last().send({ type: 'device', name: YETI.name });
+  assert.equal(notices().length, 1);
+  assert.match(notices()[0].notice, new RegExp(WEBCAM.name));
+});
+
 test('pause/resume reuses the resolved Microphone without a new notice', async () => {
   const { session, helpers, microphone, notices } = setupMic({ unique_id: WEBCAM.uniqueID, name: WEBCAM.name });
   session.start({});
