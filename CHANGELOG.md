@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 — 2026-11-10
+
+- Slack huddles in a browser: participants are read from the huddle's own tiles and "Name's profile" labels (the previous selectors matched nothing in today's Slack), the huddle title comes from the huddle window, and a DM tab without a huddle is no longer treated as a live call.
+- A meeting title is announced once per recording; two live tabs no longer make the title alternate every scan.
+
 ## 0.3.1 — 2026-11-10
 
 - Fix: participant names in browser meetings (Meet, Zoom web, Slack huddles) were empty since 0.2.3. The page-snapshot script is flattened onto one line before it reaches the browser, and `//` comments added in 0.2.3 commented out the rest of it. Comments are now block comments and a test parses the flattened script.

@@ -337,11 +337,11 @@ func traverseElement(_ element: AXUIElement, depth: Int = 0, appName: String, du
     return activeSpeaker
 }
 
-var lastEmittedMeetingTitle: String = ""
+var emittedMeetingTitles = Set<String>()
 func emitMeetingTitleOnce(_ title: String) {
     let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !clean.isEmpty, clean != lastEmittedMeetingTitle else { return }
-    lastEmittedMeetingTitle = clean
+    guard !clean.isEmpty, !emittedMeetingTitles.contains(clean) else { return }
+    emittedMeetingTitles.insert(clean)
     print("MEETING_TITLE: \(clean)")
     fflush(stdout)
 }
@@ -461,15 +461,39 @@ let googleMeetSnapshotJS = #"""
     }
     let scope = document;
     if (slack) {
-        const roots = [...document.querySelectorAll('[role="dialog"], [data-qa*="huddle"], [data-testid*="huddle"]')];
-        scope = roots.find(root => /huddle/i.test(root.getAttribute('aria-label') || root.getAttribute('data-qa') || root.getAttribute('data-testid') || '') &&
-            [...root.querySelectorAll('button, [role="button"]')].some(button => /^(?:leave|end)(?: the)? huddle/i.test(button.getAttribute('aria-label') || button.innerText || '')));
-        if (!scope) return JSON.stringify({active: false, participants: [], speaking_names: [], meeting_title: ''});
+        /* Slack huddle UI (2026-11): one tile per participant,
+           data-qa="huddle_peer_tile_userId_<id>", inside
+           data-qa="huddle_window_content_container"; names appear as
+           aria-label "<Name>'s profile" (no "View " prefix) and as avatar alt
+           text; the huddle's own title sits in
+           data-qa="huddle_window_titlebar_title". A DM tab without a huddle has
+           none of these, so a tile is the "active" signal. */
+        const tiles = [...document.querySelectorAll('[data-qa^="huddle_peer_tile_userId_"]')];
+        const container = document.querySelector('[data-qa="huddle_window_content_container"], [class*="p-huddle_window"]');
+        if (!tiles.length && !container) return JSON.stringify({active: false, participants: [], speaking_names: [], meeting_title: ''});
+        scope = container || document;
+        const profileRe = /^(?:View )?(.+?)['’]s profile$/i;
         scope.querySelectorAll('[aria-label]').forEach(el => {
-            const label = clean(el.getAttribute('aria-label'));
-            const match = label.match(/^View (.+?)(?:['’]s)? profile$/i);
+            const match = clean(el.getAttribute('aria-label')).match(profileRe);
             if (match) names.add(match[1].trim());
         });
+        tiles.forEach(tile => {
+            tile.querySelectorAll('img[alt]').forEach(img => {
+                const alt = clean(img.alt);
+                if (alt && alt.length <= 60 && !/avatar|image|photo|emoji/i.test(alt)) names.add(alt);
+            });
+            const label = clean(tile.getAttribute('aria-label'));
+            if (/speaking/i.test(label)) {
+                const who = label.replace(/\s*(?:is\s+)?speaking.*$/i, '').trim();
+                if (who) { names.add(who); speaking.add(who); }
+            } else if (/(^|[\s_-])speaking([\s_-]|$)/i.test(tile.className || '')) {
+                const alt = tile.querySelector('img[alt]');
+                if (alt && clean(alt.alt)) speaking.add(clean(alt.alt));
+            }
+        });
+        const titleEl = document.querySelector('[data-qa="huddle_window_titlebar_title"]');
+        const huddleTitle = clean(titleEl && titleEl.innerText) || document.title;
+        return JSON.stringify({active: tiles.length > 0, participants: [...names], speaking_names: [...speaking], meeting_title: huddleTitle});
     }
     scope.querySelectorAll('[data-participant-id]').forEach(tile => {
         const name = tileName(tile);
