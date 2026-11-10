@@ -164,9 +164,15 @@ test('real adapter: every speaker-watch line except level meters lands in the pe
     'console.log("[00:03] SPEAKER_ACTIVE: Jane Doe (Browser meeting)");');
   const start = createCaptureHelperFactory({ captureBin, speakerWatchBin }, { inboxDir: dir, logsDir: dir });
   const handle = start({ recordingId: 'meeting_log', selfName: null });
-  await new Promise((r) => setTimeout(r, 400));
+  // Wait for the speaker line to arrive rather than a fixed delay: node
+  // start-up for the stub varies with machine load.
+  const logPath = path.join(dir, 'speaker-watch-meeting_log.log');
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline && !(fs.existsSync(logPath) && fs.readFileSync(logPath, 'utf8').includes('SPEAKER_ACTIVE'))) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
   await handle.stop();
-  const log = fs.readFileSync(path.join(dir, 'speaker-watch-meeting_log.log'), 'utf8');
+  const log = fs.readFileSync(logPath, 'utf8');
   assert.match(log, /Speaker Watcher active/, 'chatter lines are kept for diagnosis');
   assert.match(log, /AX-DUMP/);
   assert.match(log, /AppleScript -1719: Invalid index/);
