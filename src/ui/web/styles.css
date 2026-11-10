@@ -468,6 +468,7 @@ mark.search-match.active {
 .byom-tabs .auth-tab small{font-weight:400;color:var(--muted);margin-left:4px}
 .byom-advanced{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
 .microphone-picker{display:flex;gap:8px;align-items:center}
+.onboarding-microphone{padding:0 0 14px}
 .microphone-picker select{flex:1;min-width:0;padding:10px 12px;border-radius:8px;border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);font-family:inherit;font-size:13px;cursor:pointer}
 .byom-model-row{display:flex;gap:8px;align-items:center}
 .byom-model-row input{flex:1}

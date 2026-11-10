@@ -72,7 +72,7 @@ const panels = ['profile', 'recording'].map(panel => {
 });
 let permission = 'not-determined';
 const context = vm.createContext({console, setTimeout, Promise, JSON,
-  $: node, $$: q => q === '.settings-nav-item' ? navTabs : q === '.settings-panel' ? panels : [],
+  $: node, $$: q => q === '.settings-nav-item' ? navTabs : q === '.settings-panel' ? panels : q === '[data-onboarding-next]' ? [node(q)] : [],
   esc: v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
   toast: (m, e) => toasts.push(m), api,
   closeCredentialsModal(){}, toggleAuthTypeFields(){}, doTestCredentials(){}, doSaveCredentials(){}, copyText(){},
@@ -185,3 +185,38 @@ run(async () => {
   assert.equal(deviceCalls(), 2);  // not listed while the section is hidden
 });
 ''')
+
+
+@needs_node
+def test_onboarding_shows_the_picker_once_mic_access_is_granted_preselected_to_system_default(tmp_path):
+    run_node(tmp_path, WEB + r'''
+run(async () => {
+  await vm.runInContext("showOnboardingStep(ONBOARDING_STEPS.indexOf('permissions'))", context);
+  await new Promise(r => setTimeout(r));
+  assert.equal(node('#onboardingMicrophoneField').hidden, true);
+  assert.equal(deviceCalls(), 0);
+
+  await fire('#permMicBtn');
+  assert.equal(node('#onboardingMicrophoneField').hidden, false);
+  assert.match(node('#onboardingMicrophone').innerHTML, /Shure MV7 \(system default\)/);
+  assert.equal(node('#onboardingMicrophone').value, '');
+
+  // Completing the step without touching the picker saves nothing.
+  await fire('[data-onboarding-next]');
+  assert.equal(microphoneWrites().length, 0);
+
+  node('#onboardingMicrophone').value = 'AppleUSBAudioEngine:Shure:MV7:1';
+  await fire('#onboardingMicrophone', 'change');
+  assert.deepEqual(microphoneWrites().pop().body.value, {unique_id:'AppleUSBAudioEngine:Shure:MV7:1', name:'Shure MV7'});
+});
+''')
+
+
+def test_onboarding_permissions_step_holds_the_picker_hidden_until_granted():
+    html = (ROOT / 'src/ui/web/index.html').read_text()
+    start = html.index('data-step="permissions"')
+    step = html[start:html.index('</section>', start)]
+    assert 'id="onboardingMicrophoneField"' in step and 'id="onboardingMicrophone"' in step
+    assert 'id="onboardingMicrophoneRefresh"' in step
+    field = step[step.index('id="onboardingMicrophoneField"') - 80:step.index('id="onboardingMicrophoneField"') + 80]
+    assert 'hidden' in field
