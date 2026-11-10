@@ -38,4 +38,6 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **To-do**: an Action item as Todo/Planner tracks it: done or not. It keeps its identity (and done mark) when its Recording is reprocessed and the same Action item comes back; one that no longer appears is superseded, not listed. _Avoid_: task.
 
+**Microphone**: the input device that feeds a Recording's mic track: "System default" (whatever macOS has as default input when recording starts) or one named device. The system-audio track is not a Microphone. _Avoid_: input device, audio source.
+
 **Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript.
