@@ -118,6 +118,17 @@ def test_a_failing_local_transcriber_leaves_a_gap_and_the_run_continues():
     assert segments[-1]["reason"] == "the cloud engine kept rejecting this stretch; local transcription failed"
 
 
+def test_a_local_transcriber_that_hears_nothing_leaves_a_gap():
+    # Silence from the local model is not a transcript: the Window still shows
+    # up as untranscribed in the summary and the transcript.
+    failed = []
+    segments = run(fallback=lambda audio, start, end: [], on_window_failed=lambda *a: failed.append(a))
+    reason = "the cloud engine kept rejecting this stretch; no speech found on this Mac"
+    assert segments[-1] == {"start": 100.0, "end": 140.0, "text": "", "engine": "gap", "reason": reason}
+    assert failed == [(100.0, 140.0, reason)]
+    assert engine_summary(segments)["gap_s"] == 40.0
+
+
 def test_on_window_failed_reports_locally_transcribed_windows_too():
     failed = []
     run(fallback=local(), on_window_failed=lambda *a: failed.append(a))

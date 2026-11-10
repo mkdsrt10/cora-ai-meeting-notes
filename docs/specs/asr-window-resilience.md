@@ -71,7 +71,7 @@ validated as a unit. A Window the cloud engine keeps rejecting is transcribed lo
 
 **Windowed transcription fallback**
 - The retry-then-split ladder is unchanged. When a Window is still rejected at the bottom of the ladder, or the provider refuses it (a blocked prompt or a refusal finish reason; empty candidates alone are retried as a transient error), the windowed transcriber hands that Window to the local Whisper adapter with the Window's offset so segments land at the right times, and marks each resulting segment with the engine that produced it. The run continues; the Recording completes.
-- If no local Whisper model is available, the Window becomes a gap marker in the transcript with its time range and reason; the Recording still completes.
+- If no local Whisper model is available, the local model fails, or it finds no speech in the Window, the Window becomes a gap marker in the transcript with its time range and reason; the Recording still completes.
 - This applies to every hosted Transcriber adapter that uses the windowed path (Gemini and OpenAI-compatible).
 - Each segment carries its producing engine. The Recording records a per-engine summary (seconds transcribed locally, seconds left as gaps, reasons) for the UI and the notification.
 - One notification per Recording, through the existing notify path and tied to the recording id, states the minutes transcribed on the Mac or left as gaps and the reason. None when every Window succeeded.
