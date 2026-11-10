@@ -7,11 +7,11 @@ const {
   MAC_OCR_BIN, PYTHON_SCRIPT, PIPELINE_SCRIPT, ICON_PATH, PYTHON_BIN,
 } = require('./main/paths');
 const {
-  DASHBOARD_PORT, DASHBOARD_URL, API_TOKEN, PYTHON_ENV, postJson, fetchJson, verifyOwnServer,
+  DASHBOARD_PORT, DASHBOARD_URL, API_TOKEN, PYTHON_ENV, postJson, fetchJson, fetchSetting, verifyOwnServer,
 } = require('./main/api-client');
 const { handleTrusted, installNavigationGuards } = require('./main/security');
 const { startMeetingWatcher, detectActiveMeeting } = require('./meeting-detector');
-const { createCaptureHelperFactory, startMicWatch } = require('./recording/capture-helper');
+const { createCaptureHelperFactory, listAudioDevices, startMicWatch } = require('./recording/capture-helper');
 const { createRecordingSession } = require('./recording/session');
 const { createProcessingQueue } = require('./recording/processing-queue');
 const { createBackendApi, createArchiveStep } = require('./recording/backend');
@@ -68,6 +68,21 @@ const processingQueue = createProcessingQueue({
   api: backendApi,
   clock,
 });
+// Last known Microphone list, for the session's name fallback only (a
+// uniqueID that changed with the USB port). Spawning never waits for a
+// listing: it is refreshed in the background on app start and each time the
+// helper reports the mic it opened (every recording start, and mid-call
+// switches). A failed listing ([]) keeps the previous list.
+let knownMicDevices = [];
+let micListing = null;
+function refreshMicDevices() {
+  if (micListing) return micListing;
+  micListing = listAudioDevices(CAPTURE_BIN)
+    .then((list) => { if (list.length) knownMicDevices = list; })
+    .finally(() => { micListing = null; });
+  return micListing;
+}
+
 const recording = createRecordingSession({
   startHelper: createCaptureHelperFactory(
     { captureBin: CAPTURE_BIN, speakerWatchBin: SPEAKER_WATCH_BIN },
@@ -77,6 +92,13 @@ const recording = createRecordingSession({
   clock,
   queue: processingQueue,
   people: { selfName: () => selfName, labelSpeaker },
+  // The Microphone setting ({ unique_id, name } or null = System default),
+  // passed to the helper at each start; the known list only maps a stale id
+  // to a same-name device (see resolveMicrophone in recording/session.js).
+  microphone: {
+    chosen: () => fetchSetting('microphone'),
+    devices: () => knownMicDevices,
+  },
 });
 
 const isCapturing = () => recording.state().phase === 'recording';
@@ -160,14 +182,21 @@ function rendererState(s = recording.state()) {
 }
 
 let publishedState = null;
+let publishedMicDevice = null;
 function publishState() {
   const s = recording.state();
   const state = rendererState(s);
   const changed = state !== publishedState;
   publishedState = state;
+  const micChanged = s.micDevice !== publishedMicDevice;
+  publishedMicDevice = s.micDevice;
 
   if (changed && mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('recording-state', state);
+  }
+  // The Microphone the helper actually opened (null until it reports one).
+  if (micChanged && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('mic-device', s.micDevice);
   }
 
   if (state === 'recording' || state === 'paused') {
@@ -183,6 +212,7 @@ function publishState() {
       // Every state change carries mute, so the floater can never show
       // "Muted" for a recording that is capturing the mic.
       floaterWindow.webContents.send('mic-mute-state', s.muted);
+      floaterWindow.webContents.send('mic-device', s.micDevice);
     }
   } else if (floaterWindow && !floaterWindow.isDestroyed() && floaterWindow.isVisible()) {
     floaterWindow.hide();
@@ -210,6 +240,13 @@ recording.on('stopped', ({ recordingId, reason, warning }) => {
   } else if (reason !== 'quit') {
     notify({ title: 'Cora', body: 'Meeting ended. Processing your meeting…' }, { recordingId });
   }
+});
+
+// The opened Microphone is not the chosen one at start, or it changed
+// mid-call: the session supplies the text; recording carries on regardless.
+recording.on('device', ({ recordingId, notice }) => {
+  if (notice) notify({ title: 'Cora', body: notice, icon: ICON_PATH }, { level: 'warning', recordingId });
+  refreshMicDevices();
 });
 
 recording.on('level', (levels) => {
@@ -268,6 +305,8 @@ function startRecording(meetingTool = null) {
 }
 
 handleTrusted('get-recording-state', () => rendererState());
+
+handleTrusted('get-mic-device', () => recording.state().micDevice);
 
 handleTrusted('get-permission-status', () => ({
   microphone: systemPreferences.getMediaAccessStatus('microphone'),
@@ -514,6 +553,7 @@ async function handleMicActive() {
 }
 
 app.whenReady().then(async () => {
+  refreshMicDevices();
   if (app.dock) {
     app.dock.setIcon(ICON_PATH);
     app.dock.show();

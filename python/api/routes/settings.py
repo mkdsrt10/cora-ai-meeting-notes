@@ -276,15 +276,38 @@ def post_api_onboarding_complete(req, path: str, body: dict) -> None:
     return req.send_json({"ok": True})
 
 
+# Keys where a stored null means something (microphone: System default), so
+# {key, value: null} clears them. For every other key null stays a read.
+NULLABLE_SETTINGS = frozenset({"microphone"})
+
+
 @route("POST", '/api/settings')
 def post_api_settings(req, path: str, body: dict) -> None:
+    """{key, value} writes; {key} alone, or {key, value: null}, reads; for a
+    key in NULLABLE_SETTINGS, {key, value: null} clears it instead."""
     key = str(body.get("key", ""))
     value = body.get("value")
-    if value is not None:
-        db.set_setting(key, value)
-        return req.send_json({"ok": True})
-    else:
+    if value is None and not ("value" in body and key in NULLABLE_SETTINGS):
         return req.send_json({"value": db.get_setting(key)})
+    if key == "microphone" and value is not None:
+        _validate_microphone(value)
+    db.set_setting(key, value)
+    return req.send_json({"ok": True})
+
+
+def _validate_microphone(value) -> None:
+    """The Microphone setting is {unique_id, name} (null = System default)."""
+    if not (isinstance(value, dict) and set(value) == {"unique_id", "name"}
+            and all(isinstance(v, str) and v.strip() for v in value.values())):
+        raise ValueError("microphone must be {unique_id, name} or null")
+
+
+@route("GET", '/api/audio-devices')
+def get_api_audio_devices(req, path: str, query: dict) -> None:
+    """Microphone picker's device list, from the capture helper. Local-only:
+    not gated by enterprise lockdown."""
+    import capture_devices
+    return req.send_json({"devices": capture_devices.list_devices()})
 
 
 @route('GET', '/api/processing')

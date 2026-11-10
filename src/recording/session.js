@@ -1,13 +1,17 @@
 // Recording session: the live capture of a Recording, from start to stop.
 //
 // Interface
-//   session.state() -> { phase, recordingId, rootId, startedAt, elapsedMs, muted, meeting, finishing }
+//   session.state() -> { phase, recordingId, rootId, startedAt, elapsedMs, muted, meeting, finishing, micDevice }
 //     phase: 'idle' | 'recording' | 'paused'
 //     recordingId: the chunk being captured (or the paused chunk); null when idle
 //     rootId: the Recording this one continues (pause/resume chain or "Continue meeting"), else null
 //     finishing: ids of stopped Recordings still being finalized in the background
+//     micDevice: name of the Microphone the helper reports it opened; null
+//       until it does, and when idle
 //   session.start({ meeting, continues }) -> { ok, id } | { ok: false, error }
-//     never refused because an earlier Recording is still finishing
+//     never refused because an earlier Recording is still finishing; the
+//     Microphone setting is resolved once per start (see resolveMicrophone)
+//     and reused by every pause/resume chunk of it
 //   session.stop(reason) -> Promise   idempotent; back to idle at once; the
 //     promise resolves once that Recording is handed to the Processing queue
 //   session.shutdown() -> Promise     stop, then wait for every finishing Recording
@@ -18,6 +22,16 @@
 //   'state' event: emitted with state() on every change (mute included)
 //   'level' event: { mic, sys } meter readings, not state
 //   'stopped' event: { recordingId, reason, warning } once per stop
+//   'device' event: { name, recordingId, notice } on every MIC_DEVICE line;
+//     notice is user-facing text when the device opened at start is not the
+//     chosen one, or the device changed since the last line; else null. It
+//     never changes the phase.
+//
+// Adapters: startHelper({ recordingId, selfName, deviceId }) -> helper handle;
+// optional microphone = { chosen() -> { unique_id, name } | null (may be a
+// promise), devices() -> [{ name, uniqueID, isDefault }], the last known
+// device list, read synchronously (anything else counts as no list) }.
+// Without it every helper spawns on System default.
 //
 // Invariants: recordingId is null whenever idle; a capture helper exiting on
 // its own while recording stops with a warning and is processed like a stop;
@@ -34,7 +48,66 @@ function recordingIdAt(ms) {
   return `meeting_${new Date(ms).toISOString().replace(/[:.]/g, '-')}`;
 }
 
-function createRecordingSession({ startHelper, api, clock, queue, people = {}, newRecordingId = recordingIdAt }) {
+// The Microphone setting resolved for a start -> { chosenName, deviceId },
+// deviceId null = System default (no --device). Never rejects.
+//
+// Only the setting read is awaited; the spawn never waits for a fresh
+// --list-devices (up to 5 s). The stored unique_id is passed as is, and the
+// helper falls back to System default itself when that device is absent.
+// The last known device list (refreshed in the background by main.js) is
+// used only for the name fallback: when it shows the id gone but a device
+// with the same name present (a uniqueID can change with the USB port), that
+// device's id is used. Trade-off: a list older than a port change misses the
+// name match for one start, and the Recording falls back to System default
+// with a notice, rather than every chosen-mic start paying for a listing.
+async function resolveMicrophone(microphone) {
+  const chosen = await Promise.resolve().then(() => microphone.chosen()).catch(() => null);
+  const id = chosen && typeof chosen.unique_id === 'string' ? chosen.unique_id : null;
+  const name = chosen && typeof chosen.name === 'string' ? chosen.name : null;
+  if (!id && !name) return { chosenName: null, deviceId: null };
+  let known = [];
+  try { known = microphone.devices(); } catch { known = []; }
+  const list = Array.isArray(known) ? known : [];
+  const byId = id && list.find((d) => d.uniqueID === id);
+  const byName = !byId && name && list.find((d) => d.name === name);
+  return {
+    chosenName: name || (byId && byId.name) || null,
+    deviceId: byId ? id : byName ? byName.uniqueID : id,
+  };
+}
+
+// A helper handle whose process is spawned once its options resolve (the
+// Microphone lookup), so start() stays synchronous. Stopped before then, it
+// never spawns. A spawn that throws is reported like a helper that died at
+// once: an 'error' event, then 'exit' with code -1; stop() still resolves.
+function deferredHelper(startHelper, optsPromise) {
+  const h = new EventEmitter();
+  let real = null;
+  let stopped = false;
+  let muted = null;
+  const ready = optsPromise.then((opts) => {
+    if (stopped) return;
+    try {
+      real = startHelper(opts);
+    } catch (err) {
+      h.emit('event', { type: 'error', message: (err && err.message) || String(err) });
+      h.emit('exit', { code: -1, signal: null });
+      return;
+    }
+    real.on('event', (ev) => h.emit('event', ev));
+    real.on('exit', (info) => h.emit('exit', info));
+    if (muted !== null) real.setMuted(muted);
+  });
+  h.setMuted = (value) => { if (real) real.setMuted(value); else muted = value; };
+  h.stop = async () => {
+    stopped = true;
+    await ready;
+    if (real) await real.stop();
+  };
+  return h;
+}
+
+function createRecordingSession({ startHelper, api, clock, queue, people = {}, microphone = null, newRecordingId = recordingIdAt }) {
   const events = new EventEmitter();
   const selfName = people.selfName || (() => null);
   const labelSpeaker = people.labelSpeaker || ((name) => name);
@@ -54,6 +127,10 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
   let handedOver = Promise.resolve(); // last finish in stop order
   let lastSpeaker = '';
   let lastSpeakerAt = 0;
+  // Microphone, resolved once per start and reused by every chunk of it.
+  let micPending = null;    // Promise of the resolution, while it runs
+  let mic = null;           // { chosenName, deviceId } once resolved
+  let micDevice = null;     // name the helper last reported opening
 
   const log = (label) => (err) => console.error(`[Cora session] ${label}:`, err && err.message);
 
@@ -67,6 +144,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
       muted,
       meeting,
       finishing: [...finishing.keys()],
+      micDevice,
     };
   }
 
@@ -84,7 +162,26 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
       api.setTitle(recordingId, ev.title).catch(log('title'));
     } else if (ev.type === 'speakerActive') {
       onSpeaker(ev.name);
+    } else if (ev.type === 'device') {
+      onDevice(ev.name);
     }
+  }
+
+  // The helper (re)opened a Microphone. Never changes the recording phase.
+  // A notice (user-facing text) comes with the event when the opened device
+  // is not the chosen one at start, and on every later change of device.
+  function onDevice(name) {
+    const previous = micDevice;
+    micDevice = name;
+    let notice = null;
+    const chosen = mic && mic.chosenName;
+    if (previous === null && chosen && name !== chosen) {
+      notice = `${chosen} is not available. Recording on ${name} instead.`;
+    } else if (previous !== null && name !== previous) {
+      notice = `Microphone changed. Recording continues on ${name}.`;
+    }
+    events.emit('device', { name, recordingId, notice });
+    emit();
   }
 
   function onSpeaker(rawName) {
@@ -128,7 +225,10 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
     }).catch(log('create recording'));
     if (continues) api.setContinuationStatus(rootId, 'recording', id).catch(log('continuation status'));
 
-    const h = startHelper({ recordingId: id, selfName: selfName() });
+    const opts = { recordingId: id, selfName: selfName() };
+    const h = mic || !micPending
+      ? startHelper({ ...opts, deviceId: mic ? mic.deviceId : null })
+      : deferredHelper(startHelper, micPending.then((m) => ({ ...opts, deviceId: m.deviceId })));
     helper = h;
     h.on('event', (ev) => onHelperEvent(h, ev));
     h.on('exit', (info) => onHelperExit(h, info || {}));
@@ -144,6 +244,15 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
     rootId = continues || null;
     meeting = tool;
     muted = false;
+    micDevice = null;
+    mic = null;
+    micPending = null;
+    if (microphone) {
+      const gen = generation;
+      const pending = resolveMicrophone(microphone);
+      micPending = pending;
+      pending.then((m) => { if (gen === generation) mic = m; });
+    }
     const id = startChunk(continues);
     emit();
     return { ok: true, id };
@@ -184,6 +293,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, n
     startedAt = null;
     meeting = null;
     muted = false;
+    micDevice = null;
     phase = 'idle';
 
     const p = finish(job).catch(log('finish')).finally(() => {

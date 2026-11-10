@@ -155,6 +155,14 @@
         <span id="permMicStatus" class="stage-pill">Checking…</span>
         <button class="button secondary" id="permMicBtn">Grant</button>
       </div>
+      <div class="settings-field onboarding-microphone" id="onboardingMicrophoneField" hidden>
+        <label for="onboardingMicrophone">Record with</label>
+        <div class="microphone-picker">
+          <select id="onboardingMicrophone"><option value="">System default</option></select>
+          <button class="button secondary small" id="onboardingMicrophoneRefresh" type="button" title="List microphones again, e.g. after plugging one in">Refresh</button>
+        </div>
+        <small class="muted">Optional. System default follows the input chosen in macOS. You can change this later in Settings → Recording.</small>
+      </div>
       <div class="permission-row">
         <div><strong>Screen Recording</strong><small class="muted">Required by macOS to capture system audio (what others say).</small></div>
         <span id="permScreenStatus" class="stage-pill">Checking…</span>
@@ -272,6 +280,7 @@
               <div class="audio-level-meter">
                 <span class="audio-level-label">You</span>
                 <div class="audio-level-track"><div class="audio-level-fill" id="audioLevelMic"></div></div>
+                <span class="audio-level-device" id="audioLevelMicDevice" hidden></span>
               </div>
               <div class="audio-level-meter">
                 <span class="audio-level-label">System</span>
@@ -383,6 +392,7 @@
         <div class="settings-nav">
           <button class="settings-nav-item active" data-settings-panel="profile">Profile</button>
           <button class="settings-nav-item" data-settings-panel="preferences">Preferences</button>
+          <button class="settings-nav-item" data-settings-panel="recording">Recording</button>
           <button class="settings-nav-item" data-settings-panel="meeting-types">Meeting types</button>
           <button class="settings-nav-item" data-settings-panel="models">Processing &amp; models</button>
           <button class="settings-nav-item" data-settings-panel="cloud-models">Where models run</button>
@@ -406,6 +416,18 @@
             <div class="settings-row">
               <div><strong>Keep source audio after processing</strong><small>Off deletes the recording once its transcript and summary are ready — this also removes playback/seek for that meeting.</small></div>
               <label class="switch"><input type="checkbox" id="settingsRetainAudio" checked><span class="slider"></span></label>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-settings-content="recording" hidden>
+            <h1 class="settings-title">Recording</h1>
+            <p class="settings-sub">Which microphone records your side of the call. System default follows the input chosen in macOS when each recording starts.</p>
+            <div class="settings-field">
+              <label for="settingsMicrophone">Microphone</label>
+              <div class="microphone-picker">
+                <select id="settingsMicrophone"><option value="">System default</option></select>
+                <button class="button secondary small" id="settingsMicrophoneRefresh" type="button" title="List microphones again, e.g. after plugging one in">Refresh</button>
+              </div>
             </div>
           </div>
 

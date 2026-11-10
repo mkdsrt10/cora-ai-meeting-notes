@@ -19,4 +19,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     expandFloater: (height) => ipcRenderer.invoke('expand-floater', height),
     toggleMuteMic: (state) => ipcRenderer.invoke('toggle-mute-mic', state),
     onMicMuteState: (callback) => ipcRenderer.on('mic-mute-state', (_event, isMuted) => callback(isMuted)),
+    // Name of the Microphone the recording is actually using (null until known / when idle).
+    getMicDevice: () => ipcRenderer.invoke('get-mic-device'),
+    onMicDevice: (callback) => ipcRenderer.on('mic-device', (_event, name) => callback(name)),
 });
