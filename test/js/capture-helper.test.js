@@ -25,6 +25,18 @@ test('mute status and mic watcher lines', () => {
   assert.deepEqual(parseHelperLine('MIC_OFF'), { type: 'micOff' });
 });
 
+test('mic device status line becomes a device event with the name intact', () => {
+  assert.deepEqual(parseHelperLine('STATUS: MIC_DEVICE MacBook Pro Microphone'), { type: 'device', name: 'MacBook Pro Microphone' });
+  assert.deepEqual(parseHelperLine("STATUS: MIC_DEVICE Mayank's AirPods Pro (2) - Mic #1"), { type: 'device', name: "Mayank's AirPods Pro (2) - Mic #1" });
+  assert.deepEqual(parseHelperLine('STATUS: MIC_DEVICE Yeti: USB/Stereo, 48kHz'), { type: 'device', name: 'Yeti: USB/Stereo, 48kHz' });
+});
+
+test('a mic device line without a name, or a lookalike, is ignored', () => {
+  assert.equal(parseHelperLine('STATUS: MIC_DEVICE'), null);
+  assert.equal(parseHelperLine('STATUS: MIC_DEVICE   '), null);
+  assert.equal(parseHelperLine('STATUS: MIC_DEVICES Yeti'), null);
+});
+
 test('chatter is ignored', () => {
   assert.equal(parseHelperLine('Spike A: Dual-track recording started.'), null);
   assert.equal(parseHelperLine(''), null);
@@ -34,7 +46,7 @@ test('chatter is ignored', () => {
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { createCaptureHelperFactory } = require('../../src/recording/capture-helper');
+const { createCaptureHelperFactory, listAudioDevices } = require('../../src/recording/capture-helper');
 
 // A stand-in helper: a Node script, so signal handling is predictable.
 function stubBin(dir, name, body) {
@@ -78,6 +90,46 @@ test('real adapter: stop() interrupts the helper and resolves after exit; mute g
     await handle.stop();
   }
   await exited;
+});
+
+// A stub that reports its argv (after the output file) as a warning line.
+const ARGV_STUB = "console.log('CAPTURE_WARNING: ' + JSON.stringify(process.argv.slice(3)));";
+
+async function spawnedArgs(opts) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cora-helper-'));
+  const captureBin = stubBin(dir, 'dual-capture', ARGV_STUB);
+  const start = createCaptureHelperFactory({ captureBin, speakerWatchBin: null }, { inboxDir: dir, logsDir: dir });
+  const { events, exited } = collect(start({ recordingId: 'meeting_d', selfName: null, ...opts }));
+  await exited;
+  await new Promise((r) => setTimeout(r, 50));
+  return JSON.parse(events.find((e) => e.type === 'warning').message);
+}
+
+test('real adapter: a chosen Microphone is passed as --device <uniqueID>', async () => {
+  assert.deepEqual(await spawnedArgs({ deviceId: 'AppleUSBAudioEngine:Blue:Yeti:1' }), ['--device', 'AppleUSBAudioEngine:Blue:Yeti:1']);
+});
+
+test('real adapter: System default spawns with no device argument', async () => {
+  assert.deepEqual(await spawnedArgs({}), []);
+  assert.deepEqual(await spawnedArgs({ deviceId: null }), []);
+});
+
+test('listing devices returns the helper\'s --list-devices JSON', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cora-helper-'));
+  const devices = [
+    { name: 'MacBook Pro Microphone', uniqueID: 'BuiltInMicrophoneDevice', isDefault: false },
+    { name: 'Yeti Stereo Microphone', uniqueID: 'AppleUSBAudioEngine:Blue:Yeti:1', isDefault: true },
+  ];
+  const captureBin = stubBin(dir, 'dual-capture', `if (process.argv[2] === '--list-devices') console.log(${JSON.stringify(JSON.stringify(devices))}); else process.exitCode = 2;`);
+  assert.deepEqual(await listAudioDevices(captureBin), devices);
+});
+
+test('listing devices yields an empty list when the helper fails, hangs or prints garbage', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cora-helper-'));
+  assert.deepEqual(await listAudioDevices(path.join(dir, 'missing')), []);
+  assert.deepEqual(await listAudioDevices(stubBin(dir, 'garbage', "console.log('not json')")), []);
+  assert.deepEqual(await listAudioDevices(stubBin(dir, 'failing', "console.log('[]'); process.exitCode = 1;")), []);
+  assert.deepEqual(await listAudioDevices(stubBin(dir, 'hangs', 'setInterval(() => {}, 1000);'), { timeoutMs: 200 }), []);
 });
 
 test('real adapter: a missing binary surfaces as an error and an exit', async () => {
