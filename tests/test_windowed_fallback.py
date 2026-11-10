@@ -273,3 +273,12 @@ def test_a_fully_cloud_transcribed_recording_posts_no_notification(fake_text, fa
     _, metadata, notes = _process("engines-clean", MIXED[:1], fake_text, fake_transcriber, monkeypatch)
     assert metadata["transcription_engines"] == {"local_s": 0.0, "gap_s": 0.0, "windows": []}
     assert notes == []
+
+
+def test_transcript_segments_keep_their_engine_marks(fake_text, fake_transcriber, monkeypatch):
+    result, _, _ = _process("engines-marks", MIXED, fake_text, fake_transcriber, monkeypatch)
+    marks = [(s.get("engine"), s.get("reason"), s["text"]) for s in result["diarization"]["segments"]]
+    assert marks == [(None, None, "cloud words about the launch"),
+                     ("local", "the cloud engine refused this stretch", "local words about the budget"),
+                     ("gap", "the cloud engine kept rejecting this stretch; no local model is installed", "")]
+    assert all(p["name"] for p in result["diarization"]["speakers"])    # a gap is nobody speaking

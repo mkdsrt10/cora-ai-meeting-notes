@@ -201,6 +201,11 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
         start_sec = float(seg.get("start", 0.0))
         end_sec = float(seg.get("end", 0.0))
         text = seg.get("text", "").strip()
+        marks = {k: seg[k] for k in ("engine", "reason") if seg.get("engine") in ("local", "gap") and k in seg}
+        if marks.get("engine") == "gap":  # a Window nobody transcribed: kept so the transcript shows it
+            aligned_segments.append({"speaker_id": "", "speaker_name": "", "start": format_ts(start_sec),
+                                     "end": format_ts(end_sec), "text": "", "language": "en", "emotion": "neutral", **marks})
+            continue
         if not text or text in {"!", ".", "?", "...", ",", "-", "!!", "!!!"} or re.fullmatch(r"[!?. ,\-_]+", text):
             continue
 
@@ -229,6 +234,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
             "text": text,
             "language": "en",
             "emotion": "neutral",
+            **marks,
         })
 
     # 2a. Name the remote turns the audio couldn't attribute (several other
@@ -245,7 +251,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
             print(f"[Local Pipeline] Romanization: {stats}", flush=True)
         # 2a-ii. Name remote turns the audio couldn't attribute.
         _guess_remote_speakers(folder, aligned_segments, ax_participants, title, model)
-    assigned_speakers = {s["speaker_name"] for s in aligned_segments}
+    assigned_speakers = {s["speaker_name"] for s in aligned_segments if s["speaker_name"]}
 
     # 2b. If this recording is linked as a continuation of an earlier one,
     # shift this recording's own segments onto the end of that meeting's
