@@ -68,6 +68,21 @@ const processingQueue = createProcessingQueue({
   api: backendApi,
   clock,
 });
+// Last known Microphone list, for the session's name fallback only (a
+// uniqueID that changed with the USB port). Spawning never waits for a
+// listing: it is refreshed in the background on app start and each time the
+// helper reports the mic it opened (every recording start, and mid-call
+// switches). A failed listing ([]) keeps the previous list.
+let knownMicDevices = [];
+let micListing = null;
+function refreshMicDevices() {
+  if (micListing) return micListing;
+  micListing = listAudioDevices(CAPTURE_BIN)
+    .then((list) => { if (list.length) knownMicDevices = list; })
+    .finally(() => { micListing = null; });
+  return micListing;
+}
+
 const recording = createRecordingSession({
   startHelper: createCaptureHelperFactory(
     { captureBin: CAPTURE_BIN, speakerWatchBin: SPEAKER_WATCH_BIN },
@@ -78,10 +93,11 @@ const recording = createRecordingSession({
   queue: processingQueue,
   people: { selfName: () => selfName, labelSpeaker },
   // The Microphone setting ({ unique_id, name } or null = System default),
-  // resolved against the helper's own device list at each start.
+  // passed to the helper at each start; the known list only maps a stale id
+  // to a same-name device (see resolveMicrophone in recording/session.js).
   microphone: {
     chosen: () => fetchSetting('microphone'),
-    devices: () => listAudioDevices(CAPTURE_BIN),
+    devices: () => knownMicDevices,
   },
 });
 
@@ -230,6 +246,7 @@ recording.on('stopped', ({ recordingId, reason, warning }) => {
 // mid-call: the session supplies the text; recording carries on regardless.
 recording.on('device', ({ recordingId, notice }) => {
   if (notice) notify({ title: 'Cora', body: notice, icon: ICON_PATH }, { level: 'warning', recordingId });
+  refreshMicDevices();
 });
 
 recording.on('level', (levels) => {
@@ -536,6 +553,7 @@ async function handleMicActive() {
 }
 
 app.whenReady().then(async () => {
+  refreshMicDevices();
   if (app.dock) {
     app.dock.setIcon(ICON_PATH);
     app.dock.show();

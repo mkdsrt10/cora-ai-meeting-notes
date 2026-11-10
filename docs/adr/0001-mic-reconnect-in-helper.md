@@ -19,13 +19,17 @@ meeting.
 ## Decision
 
 The helper handles the disconnect itself. On `AVCaptureDevice.wasDisconnectedNotification` for
-the device in use, or `AVCaptureSession.runtimeErrorNotification`, it reopens the CoreAudio
-default input (retrying every 0.5 s while CoreAudio moves its default; after about 3 s it accepts
-any connected input) into the same `AVCaptureSession`, and keeps appending to the same mic
-`AVAssetWriterInput` in the same file. The first mic buffer after the reconnect is preceded by
-zero PCM covering the gap since the last mic buffer, so the mic track stays time-aligned with the
-system track. The mic output is pinned to one PCM format (48 kHz, stereo, Float32 interleaved)
-so any device, and the padding, feed the writer identically. The helper then prints
+the device in use, or `AVCaptureSession.runtimeErrorNotification`, it reopens a mic into the same
+`AVCaptureSession`, and keeps appending to the same mic `AVAssetWriterInput` in the same file.
+After a session runtime error it first reattaches the device in use if that device is still
+connected (unless it already failed again within 5 s of such a reattach); otherwise, and always
+after a disconnect, it opens the CoreAudio default input (retrying every 0.5 s while CoreAudio
+moves its default; after about 3 s it accepts any connected input). The first mic buffer after
+the reconnect is preceded by zero PCM covering the gap since the last mic buffer, so the mic
+track stays time-aligned with the system track. The padding is written on the mic sample queue
+under a mic-only lock, so it never stalls the system-audio track. The mic output is pinned to one
+PCM format (48 kHz, stereo, Float32 interleaved) so any device, and the padding, feed the writer
+identically. The helper then prints
 `STATUS: MIC_DEVICE <name>` again. It never exits, never ends the Chunk, and never emits a
 mic-off style event that could auto-stop the Recording.
 

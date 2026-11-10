@@ -31,6 +31,14 @@ Helper alone (`./capture/dual-capture`):
 - [ ] Unplug every input mid-recording: the helper keeps running and prints
       `Microphone: no input device available yet; still retrying.`; plugging one back in resumes
       the mic track with a status line.
+- [ ] While a long gap is being padded (unplug every input for ~30 s, then plug one in), the
+      system track has no dropouts: play continuous audio through the speakers throughout.
+- [ ] A session runtime error with the device still connected (e.g. change its sample rate in
+      Audio MIDI Setup mid-recording): the helper reattaches the same device (status line names
+      it, no switch to the default).
+- [ ] With the macOS default input unavailable to AVFoundation (if reproducible), the helper
+      prints `CAPTURE_WARNING: Using <name> because the system default microphone could not be
+      opened` alongside the status line.
 
 App:
 
@@ -38,6 +46,8 @@ App:
       preselected to System default; finishing the step without touching it works.
 - [ ] Settings > Recording lists System default first, the macOS default annotated, the chosen
       one checked; a newly plugged mic appears after Refresh or reopening the section.
+- [ ] Choose a device, unplug it, reopen Settings > Recording: it shows as "<name> (not
+      connected)", selected and greyed out, not as System default.
 - [ ] Choose each device in turn and record ~20 s: the floater mic meter tooltip and the recording
       panel name that device; no notification.
 - [ ] System default chosen: recording uses the macOS default input, no notification.
