@@ -37,6 +37,9 @@ THRESHOLD_CAP_DB = -20.0  # a threshold never sits above this, however noisy the
 # A measured floor above this means the recording has no quiet frames (speech
 # end to end), so the "floor" is speech itself; clamp it before the margin.
 FLOOR_CLAMP_DB = -45.0
+# A muted mic writes exact zeros (floor -inf, clamped to _SILENT_FRAME_DB); a
+# threshold that low is under one 16-bit step and silencedetect never fires.
+FLOOR_MIN_DB = -80.0
 _FRAME_S = 0.1
 _SILENT_FRAME_DB = -120.0  # digital silence reports -inf; clamp it
 # config.example.json used to ship this exact value, and every new data dir
@@ -84,9 +87,10 @@ def _measure_noise_floor_db(audio_path: str, _size: int, _mtime_ns: int) -> floa
 
 
 def relative_threshold_db(floor: float, margin_db: float, cap_db: float = THRESHOLD_CAP_DB) -> str:
-    """silencedetect threshold `min(floor, FLOOR_CLAMP_DB) + margin`, never
-    above cap_db, e.g. "-35dB"."""
-    return f"{min(min(floor, FLOOR_CLAMP_DB) + margin_db, cap_db):.0f}dB"
+    """silencedetect threshold `floor + margin`, the floor bounded to
+    [FLOOR_MIN_DB, FLOOR_CLAMP_DB], never above cap_db, e.g. "-35dB"."""
+    floor = min(max(floor, FLOOR_MIN_DB), FLOOR_CLAMP_DB)
+    return f"{min(floor + margin_db, cap_db):.0f}dB"
 
 
 def find_speech_segments(

@@ -63,6 +63,20 @@ def test_continuous_speech_with_no_quiet_frames_stays_one_stretch(tmp_path):
     assert audio.find_speech_segments(rec, pad=PAD) == [(0.0, pytest.approx(DURATION, abs=0.05))]
 
 
+def test_digital_silence_between_speech_is_found(tmp_path):
+    # A muted mic writes exact zeros: the floor reads as -inf (clamped to -120),
+    # and floor + margin would sit below one 16-bit step, where silencedetect
+    # can never see silence. The floor is bounded below so it stays detectable.
+    rec = tmp_path / "muted.wav"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y",
+                    "-f", "lavfi", "-i", "sine=frequency=220:sample_rate=16000:duration=6",
+                    "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono:d=4",
+                    "-f", "lavfi", "-i", "sine=frequency=330:sample_rate=16000:duration=8",
+                    "-filter_complex", "[0][1][2]concat=n=3:v=0:a=1", "-ac", "1", str(rec)], check=True)
+    speech = audio.find_speech_segments(rec, pad=PAD)
+    assert speech == [(0.0, pytest.approx(6.0 + PAD, abs=0.15)), (pytest.approx(10.0 - PAD, abs=0.15), pytest.approx(18.0, abs=0.05))]
+
+
 def test_configured_threshold_overrides_the_relative_one(tmp_path, monkeypatch):
     rec = make_recording(tmp_path / "rec.wav", -40.0)
     # A hand-tuned -55 dB sits under the -40 dB bed, so nothing reads as silence.
@@ -105,6 +119,11 @@ def test_threshold_never_goes_above_minus_20_db():
     assert audio.relative_threshold_db(-52.0, 10.0) == "-42dB"
     assert audio.relative_threshold_db(-52.0, 18.0) == "-34dB"
     assert audio.relative_threshold_db(-60.0, 50.0) == "-20dB"
+
+
+def test_a_floor_below_minus_80_db_is_raised_to_it():
+    assert audio.relative_threshold_db(-120.0, 10.0) == "-70dB"
+    assert audio.relative_threshold_db(-120.0, 18.0) == "-62dB"
 
 
 def test_a_floor_above_minus_45_db_is_clamped_before_the_margin():
