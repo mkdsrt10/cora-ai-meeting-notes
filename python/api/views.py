@@ -362,6 +362,9 @@ def recording_item(folder: Path | dict, detailed: bool = False) -> dict[str, Any
         "plugins": plugin_data,
         "size_bytes": audio.stat().st_size if audio else 0,
     }
+    failure = metadata.get("processing_failure") or {}
+    if stage == "failed":
+        item["failure"] = {"code": failure.get("code", "internal"), "message": failure.get("message", "")}
     if detailed:
         transcript_path = folder / "transcript_diarized.md"
         transcript = transcript_path.read_text(errors="replace") if transcript_path.exists() else ""
@@ -439,6 +442,7 @@ def all_recordings() -> list[dict[str, Any]]:
         item = recording_item(row)
         # Keep meetings whose audio was deleted after processing
         # (retain_audio off) — the transcript and notes are what matter.
+        # A failed one ("Processing failed") is always kept so it can be retried.
         if item.get("audio_url") or item.get("analysis_stage") != "needs_diarization":
             items.append(item)
     return sorted(items, key=lambda x: _parse_recorded_at(x.get("recorded_at")), reverse=True)

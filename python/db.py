@@ -262,6 +262,29 @@ def set_pending_recording_status(recording_id, status):
         conn.commit()
 
 
+def set_processing_failure(recording_id, failure=None):
+    """Record how this Recording's last processing run failed
+    ({"code", "message", "at"}) and set its status to "failed" (the
+    "Processing failed" Stage), or, with failure=None, clear both after a
+    successful run. Stored on the Recording itself so the Stage survives a
+    restart. A no-op for an id with no row."""
+    with get_db() as conn:
+        row = conn.execute("SELECT metadata, status FROM recordings WHERE id = ?", (recording_id,)).fetchone()
+        if not row:
+            return
+        meta = json.loads(row["metadata"]) if row["metadata"] else {}
+        if failure:
+            meta["processing_failure"] = dict(failure)
+            status = "failed"
+        else:
+            if "processing_failure" not in meta and row["status"] != "failed":
+                return
+            meta.pop("processing_failure", None)
+            status = None if row["status"] == "failed" else row["status"]
+        conn.execute("UPDATE recordings SET metadata = ?, status = ? WHERE id = ?", (json.dumps(meta), status, recording_id))
+        conn.commit()
+
+
 def set_continuation_status(recording_id, status, child_id=None):
     """Marks a recording as having a live pause/resume or "continue this
     meeting" segment in flight (status: "recording" | "processing"), or
@@ -387,7 +410,9 @@ def get_recording_by_live_id(live_id):
     that id before archiving replaced it with the real folder id."""
     with get_db() as conn:
         row = conn.execute(
-            "SELECT * FROM recordings WHERE status IS NULL AND json_extract(metadata, '$.live_recording_id') = ?",
+            # status 'failed' is an archived Recording whose last run failed;
+            # the Processing queue retries it by this live id.
+            "SELECT * FROM recordings WHERE (status IS NULL OR status = 'failed') AND json_extract(metadata, '$.live_recording_id') = ?",
             (live_id,),
         ).fetchone()
         if row:

@@ -17,6 +17,7 @@ CORE_LABELS = {
     "recording": "Recording…",
     "processing": "Processing…",
     "paused": "Paused",
+    "failed": "Processing failed",
     "needs_diarization": "Needs diarization",
     "needs_speaker_confirmation": "Identify me",
     "ready": "Ready",
@@ -28,6 +29,8 @@ def stage(recording: dict[str, Any]) -> str:
     status = recording.get("status")
     if status in PENDING:
         return status
+    if status == "failed":
+        return "failed"
     if not recording.get("diarization"):
         return "needs_diarization"
     if not (recording.get("identity") or {}).get("speaker_id"):

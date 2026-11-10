@@ -886,6 +886,16 @@ mark.search-match.active {
 .turn-text-input{font:inherit;font-size:13px;line-height:1.6;width:100%;min-height:3.2em;box-sizing:border-box;padding:8px 10px;border-radius:8px;border:1px solid var(--hairline);background:var(--surface-2);color:var(--text);resize:vertical}
 .turn-rename-all{font-size:11px;color:var(--text2);display:inline-flex;gap:4px;align-items:center}
 .timeline-speaker .speaker-source{font-weight:500;color:var(--text2);margin-left:6px;font-size:11px}
+.timeline-speaker .engine-note{font-weight:500;color:var(--muted);margin-left:6px;font-size:11px;font-style:italic}
+.timeline-turn.transcript-gap .timeline-text{color:var(--muted);font-style:italic}
+
+/* "Processing failed": reason + Retry, on the dashboard row and detail page */
+.stage-pill.failed{color:var(--coral);background:var(--coral-soft);border-color:transparent}
+.failure-notice{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:4px}
+.session-row .failure-notice .failure-message{font-size:10px;color:var(--coral);white-space:normal}
+.failure-message{margin:0;color:var(--coral)}
+.notepad-continuation-banner.failure-notice{margin-top:0;border-color:color-mix(in srgb, var(--coral) 35%, var(--hairline))}
+.failure-notice .button{cursor:pointer}
 
 .processing-controls { display: grid; gap: 10px; margin: 12px 0 20px; }
 .processing-controls label, #summarizeModelList label { display: grid; gap: 6px; margin: 8px 0; }
