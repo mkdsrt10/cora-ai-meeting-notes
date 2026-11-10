@@ -56,6 +56,10 @@ function renderMeetingTimeline(record){
   }).join('');
 }
 
+// Select value that creates a Person from the row's current name, links the
+// participant to it and re-renders, so the new Person is offered on every row.
+const CREATE_PERSON_OPTION = '__create_person__';
+
 async function renderParticipants(record){
   const host = $('#notepadParticipants');
   if(!host || !record) return;
@@ -76,6 +80,7 @@ async function renderParticipants(record){
       <select class="participant-map-select" data-participant-map>
         <option value="">Not linked</option>
         ${people.map(person => `<option value="${esc(person.id)}" ${person.id === p.person_id ? 'selected' : ''}>${esc(person.name)}</option>`).join('')}
+        <option value="${CREATE_PERSON_OPTION}">Add "${esc(p.display_name)}" to People…</option>
       </select>
       <button type="button" class="participant-remove-btn" data-participant-hide title="Remove from list">&times;</button>
     </div>
@@ -136,9 +141,24 @@ $('#notepadParticipants')?.addEventListener('input', (e) => {
 $('#notepadParticipants')?.addEventListener('change', async (e) => {
   const select = e.target.closest('[data-participant-map]');
   if(!select) return;
-  const rawName = select.closest('.participant-row')?.dataset.rawName;
+  const row = select.closest('.participant-row');
+  const rawName = row?.dataset.rawName;
   const record = selectedRecording();
   if(!rawName || !record) return;
+  if(select.value === CREATE_PERSON_OPTION){
+    // The row's current (possibly edited) name becomes the Person's name.
+    const name = (row.querySelector('[data-participant-rename]')?.value || rawName).trim();
+    select.disabled = true;
+    try{
+      const created = await api('/api/people/create', { method: 'POST', body: JSON.stringify({ name }) });
+      await api('/api/recording/participant', { method: 'POST', body: JSON.stringify({ id: record.id, raw_name: rawName, action: 'map', person_id: created.person.id }) });
+      const entry = (selectedDetail?.participants || []).find(p => p.raw_name === rawName);
+      if(entry) entry.person_id = created.person.id;
+      toast(`Added ${name} to People and linked.`);
+    }catch(error){ toast(error.message, true); }
+    await renderParticipants(selectedDetail);
+    return;
+  }
   try{
     await api('/api/recording/participant', { method: 'POST', body: JSON.stringify({ id: record.id, raw_name: rawName, action: 'map', person_id: select.value || null }) });
     toast('Linked.');

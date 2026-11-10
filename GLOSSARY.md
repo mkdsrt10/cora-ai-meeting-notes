@@ -42,4 +42,8 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Window**: one clip of a Recording's audio sent to a cloud Transcriber call and validated as a unit; a Window that the cloud engine keeps rejecting is transcribed locally instead. _Avoid_: chunk (that is capture), segment (that is transcript).
 
+**Person**: someone Cora knows across Recordings: a People entry with a name, role, organization and optional voice reference, matched to speakers. _Avoid_: contact, user.
+
+**Participant**: a name captured from the meeting app during one Recording (the roster). A Participant may be linked to a Person, renamed, hidden, or turned into a new Person from the Participants tab. _Avoid_: attendee (that is the calendar list).
+
 **Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript.

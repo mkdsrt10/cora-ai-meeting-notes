@@ -4,6 +4,7 @@
 
 - Slack huddles in a browser: participants are read from the huddle's own tiles and "Name's profile" labels (the previous selectors matched nothing in today's Slack), the huddle title comes from the huddle window, and a DM tab without a huddle is no longer treated as a live call.
 - A meeting title is announced once per recording; two live tabs no longer make the title alternate every scan.
+- Participants tab: "Add <name> to People…" in a row's link dropdown creates the Person and links the participant in one step.
 
 ## 0.3.1 — 2026-11-10
 
