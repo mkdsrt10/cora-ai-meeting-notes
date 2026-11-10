@@ -8,6 +8,7 @@ Processing queue acts on: {"error", "code", "retryable"} plus an HTTP status.
   provider_not_configured  false      412
   lockdown                 false      403
   missing_dependency       false      501
+  cloud_transcription_rejected false  422
   provider_unavailable     true       503
   busy                     true       409
   internal                 true       500
@@ -29,6 +30,7 @@ STATUS = {
     "provider_not_configured": 412,
     "lockdown": 403,
     "missing_dependency": 501,
+    "cloud_transcription_rejected": 422,
     "provider_unavailable": 503,
     "busy": 409,
     "internal": 500,

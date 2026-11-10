@@ -183,6 +183,11 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
     context.save(folder)
     stage_timings["transcription"] = time.time() - t0
     raw_segments.sort(key=lambda s: s["start"])
+    from .windowed import engine_notice, engine_summary
+    metadata["transcription_engines"] = engine_summary(raw_segments)
+    db.update_recording_data(folder.name, "metadata", metadata)
+    if notice := engine_notice(metadata["transcription_engines"]):
+        db.log_notification(f"Part of \"{title}\" was not transcribed in the cloud", notice, "warning", folder.name)
     _write_progress(folder, "aligning_speakers", "Aligning speakers and audio tracks...", percent=45)
 
     # 2. Align speakers from Accessibility timeline
