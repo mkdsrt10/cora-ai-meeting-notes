@@ -6,8 +6,10 @@ The Processing profile's `transcription` picks the engine (ENGINES). Behind
 the interface this module owns: lockdown, dead-air removal, mapping times
 back onto the recording, cleanup of repeated/inverted segments, tracing,
 and for hosted engines the windowed ladder (pipeline/windowed.py: retry,
-split, validate, snap to speech boundaries). A hosted engine that fails
-fails the run; it never quietly substitutes another engine.
+split, validate, snap to speech boundaries). A Window the hosted engine keeps
+rejecting or refuses is transcribed by local Whisper when its model is
+downloaded, else kept as a gap; every segment carries `engine` ("gemini",
+"openai_compatible", "local" or "gap"), so the substitution is never quiet.
 
 Engines:
   local              on-device MLX Whisper in pause-bounded chunks
@@ -84,7 +86,11 @@ class Transcriber:
             trimmed.unlink(missing_ok=True)
         print(f"[ASR] STT completed in {time.time() - t0:.1f}s over {speech_s:.0f}s of speech", flush=True)
         segments.sort(key=lambda s: s["start"])
-        return clean_whisper_segments(segments), duration, speech_s
+        # Gap markers have no text by design; cleanup would drop them.
+        gaps = [s for s in segments if s.get("engine") == "gap"]
+        kept = clean_whisper_segments([s for s in segments if s.get("engine") != "gap"]) + gaps
+        kept.sort(key=lambda s: s["start"])
+        return kept, duration, speech_s
 
 
 def transcriber(profile: dict[str, Any]) -> Transcriber:
@@ -106,8 +112,8 @@ def _make(profile: dict[str, Any]) -> Transcriber:
         policy.require_outbound_allowed("Gemini transcription")
         from .gemini_asr import model_name, transcribe_window
         model = model_name()
-        return Transcriber(Windowed(lambda clip, duration, block: transcribe_window(clip, duration, block, model=model)),
-                           engine=engine, model=model)
+        return Transcriber(Windowed(lambda clip, duration, block: transcribe_window(clip, duration, block, model=model),
+                                    engine=engine), engine=engine, model=model)
     import credentials
     import db
     from .text_model import OPENAI_COMPATIBLE, resolve_base_url
@@ -117,8 +123,8 @@ def _make(profile: dict[str, Any]) -> Transcriber:
     if not policy.provider_allowed(preset, base_url):
         raise policy.LockdownError("Hosted transcription is disabled by enterprise lockdown.")
     model = db.get_setting("openai_asr_model") or OPENAI_AUDIO_DEFAULTS.get(preset, OPENAI_AUDIO_DEFAULT)
-    return Transcriber(Windowed(OpenAICompatibleAudio(base_url, settings.get("api_key") or "", model).window),
-                       engine=engine, model=model)
+    return Transcriber(Windowed(OpenAICompatibleAudio(base_url, settings.get("api_key") or "", model).window,
+                                engine=engine), engine=engine, model=model)
 
 
 # ---- adapters ---------------------------------------------------------------------
@@ -142,18 +148,43 @@ class MlxWhisper:
                  "end": _to_original_time(float(seg.get("end", 0.0)), mapping)} for seg in result.get("segments", [])]
 
 
+def _mlx_installed() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("mlx_whisper") is not None
+
+
+def local_fallback(speech: list[tuple[float, float]], hints: dict[str, Any]
+                   ) -> Optional[Callable[[Path, float, float], Segments]]:
+    """fallback(audio, start, end) for windowed.transcribe_windows: local MLX
+    Whisper over this recording's speech stretches inside [start, end],
+    segments in absolute times. None when no local model is downloaded (team
+    builds on Gemini ship none) or MLX isn't installed."""
+    from . import config
+    if not (_mlx_installed() and config.model_ready(config.resolve_whisper_model())):
+        return None
+
+    def fallback(audio: Path, start: float, end: float) -> Segments:
+        from . import transcribe
+        inside = [(max(a, start), min(b, end)) for a, b in speech if b > start and a < end]
+        return transcribe._transcribe_chunks(audio, inside, hints["prompt"], hints["prompt_for"])
+    return fallback
+
+
 class Windowed:
     """Hosted engines: multi-minute windows through windowed.transcribe_windows,
-    with `window(clip, duration, context_block) -> raw turns` as the one call."""
+    with `window(clip, duration, context_block) -> raw turns` as the one call.
+    `local(speech, hints)` builds the fallback for rejected Windows (None:
+    none available)."""
 
-    def __init__(self, window: Callable[[Path, float, str], list[dict[str, Any]]]) -> None:
-        self.window = window
+    def __init__(self, window: Callable[[Path, float, str], list[dict[str, Any]]], *, engine: str = "gemini",
+                 local: Callable[..., Optional[Callable[[Path, float, float], Segments]]] = local_fallback) -> None:
+        self.window, self.engine, self.local = window, engine, local
 
     def segments(self, audio: Path, speech: list[tuple[float, float]], hints: dict[str, Any]) -> Segments:
         from .context import MeetingContext
         from .windowed import transcribe_windows
         return transcribe_windows(audio, speech, hints["context"] or MeetingContext(), offset=hints["offset"],
-                                  caller=self.window)
+                                  caller=self.window, fallback=self.local(speech, hints), provider=self.engine)
 
 
 _RETRY_STATUS = frozenset({408, 409, 429, 500, 502, 503, 504})

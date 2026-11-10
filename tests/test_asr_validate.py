@@ -43,15 +43,18 @@ def test_repetition_loop_is_collapsed():
     assert out[0]["text"] == "the"
 
 
+PAUSED = [(0.0, 12.0), (16.0, 30.0)]  # the strict detector heard a pause, so it isn't saturated
+
+
 def test_dropped_speech_is_rejected():
-    # only the first 4 s of 30 s of speech has any transcript
+    # only the first 4 s of 26 s of speech has any transcript
     with pytest.raises(WindowInvalid, match="covers only"):
-        ok(turns((0, 4, "just the start")))
+        ok(turns((0, 4, "just the start")), strict=PAUSED)
 
 
 def test_empty_reply_for_a_window_with_speech_is_rejected_but_silence_is_fine():
     with pytest.raises(WindowInvalid):
-        ok([])
+        ok([], strict=PAUSED)
     assert ok([], strict=[(0.0, 1.0)]) == []
 
 

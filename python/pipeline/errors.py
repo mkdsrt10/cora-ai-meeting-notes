@@ -87,6 +87,16 @@ class ProviderUnavailableError(ProviderError):
         return f"{label} is unavailable right now (network error, rate limit or server error). It will be retried."
 
 
+class WindowedTranscriptionError(ProviderError):
+    """A cloud Window was rejected and could be neither transcribed locally
+    nor kept as a gap. Retrying sends the same audio for the same result."""
+    code, retryable = "cloud_transcription_rejected", False
+
+    def message_for(self, label: str) -> str:
+        return ("The cloud transcription engine rejected part of this recording "
+                "and no local model was available to fill in.")
+
+
 AUTH_STATUS = frozenset({401, 403})
 
 
