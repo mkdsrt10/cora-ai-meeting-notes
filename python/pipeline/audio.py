@@ -1,6 +1,7 @@
 """ffmpeg helpers: probing, silence detection, clipping and mic/system mixing."""
 from __future__ import annotations
 
+import functools
 import json
 import re
 import shutil
@@ -55,7 +56,16 @@ def _threshold_override(key: str) -> Optional[str]:
 
 def measure_noise_floor_db(audio_path: Path) -> float:
     """The recording's noise floor in dBFS: the 10th percentile of RMS over
-    100 ms frames (mono-downmixed). Raises on ffmpeg failure or empty audio."""
+    100 ms frames (mono-downmixed). Raises on ffmpeg failure or empty audio.
+
+    Memoized on (path, size, mtime) so the main and strict detectors on the
+    same file share one ffmpeg pass; a rewritten file is measured again."""
+    stat = Path(audio_path).stat()
+    return _measure_noise_floor_db(str(audio_path), stat.st_size, stat.st_mtime_ns)
+
+
+@functools.lru_cache(maxsize=32)
+def _measure_noise_floor_db(audio_path: str, _size: int, _mtime_ns: int) -> float:
     ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
     rate = 16000
     chain = (f"aresample={rate},aformat=channel_layouts=mono,"

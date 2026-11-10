@@ -111,3 +111,34 @@ def test_a_floor_above_minus_45_db_is_clamped_before_the_margin():
     assert audio.relative_threshold_db(-42.0, 10.0) == "-35dB"
     assert audio.relative_threshold_db(-25.0, 10.0) == "-35dB"
     assert audio.relative_threshold_db(-10.0, 18.0) == "-27dB"
+
+
+def count_floor_passes(monkeypatch):
+    calls = []
+    real_run = audio.subprocess.run
+
+    def run(cmd, *args, **kwargs):
+        if any("astats" in str(part) for part in cmd):
+            calls.append(cmd)
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(audio.subprocess, "run", run)
+    return calls
+
+
+def test_main_and_strict_detectors_share_one_floor_measurement(tmp_path, monkeypatch):
+    rec = make_recording(tmp_path / "rec.wav", -40.0)
+    passes = count_floor_passes(monkeypatch)
+    audio.find_speech_segments(rec, pad=PAD)
+    audio.find_speech_segments(rec, margin_db=audio.STRICT_MARGIN_DB,
+                               override_key="strict_silence_threshold_db", pad=PAD)
+    assert len(passes) == 1
+
+
+def test_a_rewritten_recording_is_measured_again(tmp_path, monkeypatch):
+    rec = make_recording(tmp_path / "rec.wav", -40.0)
+    passes = count_floor_passes(monkeypatch)
+    assert audio.measure_noise_floor_db(rec) == pytest.approx(-40.0, abs=1.0)
+    make_recording(rec, -50.0)
+    assert audio.measure_noise_floor_db(rec) == pytest.approx(-50.0, abs=1.0)
+    assert len(passes) == 2
