@@ -39,6 +39,7 @@ function renderSessions(){
     const continuationNote = r.continuation_status
       ? `<p class="muted">🔴 ${r.continuation_status === 'recording' ? 'Recording additional audio…' : 'Processing additional audio…'}</p>`
       : '';
-    return `<div class="session-row${pending ? ' session-row-pending' : ''}" data-open-id="${esc(r.id)}" role="button" tabindex="0"><div><h4>${esc(r.title)}</h4><p>${fmtDate(r.recorded_at)}</p>${continuationNote}${failureNotice(r) ? `<div class="failure-notice">${failureNotice(r)}</div>` : ''}</div><div>${stagePill(r.analysis_stage)}</div><span>${fmtDuration(r.duration_seconds)}</span><span>›</span></div>`;
+    const failure = failureNotice(r);
+    return `<div class="session-row${pending ? ' session-row-pending' : ''}" data-open-id="${esc(r.id)}" role="button" tabindex="0"><div><h4>${esc(r.title)}</h4><p>${fmtDate(r.recorded_at)}</p>${continuationNote}${failure ? `<div class="failure-notice">${failure}</div>` : ''}</div><div>${stagePill(r.analysis_stage)}</div><span>${fmtDuration(r.duration_seconds)}</span><span>›</span></div>`;
   }).join('') || `<div class="session-row"><p>${data.recordings.length ? 'No matching sessions.' : 'No recordings yet — start one from the tray or wait for Cora to notice your next meeting.'}</p></div>`;
 }

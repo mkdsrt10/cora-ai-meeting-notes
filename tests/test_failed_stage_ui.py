@@ -116,3 +116,13 @@ def test_detail_page_shows_failure_and_affected_minutes(tmp_path):
  run(`renderProcessingNotices({{id:'rec-4',analysis_stage:'ready',transcription_engines:{{local_s:0,gap_s:0,windows:[]}}}})`);
  assert.equal(engines.style.display,'none');
 ''')
+
+
+@needs_node
+def test_dashboard_builds_each_failure_notice_once(tmp_path):
+    _run(tmp_path, f'''
+ run("noticeCalls=0; const realNotice=failureNotice; failureNotice=r=>{{noticeCalls++; return realNotice(r);}}");
+ run("data={{recordings:[{FAILED}],storage:{{}}}}; renderSessions()");
+ assert.match(node('#sessionRows').innerHTML,/class="failure-notice"/);
+ assert.equal(run('noticeCalls'),1);
+''')
