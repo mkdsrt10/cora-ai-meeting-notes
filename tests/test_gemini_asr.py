@@ -242,3 +242,29 @@ def test_empty_response_reports_candidate_and_block_diagnostics(tmp_path):
     client.models.generate_content = empty
     with pytest.raises(gemini_asr.AsrCallError,match='candidates=0, block_reason=SAFETY'):
         gemini_asr.transcribe_window(clip(tmp_path),3,'context',client=client,model='test-model')
+
+
+def _empty_reply(tmp_path, candidates, block_reason=None):
+    client = FakeClient('')
+    client.models.generate_content = lambda **kwargs: SimpleNamespace(
+        text=None, candidates=candidates, prompt_feedback=SimpleNamespace(block_reason=block_reason))
+    with pytest.raises(gemini_asr.AsrCallError) as raised:
+        gemini_asr.transcribe_window(clip(tmp_path), 3, 'context', client=client, model='test-model')
+    return raised.value
+
+
+def test_a_blocked_prompt_is_a_refusal(tmp_path):
+    assert isinstance(_empty_reply(tmp_path, [], block_reason='PROHIBITED_CONTENT'), gemini_asr.AsrRefusedError)
+
+
+def test_a_refusal_finish_reason_is_a_refusal(tmp_path):
+    refused = _empty_reply(tmp_path, [SimpleNamespace(finish_reason='FinishReason.SAFETY')])
+    assert isinstance(refused, gemini_asr.AsrRefusedError)
+
+
+def test_no_candidates_without_a_block_reason_stays_retryable(tmp_path):
+    # An empty candidate list with nothing blocked is a transient hiccup, not a
+    # refusal: the ladder should retry it before the Window goes local.
+    error = _empty_reply(tmp_path, [])
+    assert not isinstance(error, gemini_asr.AsrRefusedError)
+    assert 'candidates=0' in str(error)
