@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.2 — unreleased
+## 0.4.2 — 2026-11-11
 
 - Call detection for Google Meet: rooms at today's `meet.google.com/meet/xxx-xxxx-xxx` address are detected again (the old rule wanted the room code right after the host, so Meet never prompted since October). Cora asks the tab whether you have joined, so the "Google Meet call detected. Start recording?" prompt comes after you click Join, not in the green room. The landing page, `/new` and `/landing` never count.
 - Slack huddles in a browser (Chrome, Brave, Edge, Safari) are detected, expanded or collapsed to the bottom mini-bar. A Slack tab with no huddle never prompts.
