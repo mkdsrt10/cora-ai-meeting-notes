@@ -135,7 +135,7 @@ async function pollLiveFeedIfRecording(){
       if(!isSelectedMeeting(record.id)) return;
       const stageChanged = fresh.analysis_stage !== record.analysis_stage;
       selectedDetail = fresh;
-      syncCopyRecordingIdButton();
+      if(typeof syncCopyRecordingIdButton === 'function') syncCopyRecordingIdButton();
       if(stageChanged){
         // The recording moved out of "recording" (e.g. Stop was clicked,
         // now "processing") or finished entirely — a narrow sub-panel
