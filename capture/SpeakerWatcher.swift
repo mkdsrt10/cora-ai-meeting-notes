@@ -651,8 +651,28 @@ func scanBrowserGoogleMeet(browserName: String) {
 }
 }
 
+// The one-shot probe walks Slack's whole AX tree under a hard 1.5 s timeout:
+// past this deadline the walk stops and the probe exits non-zero (a failed
+// check for the caller, never "no huddle"). nil = no deadline (the watcher).
+var probeDeadline: Date? = nil
+var probeTimedOut = false
+
+func probeDeadlinePassed() -> Bool {
+    guard let deadline = probeDeadline else { return false }
+    if Date() > deadline { probeTimedOut = true }
+    return probeTimedOut
+}
+
+// The in-meeting Zoom window is titled "Zoom Meeting" (or "Zoom Webinar").
+// Join Meeting / Schedule Meeting dialogs, the home window and chat-like
+// "Meeting ..." titles are not a meeting in progress.
+func isZoomMeetingWindowTitle(_ title: String) -> Bool {
+    let t = title.trimmingCharacters(in: .whitespaces).lowercased()
+    return t == "zoom meeting" || t == "zoom webinar"
+}
+
 func hasLeaveHuddleControl(_ element: AXUIElement, depth: Int = 0) -> Bool {
-    if depth > 28 { return false }
+    if depth > 28 || probeDeadlinePassed() { return false }
     for attr in [kAXTitleAttribute, kAXDescriptionAttribute] {
         var value: AnyObject?
         AXUIElementCopyAttributeValue(element, attr as CFString, &value)
@@ -667,7 +687,7 @@ func hasLeaveHuddleControl(_ element: AXUIElement, depth: Int = 0) -> Bool {
 }
 
 func findSlackHuddleRoot(_ element: AXUIElement, depth: Int = 0) -> AXUIElement? {
-    if depth > 28 { return nil }
+    if depth > 28 || probeDeadlinePassed() { return nil }
     var labels: [String] = []
     for attr in [kAXTitleAttribute, kAXDescriptionAttribute] {
         var value: AnyObject?
@@ -785,6 +805,8 @@ func scanMeetingApps() {
 // Accessibility is not granted (AXError -25211 / apiDisabled), so the caller
 // falls back to process-only. The caller enforces the 1.5 s hard timeout.
 func runProbe() -> Never {
+    let started = Date()
+    probeDeadline = started.addingTimeInterval(1.2)
     var zoomMeeting = false
     var slackHuddle = false
     var untrusted = !AXIsProcessTrusted()
@@ -802,10 +824,13 @@ func runProbe() -> Never {
             var titleVal: AnyObject?
             AXUIElementCopyAttributeValue(win, kAXTitleAttribute as CFString, &titleVal)
             let title = (titleVal as? String) ?? ""
-            if isZoom && title.localizedCaseInsensitiveContains("Meeting") { zoomMeeting = true }
+            if isZoom && isZoomMeetingWindowTitle(title) { zoomMeeting = true }
             if isSlack && findSlackHuddleRoot(win) != nil { slackHuddle = true }
         }
     }
+    let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
+    FileHandle.standardError.write(Data("[probe] elapsed \(elapsedMs)ms\(probeTimedOut ? " (deadline hit)" : "")\n".utf8))
+    if probeTimedOut { exit(2) }
     if untrusted {
         print("{\"ax\":\"untrusted\",\"zoomMeeting\":false,\"slackHuddle\":false}")
     } else {
@@ -827,6 +852,12 @@ if CommandLine.arguments.contains("--self-test") {
     precondition(findSpeakingInText("Jane Doe (speaking)") == "Jane Doe")
     precondition(findSpeakingInText("Jane Doe, Computer audio unmuted, active speaker") == "Jane Doe")
     precondition(findSpeakingInText("Speaking") == nil)
+    precondition(isZoomMeetingWindowTitle("Zoom Meeting"))
+    precondition(isZoomMeetingWindowTitle("Zoom Webinar"))
+    precondition(!isZoomMeetingWindowTitle("Join Meeting"))
+    precondition(!isZoomMeetingWindowTitle("Schedule Meeting"))
+    precondition(!isZoomMeetingWindowTitle("Meeting Chat"))
+    precondition(!isZoomMeetingWindowTitle("Zoom Workplace"))
     print("Speaker watcher parser checks passed")
     exit(0)
 }

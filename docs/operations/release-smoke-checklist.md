@@ -89,6 +89,12 @@ Covers the `speaker-watch --probe` one-shot and the Zoom web snapshot. Needs `ma
 real Zoom and Slack, Accessibility granted to Cora (and to the terminal for `make dev`).
 
 - [ ] `./capture/speaker-watch --probe` prints one JSON line and exits in well under 1.5 s.
+- [ ] With a large Slack workspace open (many channels, a long sidebar), `time ./capture/speaker-watch --probe`
+      stays under 1.5 s and its stderr shows `[probe] elapsed Nms` with N under about 1200. A walk
+      past 1.2 s prints `(deadline hit)` and exits 2 with no JSON line; the log then shows a failed
+      check, not "no huddle".
+- [ ] Zoom desktop with only the Join Meeting or Schedule Meeting dialog open (no meeting):
+      `"zoomMeeting":false`.
 - [ ] Zoom desktop open on the home window (no meeting): `"zoomMeeting":false`, and no Call prompt
       from the 20 s poll or a mic-on.
 - [ ] Join a Zoom meeting: `"zoomMeeting":true`, Call prompt appears.
