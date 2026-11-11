@@ -46,6 +46,7 @@ CATALOG: dict[str, frozenset[str]] = {name: frozenset(keys.split()) for name, ke
     "update_available": "from_version to_version",
     "update_started": "from_version to_version",
     "update_finished": "from_version to_version status error_code",
+    "call_detected": "app signal confirmed",
 }.items()}
 
 
