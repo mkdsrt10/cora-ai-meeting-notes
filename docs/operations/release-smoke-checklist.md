@@ -82,3 +82,19 @@ Start Recording button, and that nothing records until it is clicked. Each check
       alone; a browser huddle does not prompt. Turn the setting back on afterwards.
 - [ ] The receiver (or "Show what Cora shares") has one `call_detected` event per prompt, with
       `signal` `mic` or `poll` and no URL or title.
+
+## Call detection: desktop liveness and Zoom web
+
+Covers the `speaker-watch --probe` one-shot and the Zoom web snapshot. Needs `make build-native`,
+real Zoom and Slack, Accessibility granted to Cora (and to the terminal for `make dev`).
+
+- [ ] `./capture/speaker-watch --probe` prints one JSON line and exits in well under 1.5 s.
+- [ ] Zoom desktop open on the home window (no meeting): `"zoomMeeting":false`, and no Call prompt
+      from the 20 s poll or a mic-on.
+- [ ] Join a Zoom meeting: `"zoomMeeting":true`, Call prompt appears.
+- [ ] Slack desktop idle: `"slackHuddle":false`. Start a huddle popped out, then docked to the main
+      window: `"slackHuddle":true` both times.
+- [ ] Zoom web (`/wc/`): pre-join screen is not a Call; after Join it is (Allow JavaScript from
+      Apple Events on).
+- [ ] Revoke Accessibility for Cora: probe prints `"ax":"untrusted"`, the log has
+      `fallback=ax_untrusted`, a mic-on with Zoom or Slack open prompts, the 20 s poll never does.
