@@ -1,16 +1,17 @@
 const { execFile } = require('child_process');
+const { createProbeRunner } = require('./recording/desktop-probe');
 const { PAGE_EXPRESSION } = require('../capture/live-call-snippet');
 
-// Detects a Call (see GLOSSARY.md): a known meeting app running, a browser tab
-// on a meeting URL, or a Slack window titled "Huddle". One AppleScript round
-// per check lists processes, tab URLs and Slack window titles; for Meet and
-// Slack tabs it also prints a SNAPSHOT line with the page's own answer to "is
+// Detects a Call (see GLOSSARY.md): Teams running, a browser tab on a meeting
+// URL, or Zoom/Slack desktop with a live meeting window / huddle control (asked
+// through the probe, a one-shot of the speaker-watch helper). One AppleScript
+// round per check lists processes and tab URLs; for Meet, Slack and Zoom web
+// tabs it also prints a SNAPSHOT line with the page's own answer to "is
 // a call live here?", asked with the snippet shared with the speaker watcher
 // (capture/live-call-snippet.js). The script runner is injectable so the
 // decision can be tested with canned output.
 
 const MEETING_APP_PROCESSES = [
-  { process: 'zoom.us', label: 'Zoom' },
   { process: 'Microsoft Teams', label: 'Microsoft Teams' },
   { process: 'Teams', label: 'Microsoft Teams' },
 ];
@@ -252,21 +253,6 @@ else
   set end of output to "SAFARI_URLS:"
 end if
 
--- Slack has no meeting URL or separate process for a Huddle: it's a floating
--- window inside the same "Slack" process. Reading its window title is the
--- only signal available without Slack's (paid/limited) API, and needs
--- Accessibility permission granted to osascript/Script Editor.
-try
-  tell application "System Events"
-    if exists process "Slack" then
-      set slackWindowNames to name of every window of process "Slack"
-    else
-      set slackWindowNames to {}
-    end if
-  end tell
-  set end of output to "SLACK_WINDOWS:" & my joinList(slackWindowNames, DELIM)
-end try
-
 set output to output & snapshotLines
 return my joinList(output, linefeed)
 `;
@@ -343,6 +329,32 @@ function urlRule(url) {
   return null;
 }
 
+const DESKTOP_APPS = [
+  { process: 'zoom.us', label: 'Zoom', host: 'zoom.us', live: 'zoomMeeting' },
+  { process: 'Slack', label: 'Slack Huddle', host: 'Slack', live: 'slackHuddle' },
+];
+
+const runsDesktopApp = (processes) => DESKTOP_APPS.some((a) => processes.includes(a.process));
+
+// Zoom/Slack desktop, from what the probe said (parsed.desktop). Live only with
+// a meeting window / huddle control. With Accessibility untrusted the probe
+// cannot look, so the bare process stands in: a mic-gated Call (the mic-on fast
+// path may act on it, the 20 s poll never does). A failed probe adds nothing.
+function desktopCandidates(parsed) {
+  const probe = parsed.desktop;
+  if (!probe || probe.status === 'failed') return [];
+  const out = [];
+  for (const app of DESKTOP_APPS) {
+    if (!parsed.processes.includes(app.process)) continue;
+    if (probe.status === 'untrusted') {
+      out.push({ host: app.host, answer: 'untrusted', call: { label: app.label, source: 'app', confirmed: false, micGated: true } });
+    } else {
+      out.push({ host: app.host, answer: 'probed', call: probe[app.live] ? { label: app.label, source: 'app', confirmed: true } : null });
+    }
+  }
+  return out;
+}
+
 // Every candidate seen, in precedence order (apps, URLs, Slack windows), each
 // with the Call it yields (or null) and whether its page answered.
 function candidatesOf(parsed) {
@@ -370,9 +382,7 @@ function candidatesOf(parsed) {
     else if (live === null && rule.kind === 'meet') call = { label: rule.label, source: 'browser', url, confirmed: false };
     out.push({ host: rule.host, answer, unanswered, call });
   }
-  if (parsed.slackWindows.some((name) => /huddle/i.test(name))) {
-    out.push({ host: 'Slack', answer: 'none', call: { label: 'Slack Huddle', source: 'app', confirmed: true } });
-  }
+  out.push(...desktopCandidates(parsed));
   return out;
 }
 
@@ -382,7 +392,8 @@ function unansweredOf(candidates) {
 
 function pick(candidates) {
   const calls = candidates.map((c) => c.call).filter(Boolean);
-  return calls.find((c) => c.confirmed) || calls[0] || null;
+  const real = calls.filter((c) => !c.micGated);
+  return real.find((c) => c.confirmed) || real[0] || calls[0] || null;
 }
 
 /** Parsed script output -> the Call to offer, or null. Pure. */
@@ -411,6 +422,22 @@ function runnerError(err) {
 }
 
 const TICK_BUDGET_MS = 2500;
+const PROBE_TIMEOUT_MS = 1500;
+
+// Probe answer -> { status: 'ok' | 'untrusted', zoomMeeting, slackHuddle } or
+// { status: 'failed' }. Anything unexpected is a failed check, never "empty".
+function normalizeProbe(answer) {
+  if (answer && answer.ax === 'untrusted') return { status: 'untrusted' };
+  if (answer && answer.ax === 'ok') return { status: 'ok', zoomMeeting: answer.zoomMeeting === true, slackHuddle: answer.slackHuddle === true };
+  return { status: 'failed' };
+}
+
+// Reason code for "the desktop apps could not be looked into": the caller
+// (T6) emits the usage event and the permissions hint from it.
+function fallbackOf(candidates) {
+  const apps = candidates.filter((c) => c.answer === 'untrusted').map((c) => c.call.label);
+  return apps.length ? { reason: 'ax_untrusted', apps } : null;
+}
 
 function osascript(script, { timeoutMs }) {
   return new Promise((resolve, reject) => {
@@ -428,12 +455,30 @@ function osascript(script, { timeoutMs }) {
  * createDetector({ run }) -> { checkOnce, startWatcher }.
  * run(script, { timeoutMs }) -> Promise<string>; defaults to osascript.
  */
-function createDetector({ run = osascript } = {}) {
+function createDetector({ run = osascript, probe = null, probeBin = null, probeTimeoutMs = PROBE_TIMEOUT_MS } = {}) {
+  const runProbe = probe || createProbeRunner({ bin: probeBin });
+
   // Watchers listening for "a Meet/Slack page could not be asked". Any check
   // of this detector (the poll or a mic-on checkOnce) can report it, and a
   // Slack tab that could not be asked yields no Call, so it travels here
   // rather than only on the Call.
   const unansweredListeners = new Set();
+
+  // The caller enforces the probe's hard timeout, whatever the runner does.
+  async function probeDesktop() {
+    let timer;
+    const timeout = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`probe timed out after ${probeTimeoutMs}ms`)), probeTimeoutMs);
+    });
+    try {
+      return normalizeProbe(await Promise.race([runProbe({ timeoutMs: probeTimeoutMs }), timeout]));
+    } catch (err) {
+      console.log(`[call-detect] candidates=error(probe: ${runnerError(err)}) -> none`);
+      return { status: 'failed' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   async function evaluate(timeoutMs = SCRIPT_TIMEOUT_MS) {
     let raw;
@@ -445,15 +490,21 @@ function createDetector({ run = osascript } = {}) {
       console.log(`[call-detect] candidates=error(${runnerError(err)}) -> none`);
       // failed: this check saw nothing either way, so it must not count as
       // "checked, found nothing" (a miss).
-      return { status: 'failed', call: null, unanswered: [] };
+      return { status: 'failed', call: null, unanswered: [], fallback: null };
     }
-    const candidates = candidatesOf(parseScriptOutput(raw));
+    const parsed = parseScriptOutput(raw);
+    if (runsDesktopApp(parsed.processes)) parsed.desktop = await probeDesktop();
+    const candidates = candidatesOf(parsed);
     const unanswered = unansweredOf(candidates);
     const picked = pick(candidates);
     const call = picked ? { ...picked, unanswered } : null;
+    const fallback = fallbackOf(candidates);
     logLine(candidates, call);
+    if (fallback) console.log(`[call-detect] fallback=${fallback.reason} apps=${fallback.apps.join(',')}`);
     if (unanswered.length) for (const fn of unansweredListeners) fn(unanswered);
-    return { status: call ? 'found' : 'empty', call, unanswered };
+    // A failed probe means a desktop app went unchecked: no Call is not a real miss.
+    const status = call ? 'found' : parsed.desktop && parsed.desktop.status === 'failed' ? 'failed' : 'empty';
+    return { status, call, unanswered, fallback };
   }
 
   /**
@@ -468,7 +519,7 @@ function createDetector({ run = osascript } = {}) {
     const budget = new Promise((resolve) => {
       timer = setTimeout(() => {
         console.log(`[call-detect] candidates=error(tick budget ${budgetMs}ms spent) -> none`);
-        resolve({ status: 'failed', call: null, unanswered: [] });
+        resolve({ status: 'failed', call: null, unanswered: [], fallback: null });
       }, budgetMs);
     });
     try {
@@ -509,8 +560,11 @@ function createDetector({ run = osascript } = {}) {
       if (stopped || running) return;
       running = true;
       try {
-        const { status, call } = await check({ budgetMs: tickBudgetMs });
-        if (stopped || status === 'failed') return;
+        const result = await check({ budgetMs: tickBudgetMs });
+        if (stopped || result.status === 'failed') return;
+        // A mic-gated fallback Call is for the mic-on fast path only: the poll
+        // reads it as "nothing here".
+        const call = result.call && !result.call.micGated ? result.call : null;
         if (call) {
           misses = 0;
           if (!inCall) {

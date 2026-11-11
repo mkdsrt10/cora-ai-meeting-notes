@@ -111,15 +111,88 @@ test('Teams meeting links are unconfirmed Calls', async () => {
   }
 });
 
-test('a running desktop meeting app is a confirmed Call', async () => {
-  assert.deepEqual(await check({ processes: ['Finder', 'zoom.us'] }), { label: 'Zoom', source: 'app', confirmed: true, unanswered: [] });
+test('a running Teams process is a confirmed Call (process-only, out of scope for liveness)', async () => {
   assert.equal((await check({ processes: ['Microsoft Teams'] })).label, 'Microsoft Teams');
 });
 
-test('a Slack desktop window titled Huddle is a confirmed Slack Huddle', async () => {
-  const call = await check({ processes: ['Slack'], slackWindows: ['general - Acme', 'Huddle: design'] });
-  assert.deepEqual(call, { label: 'Slack Huddle', source: 'app', confirmed: true, unanswered: [] });
-  assert.equal(await check({ processes: ['Slack'], slackWindows: ['general - Acme'] }), null);
+// T3: Zoom and Slack desktop are asked through the probe (speaker-watch one-shot),
+// injected like the script runner. Its answer: { ax: 'ok' | 'untrusted',
+// zoomMeeting, slackHuddle }.
+const PROBE_IDLE = { ax: 'ok', zoomMeeting: false, slackHuddle: false };
+function probed(spec, probe, opts = {}) {
+  return createDetector({ run: async () => scriptOutput(spec), probe, ...opts });
+}
+
+test('Zoom desktop is a Call only with a meeting window', async () => {
+  const withWindow = await probed({ processes: ['zoom.us'] }, async () => ({ ...PROBE_IDLE, zoomMeeting: true })).check();
+  assert.deepEqual(withWindow, { status: 'found', call: { label: 'Zoom', source: 'app', confirmed: true, unanswered: [] }, unanswered: [], fallback: null });
+  const idle = await probed({ processes: ['zoom.us'] }, async () => PROBE_IDLE).check();
+  assert.deepEqual(idle, { status: 'empty', call: null, unanswered: [], fallback: null });
+});
+
+test('Slack desktop is a Call only with a live huddle control, docked or not', async () => {
+  const huddle = await probed({ processes: ['Slack'] }, async () => ({ ...PROBE_IDLE, slackHuddle: true })).check();
+  assert.deepEqual(huddle.call, { label: 'Slack Huddle', source: 'app', confirmed: true, unanswered: [] });
+  const idle = await probed({ processes: ['Slack'], slackWindows: ['Huddle: design'] }, async () => PROBE_IDLE).check();
+  assert.equal(idle.status, 'empty', 'a window titled Huddle no longer decides alone');
+});
+
+test('the probe is only run when Zoom or Slack is running', async () => {
+  let calls = 0;
+  const probe = async () => { calls += 1; return PROBE_IDLE; };
+  await probed({ processes: ['Finder'] }, probe).check();
+  assert.equal(calls, 0);
+  await probed({ processes: ['Finder', 'Slack'] }, probe).check();
+  assert.equal(calls, 1);
+});
+
+test('a probe error or timeout is a failed check, never empty', async () => {
+  const boom = await probed({ processes: ['zoom.us'] }, async () => { throw new Error('exit 1'); }).check();
+  assert.deepEqual(boom, { status: 'failed', call: null, unanswered: [], fallback: null });
+  const hang = await probed({ processes: ['Slack'] }, () => new Promise(() => {}), { probeTimeoutMs: 20 }).check();
+  assert.equal(hang.status, 'failed');
+});
+
+test('a failed probe does not hide a Call the browser snapshot already confirmed', async () => {
+  const r = await probed({ processes: ['zoom.us'], urls: [MEET_ROOM_NEW], snapshots: [{ url: MEET_ROOM_NEW, live: true, label: 'Google Meet' }] },
+    async () => { throw new Error('x'); }).check();
+  assert.equal(r.status, 'found');
+  assert.equal(r.call.label, 'Google Meet');
+});
+
+test('probe timeout defaults to 1.5 s', async () => {
+  let got = null;
+  await probed({ processes: ['zoom.us'] }, async (opts) => { got = opts.timeoutMs; return PROBE_IDLE; }).check();
+  assert.equal(got, 1500);
+});
+
+test('Accessibility untrusted: desktop apps fall back to process-only, mic-gated, with a reason code', async (t) => {
+  const lines = [];
+  t.mock.method(console, 'log', (...args) => lines.push(args.join(' ')));
+  const r = await probed({ processes: ['zoom.us', 'Slack'] }, async () => ({ ax: 'untrusted', zoomMeeting: false, slackHuddle: false })).check();
+  assert.equal(r.status, 'found');
+  assert.deepEqual(r.call, { label: 'Zoom', source: 'app', confirmed: false, micGated: true, unanswered: [] });
+  assert.deepEqual(r.fallback, { reason: 'ax_untrusted', apps: ['Zoom', 'Slack Huddle'] });
+  assert.ok(lines.some((l) => l.startsWith('[call-detect] fallback=ax_untrusted')), lines.join('\n'));
+});
+
+test('a real Call beats a mic-gated process-only fallback', async () => {
+  const r = await probed({ processes: ['zoom.us'], urls: [MEET_ROOM_NEW], snapshots: [{ url: MEET_ROOM_NEW, live: true, label: 'Google Meet' }] },
+    async () => ({ ax: 'untrusted' })).check();
+  assert.equal(r.call.label, 'Google Meet');
+});
+
+test('the 20 s backstop never acts on a mic-gated fallback Call; the fast path does', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const detector = probed({ processes: ['zoom.us'] }, async () => ({ ax: 'untrusted' }));
+  const detected = [];
+  const stop = detector.startWatcher({ onDetected: (c) => detected.push(c.label), intervalMs: 1000 });
+  await flush();
+  t.mock.timers.tick(1000);
+  await flush();
+  stop();
+  assert.deepEqual(detected, []);
+  assert.equal((await detector.checkOnce()).label, 'Zoom');
 });
 
 test('a page-confirmed Call beats an earlier URL-only one', async () => {
@@ -214,7 +287,7 @@ test('the watcher fires detected once when a Call appears and ended when it goes
   t.mock.timers.tick(1000);
   await flush();
   stop();
-  set({ processes: ['zoom.us'] });
+  set({ processes: ['Finder'] });
   t.mock.timers.tick(1000);
   await flush();
   assert.deepEqual(events, [['detected', 'Google Meet', true], ['ended']]);

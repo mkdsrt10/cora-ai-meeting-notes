@@ -666,7 +666,7 @@ function updateTrayMenu() {
 // desktop app reportedly detects meetings); the poll is the backstop in case
 // mic-watch can't launch. See src/main/call-detection.js.
 const callDetection = createCallDetection({
-  detector: createDetector(),
+  detector: createDetector({ probeBin: SPEAKER_WATCH_BIN }),
   notify,
   startRecording,
   stopRecording: (reason) => recording.stop(reason),
