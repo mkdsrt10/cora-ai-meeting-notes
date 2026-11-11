@@ -1,6 +1,5 @@
 """Regression checks for Meet DOM capture, name filtering and capture diagnostics."""
 import json
-from pathlib import Path
 import shutil
 import subprocess
 
@@ -8,6 +7,7 @@ import pytest
 
 from participants import clean_and_validate_participant
 from api.views import participant_capture_payload, participants_payload
+from swift_snapshot_js import snapshot_js
 
 
 @pytest.mark.parametrize('name', ['Jane R.T.', 'J. Doe', 'José García', 'अनन्या शर्मा'])
@@ -34,8 +34,7 @@ def test_roster_keeps_initials_and_capture_warning(tmp_path, monkeypatch):
 
 @pytest.mark.skipif(not shutil.which('node'), reason='needs Node')
 def test_meet_javascript_handles_newlines_and_tile_speaking(tmp_path):
-    source = (Path(__file__).resolve().parents[1]/'capture/SpeakerWatcher.swift').read_text()
-    javascript = source.split('let googleMeetSnapshotJS = #"""\n',1)[1].split('\n"""#',1)[0]
+    javascript = snapshot_js()
     script = tmp_path/'meet-dom-test.js'
     script.write_text('''
 const vm = require('node:vm');
@@ -63,8 +62,7 @@ def test_generic_labels_and_audio_controls_are_not_roster_entries(name):
 
 @pytest.mark.skipif(not shutil.which('node'), reason='needs Node')
 def test_slack_snapshot_is_limited_to_live_huddle_not_chat(tmp_path):
-    source = (Path(__file__).resolve().parents[1]/'capture/SpeakerWatcher.swift').read_text()
-    javascript = source.split('let googleMeetSnapshotJS = #"""\n',1)[1].split('\n"""#',1)[0]
+    javascript = snapshot_js()
     script = tmp_path/'slack-dom-test.js'
     script.write_text('''
 const vm=require('node:vm'), assert=require('node:assert/strict');
@@ -86,8 +84,7 @@ active=false;assert.deepEqual(run().participants,[]);assert.equal(run().active,f
 def test_slack_collapsed_huddle_names_the_dm_party_from_the_mini_bar(tmp_path):
     # Slack's bottom mini-bar (huddle minimised or popped out) has no tiles,
     # only "Huddle with <Name>"; a channel huddle names nobody.
-    source = (Path(__file__).resolve().parents[1]/'capture/SpeakerWatcher.swift').read_text()
-    javascript = source.split('let googleMeetSnapshotJS = #"""\n',1)[1].split('\n"""#',1)[0]
+    javascript = snapshot_js()
     script = tmp_path/'slack-mini-test.js'
     script.write_text('''
 const vm=require('node:vm'), assert=require('node:assert/strict');
