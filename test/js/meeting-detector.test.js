@@ -401,6 +401,70 @@ test('check tells found, empty and failed apart; checkOnce still resolves the Ca
   assert.equal(await createDetector({ run: failingRun }).checkOnce(), null);
 });
 
+// Concurrency: one check in flight per detector; the probe overlaps osascript;
+// an abandoned check goes quiet.
+test('overlapping check() calls join the one in flight: a single run, the same result', async () => {
+  let runs = 0;
+  let release;
+  const detector = createDetector({ run: () => { runs += 1; return new Promise((r) => { release = r; }); } });
+  const a = detector.check();
+  const b = detector.check({ budgetMs: 2500 });
+  const c = detector.checkOnce();
+  await flush();
+  release(scriptOutput({ urls: [MEET_ROOM_NEW], snapshots: [{ url: MEET_ROOM_NEW, live: true, label: 'Google Meet' }] }));
+  const [ra, rb, rc] = await Promise.all([a, b, c]);
+  assert.equal(runs, 1);
+  assert.equal(ra.call.label, 'Google Meet');
+  assert.deepEqual(rb, ra);
+  assert.equal(rc.label, 'Google Meet');
+  const again = detector.check();
+  await flush();
+  release(scriptOutput({}));
+  await again;
+  assert.equal(runs, 2, 'once settled, the next check runs afresh');
+});
+
+test('once Zoom or Slack has been seen, the probe runs alongside osascript, not after it', async () => {
+  const events = [];
+  let release;
+  let first = true;
+  const detector = createDetector({
+    run: () => {
+      events.push('run');
+      if (first) { first = false; return Promise.resolve(scriptOutput({ processes: ['zoom.us'] })); }
+      return new Promise((r) => { release = r; });
+    },
+    probe: async () => { events.push('probe'); return PROBE_IDLE; },
+  });
+  await detector.check();
+  events.length = 0;
+  const second = detector.check();
+  await flush();
+  assert.deepEqual([...events].sort(), ['probe', 'run'], 'probe started while osascript is still pending');
+  release(scriptOutput({ processes: ['zoom.us'] }));
+  assert.equal((await second).status, 'empty');
+});
+
+test('a check abandoned at its budget makes no unanswered callbacks and no log lines afterwards', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  const lines = [];
+  t.mock.method(console, 'log', (...args) => lines.push(args.join(' ')));
+  let release;
+  const detector = createDetector({ run: () => new Promise((r) => { release = r; }) });
+  const unanswered = [];
+  const stop = detector.startWatcher({ onUnanswered: (b) => unanswered.push(b), intervalMs: 100000, tickBudgetMs: 2500 });
+  await flush();
+  t.mock.timers.tick(2500);
+  await flush();
+  const before = lines.length;
+  assert.ok(lines.some((l) => l.includes('tick budget')));
+  release(scriptOutput({ urls: [MEET_ROOM], snapshots: [{ browser: 'Brave Browser', url: MEET_ROOM, live: null }] }));
+  await flush();
+  stop();
+  assert.deepEqual(unanswered, []);
+  assert.equal(lines.length, before);
+});
+
 test('a runner that hangs past the tick budget is a failed check', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const detector = createDetector({ run: () => new Promise(() => {}) });

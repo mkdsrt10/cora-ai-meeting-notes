@@ -465,7 +465,8 @@ function createDetector({ run = osascript, probe = null, probeBin = null, probeT
   const unansweredListeners = new Set();
 
   // The caller enforces the probe's hard timeout, whatever the runner does.
-  async function probeDesktop() {
+  // `ctx.cancelled` (set when a check is abandoned at its budget) silences it.
+  async function probeDesktop(ctx) {
     let timer;
     const timeout = new Promise((_, reject) => {
       timer = setTimeout(() => reject(new Error(`probe timed out after ${probeTimeoutMs}ms`)), probeTimeoutMs);
@@ -473,32 +474,42 @@ function createDetector({ run = osascript, probe = null, probeBin = null, probeT
     try {
       return normalizeProbe(await Promise.race([runProbe({ timeoutMs: probeTimeoutMs }), timeout]));
     } catch (err) {
-      console.log(`[call-detect] candidates=error(probe: ${runnerError(err)}) -> none`);
+      if (!ctx.cancelled) console.log(`[call-detect] candidates=error(probe: ${runnerError(err)}) -> none`);
       return { status: 'failed' };
     } finally {
       clearTimeout(timer);
     }
   }
 
-  async function evaluate(timeoutMs = SCRIPT_TIMEOUT_MS) {
+  // Whether the last check saw Zoom or Slack running. The process list only
+  // arrives with osascript's output, so while it was true the probe is started
+  // alongside osascript instead of after it (one wasted probe if the app just
+  // quit; the first check after it started probes afterwards, as before).
+  let sawDesktopApp = false;
+
+  async function evaluate(timeoutMs, ctx) {
+    const early = sawDesktopApp ? probeDesktop(ctx) : null;
     let raw;
     try {
       raw = await run(APPLESCRIPT, { timeoutMs });
     } catch (err) {
       // No Automation/Accessibility permission yet, timeout, script error:
       // "no Call" for this check rather than a crash.
-      console.log(`[call-detect] candidates=error(${runnerError(err)}) -> none`);
+      if (!ctx.cancelled) console.log(`[call-detect] candidates=error(${runnerError(err)}) -> none`);
       // failed: this check saw nothing either way, so it must not count as
       // "checked, found nothing" (a miss).
       return { status: 'failed', call: null, unanswered: [], fallback: null };
     }
     const parsed = parseScriptOutput(raw);
-    if (runsDesktopApp(parsed.processes)) parsed.desktop = await probeDesktop();
+    sawDesktopApp = runsDesktopApp(parsed.processes);
+    if (sawDesktopApp) parsed.desktop = await (early || probeDesktop(ctx));
     const candidates = candidatesOf(parsed);
     const unanswered = unansweredOf(candidates);
     const picked = pick(candidates);
     const call = picked ? { ...picked, unanswered } : null;
     const fallback = fallbackOf(candidates);
+    // An abandoned check already reported "failed": it stays silent.
+    if (ctx.cancelled) return { status: 'failed', call: null, unanswered: [], fallback: null };
     logLine(candidates, call);
     if (fallback) console.log(`[call-detect] fallback=${fallback.reason} apps=${fallback.apps.join(',')}`);
     if (unanswered.length) for (const fn of unansweredListeners) fn(unanswered);
@@ -507,23 +518,43 @@ function createDetector({ run = osascript, probe = null, probeBin = null, probeT
     return { status, call, unanswered, fallback };
   }
 
+  // One check in flight per detector (osascript + probe): the poll, the
+  // follow-up and a mic-on check that overlap all join it.
+  let inflight = null;
+
   /**
    * One check, with its outcome: { status: 'found' | 'empty' | 'failed', call,
    * unanswered }. 'empty' = checked, nothing there; 'failed' = the check itself
    * broke (runner error, osascript timeout, or budgetMs spent). Only 'empty'
-   * is a real miss. Never rejects. budgetMs (optional) bounds the whole check.
+   * is a real miss. Never rejects. budgetMs (optional) bounds the whole check;
+   * a caller that joined a check in flight shares that check's result.
    */
   async function check({ budgetMs } = {}) {
-    if (!budgetMs) return evaluate();
+    let starter = false;
+    if (!inflight) {
+      starter = true;
+      const ctx = { cancelled: false };
+      const started = { ctx };
+      started.promise = evaluate(budgetMs || SCRIPT_TIMEOUT_MS, ctx).finally(() => {
+        if (inflight === started) inflight = null;
+      });
+      inflight = started;
+    }
+    const entry = inflight;
+    if (!budgetMs) return entry.promise;
     let timer;
     const budget = new Promise((resolve) => {
       timer = setTimeout(() => {
         console.log(`[call-detect] candidates=error(tick budget ${budgetMs}ms spent) -> none`);
+        if (starter) {
+          entry.ctx.cancelled = true;
+          if (inflight === entry) inflight = null;
+        }
         resolve({ status: 'failed', call: null, unanswered: [], fallback: null });
       }, budgetMs);
     });
     try {
-      return await Promise.race([evaluate(budgetMs), budget]);
+      return await Promise.race([entry.promise, budget]);
     } finally {
       clearTimeout(timer);
     }
@@ -531,7 +562,7 @@ function createDetector({ run = osascript, probe = null, probeBin = null, probeT
 
   /** One check. Resolves the Call or null (failed reads as null); never rejects. */
   async function checkOnce() {
-    return (await evaluate()).call;
+    return (await check()).call;
   }
 
   /**
