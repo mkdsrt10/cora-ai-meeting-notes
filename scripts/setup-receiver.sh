@@ -14,10 +14,12 @@ PORT=8787
 LABEL=com.cora.beta-receiver
 PL="$HOME/Library/LaunchAgents/$LABEL.plist"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+# The Tailscale CLI lives inside the app bundle unless it was put on PATH.
+TS="$(command -v tailscale || true)"; [[ -n "$TS" ]] || TS=/Applications/Tailscale.app/Contents/MacOS/Tailscale
 
 print_env() {
   local url
-  url="$(tailscale funnel status 2>/dev/null | grep -oE 'https://[^ ]+' | head -1 || true)"
+  url="$("$TS" funnel status 2>/dev/null | grep -oE 'https://[^ ]+' | head -1 || true)"
   echo "export CORA_BETA_RECEIVER_URL=${url:-<funnel not active>}"
   echo "export CORA_BETA_TOKEN=\$(cat $ROOT/.token)"
 }
@@ -68,9 +70,9 @@ echo "auth:   HTTP $(curl -s -o /dev/null -w '%{http_code}' -X POST -d '{}' "htt
 
 # Funnel: needs to be enabled once for the tailnet; the command prints the
 # admin-console link if it is not.
-tailscale funnel --bg "$PORT"
-tailscale funnel status
-URL="$(tailscale funnel status 2>/dev/null | grep -oE 'https://[^ ]+' | head -1 || true)"
+"$TS" funnel --bg "$PORT"
+"$TS" funnel status
+URL="$("$TS" funnel status 2>/dev/null | grep -oE 'https://[^ ]+' | head -1 || true)"
 if [[ -n "$URL" ]]; then
   echo "public: $(curl -s --max-time 15 "$URL/v1/config")"
 fi
