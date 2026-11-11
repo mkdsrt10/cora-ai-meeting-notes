@@ -200,6 +200,7 @@ $('#permRecheckBtn')?.addEventListener('click', refreshPermissionStatus);
 
 async function saveSetting(key, value){
   await api('/api/settings', { method: 'POST', body: JSON.stringify({ key, value }) });
+  trackSettingChanged(key, value);
 }
 
 $('#onboardingFinish')?.addEventListener('click', async () => {

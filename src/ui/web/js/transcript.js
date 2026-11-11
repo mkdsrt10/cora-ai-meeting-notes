@@ -100,7 +100,11 @@ function renderCleanTranscript(record){
   }
 
   const copyBtn = $('#copyTranscriptBtn');
-  if(copyBtn) copyBtn.onclick = () => { copyText(transcriptAsText(segments)); toast('Transcript copied with speakers and timestamps.'); };
+  if(copyBtn) copyBtn.onclick = () => {
+    copyText(transcriptAsText(segments));
+    toast('Transcript copied with speakers and timestamps.');
+    if(record?.id) track('notes_exported', { recording_id: record.id, kind: 'copy' });
+  };
   if(editBtn) editBtn.onclick = () => { transcriptEditing = true; renderCleanTranscript(record); };
   if(cancelBtn) cancelBtn.onclick = () => { transcriptEditing = false; renderCleanTranscript(record); };
   if(saveBtn) saveBtn.onclick = () => saveTranscriptEdits(record, segments);
@@ -126,6 +130,7 @@ async function saveTranscriptEdits(record, segments){
   try{
     await api('/api/recording/transcript/edit', { method: 'POST', body: JSON.stringify({ id: record.id, edits }) });
     transcriptEditing = false;
+    track('transcript_corrected', { recording_id: record.id, corrections: edits.length });
     toast(`Saved ${edits.length} correction${edits.length === 1 ? '' : 's'}. Re-summarize to refresh the notes.`);
     await loadSelectedRecording(record.id);
   }catch(err){ toast(err.message, true); }

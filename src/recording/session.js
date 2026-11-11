@@ -27,6 +27,12 @@
 //     chosen one, or the device changed since the last line; else null. It
 //     never changes the phase.
 //
+// Usage events (through the optional api.recordEvent, fire and forget):
+// recording_started once the Microphone is resolved, recording_stopped and,
+// once the helpers exit, participants_captured per stop (pause/resume
+// chunks count as one Recording, under its first chunk id), error
+// {scope: capture} when a helper dies, manual_notes_written per floater note.
+//
 // Adapters: startHelper({ recordingId, selfName, deviceId }) -> helper handle;
 // optional microphone = { chosen() -> { unique_id, name } | null (may be a
 // promise), devices() -> [{ name, uniqueID, isDefault }], the last known
@@ -41,6 +47,7 @@
 // queue, root first, exactly once, and Recordings are handed over in the
 // order they were stopped.
 const { EventEmitter } = require('events');
+const { classifyMeeting, endedBy } = require('./usage');
 
 const SPEAKER_DEBOUNCE_MS = 1500;
 
@@ -134,6 +141,17 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
 
   const log = (label) => (err) => console.error(`[Cora session] ${label}:`, err && err.message);
 
+  // Usage events (POST /api/events through api.recordEvent): fire and
+  // forget; a failure is a logged warning and never touches capture.
+  function track(name, payload) {
+    if (typeof api.recordEvent !== 'function') return;
+    Promise.resolve()
+      .then(() => api.recordEvent(name, payload))
+      .catch((err) => console.warn(`[Cora usage] ${name} not recorded:`, err && err.message));
+  }
+  // What the usage events of the live Recording need, from start to stop.
+  let usage = null;
+
   function state() {
     return {
       phase,
@@ -159,10 +177,16 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     } else if (ev.type === 'error') {
       h.lastError = ev.message;
     } else if (ev.type === 'meetingTitle') {
+      if (usage) usage.titles.add(ev.title);
       api.setTitle(recordingId, ev.title).catch(log('title'));
     } else if (ev.type === 'speakerActive') {
+      if (usage && ev.app) usage.apps.add(ev.app);
       onSpeaker(ev.name);
     } else if (ev.type === 'device') {
+      // A helper prints MIC_DEVICE when it opens the mic; every later line
+      // from the same helper is a reopen (unplugged, switched): a reconnect.
+      if (h.openedMic && usage) usage.micReconnects += 1;
+      h.openedMic = true;
       onDevice(ev.name);
     }
   }
@@ -204,6 +228,9 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     const warning = h.lastError
       ? `Recording stopped: ${h.lastError}`
       : `Recording stopped unexpectedly (capture helper exited with code ${code}).`;
+    // Only a code goes out, never the helper's message (it can name devices).
+    const errorCode = code === -1 ? 'helper_spawn_failed' : code == null ? 'helper_killed' : `helper_exit_${code}`;
+    track('error', { scope: 'capture', code: errorCode });
     stop('helper-exit', warning);
   }
 
@@ -254,14 +281,56 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
       pending.then((m) => { if (gen === generation) mic = m; });
     }
     const id = startChunk(continues);
+    usage = { id, startedAt: clock.now(), meeting: tool, apps: new Set(), titles: new Set(),
+      pauses: 0, micReconnects: 0, micKind: 'default' };
+    const u = usage;
+    Promise.resolve(micPending).then((m) => {
+      u.micKind = m && (m.deviceId || m.chosenName) ? 'named' : 'default';
+      track('recording_started', { recording_id: id, ...classifyMeeting({ meeting: tool }), microphone_kind: u.micKind });
+    });
     emit();
     return { ok: true, id };
+  }
+
+  // participants_captured, once the helpers have written their files: the
+  // roster of every chunk (GET /api/recording, merged with People links),
+  // each name once. method: browser_js when speaker-watch reported a speaker
+  // from the browser page script, accessibility for any other source of
+  // names, none when nothing was captured. Nothing is sent if a lookup fails.
+  async function reportParticipants(u, ids) {
+    let records;
+    try {
+      records = await Promise.all(ids.map((id) => api.getRecording(id)));
+    } catch (err) {
+      console.warn('[Cora usage] participants_captured not recorded:', err && err.message);
+      return;
+    }
+    const people = new Map();
+    const warnings = new Set();
+    for (const r of records) {
+      for (const p of (r && Array.isArray(r.participants) ? r.participants : [])) {
+        const name = String(p.raw_name || p.display_name || '').toLowerCase();
+        if (name && !people.has(name)) people.set(name, p.person_id || null);
+      }
+      const w = r && r.participant_capture && r.participant_capture.warnings;
+      if (Array.isArray(w)) w.forEach((x) => warnings.add(x));
+    }
+    const apps = [...u.apps];
+    const method = apps.includes('Browser meeting') ? 'browser_js'
+      : apps.length || people.size ? 'accessibility' : 'none';
+    track('participants_captured', {
+      recording_id: u.id,
+      count: people.size,
+      method,
+      warnings: warnings.size,
+      linked_people: [...people.values()].filter(Boolean).length,
+    });
   }
 
   // Finalize a stopped Recording in the background: wait for its helpers,
   // mark it processing, then hand its chunks to the queue after every
   // Recording stopped before it.
-  function finish({ h, pending, done, root }) {
+  function finish({ h, pending, done, root, u }) {
     const before = handedOver;
     return (async () => {
       try {
@@ -270,6 +339,8 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
       } catch (err) {
         log('helper stop')(err);
       }
+      // Not awaited: the roster is read while the hand-over goes on.
+      if (u) reportParticipants(u, done);
       await Promise.all(done.map((id) => api.setStatus(id, 'processing').catch(log('status'))));
       if (root && !done.includes(root)) {
         await api.setContinuationStatus(root, 'processing').catch(log('continuation status'));
@@ -283,7 +354,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     if (phase !== 'recording' && phase !== 'paused') return handedOver;
     const h = helper;
     if (h) h.expectedExit = true;
-    const job = { h, pending: flushing, done: chunks.slice(), root: rootId };
+    const job = { h, pending: flushing, done: chunks.slice(), root: rootId, u: usage };
     const key = job.done[0];
     helper = null;
     flushing = null;
@@ -295,6 +366,20 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     muted = false;
     micDevice = null;
     phase = 'idle';
+    const u = usage;
+    usage = null;
+    if (u) {
+      // duration_s is wall-clock from start to stop, pauses included.
+      track('recording_stopped', {
+        recording_id: u.id,
+        ...classifyMeeting({ meeting: u.meeting, apps: [...u.apps], titles: [...u.titles] }),
+        duration_s: Math.round((clock.now() - u.startedAt) / 1000),
+        chunks: job.done.length,
+        pauses: u.pauses,
+        mic_reconnects: u.micReconnects,
+        ended_by: endedBy(reason),
+      });
+    }
 
     const p = finish(job).catch(log('finish')).finally(() => {
       finishing.delete(key);
@@ -321,6 +406,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     phase = 'paused';
     // The first chunk becomes the root the rest of the chain continues.
     if (!rootId) rootId = recordingId;
+    if (usage) usage.pauses += 1;
     api.setStatus(recordingId, 'paused').catch(log('status'));
     emit();
     return { ok: true, id: recordingId, status: 'paused' };
@@ -353,6 +439,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     if (!text || (phase !== 'recording' && phase !== 'paused') || !recordingId) return false;
     try {
       await api.appendNote(recordingId, text);
+      if (usage) track('manual_notes_written', { recording_id: usage.id, chars: String(text).length, phase: 'during' });
       return true;
     } catch (err) {
       log('append note')(err);

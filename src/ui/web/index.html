@@ -228,6 +228,17 @@
   </aside>
 
   <main>
+    <div class="update-banner" id="updateBanner" role="status" hidden>
+      <div class="update-banner-copy">
+        <strong id="updateBannerText"></strong>
+        <span class="update-banner-reason" id="updateBannerReason"></span>
+        <span class="update-banner-error" id="updateBannerError"></span>
+      </div>
+      <div class="update-banner-actions">
+        <button class="button secondary" id="updateLaterBtn">Later</button>
+        <button class="button primary" id="updateNowBtn">Update</button>
+      </div>
+    </div>
     <header class="topbar">
       <div><h1 id="viewTitle">Home</h1><p id="viewSubtitle" class="view-subtitle">Click a recording to view its analysis.</p></div>
       <div class="top-actions">
@@ -691,6 +702,7 @@
 <script src="/pixel-icons.js?v=cora-v4"></script>
 <!-- App scripts: classic scripts sharing one global scope; order matters (see scripts/lint-ui.js). -->
 <script src="/js/core.js"></script>
+<script src="/js/usage.js"></script>
 <script src="/js/folders.js"></script>
 <script src="/js/recording.js"></script>
 <script src="/js/sessions.js"></script>
@@ -711,6 +723,7 @@
 <script src="/js/search.js"></script>
 <script src="/js/plugin-host.js"></script>
 <!-- Enabled plugins' page scripts (src/ui/web/plugins/<id>.js) are loaded by plugin-host.js here, before init runs load(). -->
+<script src="/js/update-banner.js"></script>
 <script src="/js/init.js"></script>
 </body>
 </html>

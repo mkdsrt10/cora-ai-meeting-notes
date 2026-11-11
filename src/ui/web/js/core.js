@@ -165,6 +165,7 @@ $('#createPersonForm')?.addEventListener('submit', async event => {
     const result = await api('/api/people/create', {method:'POST', body:JSON.stringify({
       name, role:$('#createPersonRole').value.trim(), organization:$('#createPersonOrganization').value.trim()
     })});
+    track('person_added', { source: 'people_page' });
     $('#createPersonForm').reset();
     feedback.textContent = `Added ${result.person.name}.`;
     await renderPeople();

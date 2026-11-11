@@ -22,4 +22,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Name of the Microphone the recording is actually using (null until known / when idle).
     getMicDevice: () => ipcRenderer.invoke('get-mic-device'),
     onMicDevice: (callback) => ipcRenderer.on('mic-device', (_event, name) => callback(name)),
+    // In-app update banner (src/updater.js state; Update / Later).
+    getUpdateState: () => ipcRenderer.invoke('get-update-state'),
+    onUpdateState: (callback) => ipcRenderer.on('update-state', (_event, state) => callback(state)),
+    updateNow: () => ipcRenderer.invoke('update-now'),
+    updateLater: () => ipcRenderer.invoke('update-later'),
 });
