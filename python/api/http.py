@@ -120,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, FileNotFoundError) as exc:
             return self.send_json({"error": str(exc)}, 404)
         except Exception as exc:
-            return self.send_json({"error": str(exc)}, 500)
+            return self.server_error(exc)
 
     def do_POST(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
@@ -136,4 +136,14 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, FileNotFoundError) as exc:
             return self.send_json({"error": str(exc)}, 400)
         except Exception as exc:
-            return self.send_json({"error": str(exc)}, 500)
+            return self.server_error(exc)
+
+    def server_error(self, exc: Exception) -> None:
+        """500 for an unhandled route exception, recorded as an `error` Usage
+        event (scope server, code = the exception class; never its text)."""
+        try:
+            import usage_events
+            usage_events.record("error", {"scope": "server", "code": type(exc).__name__})
+        except Exception:  # noqa: BLE001 - telemetry never changes the response
+            pass
+        return self.send_json({"error": str(exc)}, 500)

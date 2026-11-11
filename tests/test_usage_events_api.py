@@ -293,3 +293,25 @@ def test_a_batch_stops_at_the_byte_limit_but_always_carries_one_event(port):
     ids = [post_viewed(port, f"r{i}") for i in range(3)]
     assert [e["id"] for e in usage_events.pending_batch(limit_bytes=1)["events"]] == ids[:1]
     assert [e["id"] for e in usage_events.pending_batch()["events"]] == ids
+
+
+# ---- server errors ----------------------------------------------------------------
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_an_unhandled_route_exception_records_a_server_error_event_with_its_class_name(port, monkeypatch, method):
+    from api import router
+
+    def broken(handler, path, params):
+        raise KeyError("detail that must not be shared")
+    monkeypatch.setitem(router._exact, (method, "/api/test-broken"), broken)
+
+    status, _ = call(port, method, "/api/test-broken", {} if method == "POST" else None)
+
+    assert status == 500
+    assert [(e["name"], e["payload"]) for e in exported(port)] == [("error", {"scope": "server", "code": "KeyError"})]
+
+
+def test_a_bad_request_records_no_error_event(port):
+    status, _ = call(port, "POST", "/api/events", {"name": "nope", "payload": {}})
+    assert status == 400
+    assert exported(port) == []
