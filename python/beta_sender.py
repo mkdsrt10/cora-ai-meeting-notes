@@ -21,7 +21,9 @@ import datetime as dt
 import json
 import os
 import threading
+import string
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import paths
@@ -154,6 +156,16 @@ def _capture_module():
     return capture if hasattr(capture, "next_pending") and hasattr(capture, "mark_uploaded") else None
 
 
+def _drop_expired_captures() -> None:
+    capture = _capture_module()
+    if capture is None or not hasattr(capture, "drop_expired"):
+        return
+    try:
+        capture.drop_expired()
+    except Exception as e:  # noqa: BLE001 - local bookkeeping, never fatal to a flush
+        _status["last_error"] = f"capture expiry: {type(e).__name__}: {e}"
+
+
 def _upload_one_capture() -> None:
     """Upload the oldest pending Captured Recording, if any. 201 and 409
     (already stored) both mark it uploaded; anything else leaves it pending."""
@@ -186,9 +198,14 @@ def _upload_one_capture() -> None:
     capture.mark_uploaded(recording_id)
 
 
+_HEADER_SAFE = "".join(c for c in string.printable if c not in "%\t\n\r\x0b\x0c")
+
+
 def _display_name() -> str:
+    """The display name for a header: printable ASCII as is, everything else
+    (non-Latin-1 letters, control characters, '%') percent-encoded as UTF-8."""
     import db
-    return db.get_setting("beta_display_name") or ""
+    return urllib.parse.quote(db.get_setting("beta_display_name") or "", safe=_HEADER_SAFE)
 
 
 def flush(*, captures: bool = True, timeout: float = TIMEOUT_S, wait: float | None = None) -> None:
@@ -197,7 +214,10 @@ def flush(*, captures: bool = True, timeout: float = TIMEOUT_S, wait: float | No
     sharing is enabled and the remote config allows telemetry. A failure keeps
     the rows, lands in status()["last_error"] and applies the queue limits
     (7 days / 5 MB, oldest dropped first, one `events_dropped`). `wait` bounds
-    how long to wait for a flush already in progress (None: as long as it takes)."""
+    how long to wait for a flush already in progress (None: as long as it takes).
+    Captures waiting more than 7 days are dropped first, whether or not
+    anything can be sent, so their `capture_dropped` events go in this batch."""
+    _drop_expired_captures()
     if not _may_send():
         return
     if not _lock.acquire(timeout=-1 if wait is None else wait):

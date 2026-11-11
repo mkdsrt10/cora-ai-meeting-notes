@@ -159,11 +159,11 @@ def test_sharing_needs_a_receiver_url_and_token_in_the_build(port, monkeypatch, 
     assert call(port, "GET", "/api/beta/status")[1]["sharing_enabled"] is False
 
 
-def test_beta_status_counts_unsent_events_and_leaves_sender_fields_empty(port):
+def test_beta_status_counts_unsent_events_and_no_pending_captures_before_any_flush(port):
     for _ in range(3):
         call(port, "POST", "/api/events", {"name": "notes_viewed", "payload": {}})
     assert call(port, "GET", "/api/beta/status") == (200, {
-        "sharing_enabled": False, "unsent_events": 3, "pending_captures": None,
+        "sharing_enabled": False, "unsent_events": 3, "pending_captures": 0,
         "last_flush_at": None, "last_error": None})
 
 

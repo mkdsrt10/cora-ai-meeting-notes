@@ -168,6 +168,18 @@ def init_db():
             )
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_usage_events_unsent ON usage_events(sent_at, id)')
+
+        # Captured Recordings (beta): one row per Recording asked for, by a
+        # rating or the sample; uploaded_at / dropped_at end it. See python/capture.py.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS captures (
+                recording_id TEXT PRIMARY KEY,
+                reason TEXT NOT NULL,
+                requested_at TEXT NOT NULL,
+                uploaded_at TEXT,
+                dropped_at TEXT
+            )
+        ''')
         conn.commit()
 
 
