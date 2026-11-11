@@ -14,13 +14,12 @@ function joinNames(names) {
 
 function createCallDetection({ detector, notify, startRecording, stopRecording, track, isCapturing }) {
   let notified = false;
-  let hinted = false;
 
-  // A Meet or Slack tab the page could not be asked about: once per app run
-  // (one instance per run), say which browser setting lets Cora see inside.
+  // A Meet or Slack tab the page could not be asked about: say which browser
+  // setting lets Cora see inside. The watcher fires onUnanswered at most once
+  // per start(), so it alone decides how often this shows.
   function hint(browsers) {
-    if (hinted || !browsers || !browsers.length) return;
-    hinted = true;
+    if (!browsers || !browsers.length) return;
     notify({
       title: 'Cora',
       body: `Cora can't see inside ${joinNames(browsers)}. Turn on View > Developer > Allow JavaScript from Apple Events`

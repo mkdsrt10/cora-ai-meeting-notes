@@ -6,6 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('events');
 const { createCallDetection } = require('../../src/main/call-detection');
+const { createDetector } = require('../../src/meeting-detector');
 
 const MEET = { label: 'Google Meet', source: 'browser', url: 'https://meet.google.com/abc-defg-hij', confirmed: true, unanswered: [] };
 
@@ -127,22 +128,41 @@ test('the Call ending with nothing capturing stops nothing', () => {
 
 const HINT_TAIL = 'Turn on View > Developer > Allow JavaScript from Apple Events (Safari: Develop menu) so huddles and Meet are detected.';
 
-test('a browser that cannot be asked gets one hint per app run, through notify', () => {
-  const h = harness();
-  h.cd.start();
-  h.watcher().onUnanswered(['Google Chrome']);
-  h.watcher().onUnanswered(['Google Chrome']);
-  assert.deepEqual(h.shown, [{ title: 'Cora', body: `Cora can't see inside Google Chrome. ${HINT_TAIL}` }]);
+test('a browser that cannot be asked gets one hint per start(), through notify', async (t) => {
+  // The real detector, fed a Meet tab that never answers on every poll: the
+  // watcher's once-per-watcher onUnanswered is what keeps this to one hint.
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  t.mock.method(console, 'log', () => {});
+  const raw = 'PROCESSES:Finder\nURLS:https://meet.google.com/abc-defg-hij\nSNAPSHOT:Google Chrome|https://meet.google.com/abc-defg-hij|null';
+  const shown = [];
+  const notify = (opts) => { shown.push(opts); const n = new EventEmitter(); n.show = () => {}; return n; };
+  const cd = createCallDetection({
+    detector: createDetector({ run: async () => raw }),
+    notify,
+    track: () => {},
+    isCapturing: () => false,
+    startRecording: () => {},
+    stopRecording: () => {},
+  });
+  const stop = cd.start();
+  for (let i = 0; i < 3; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+    t.mock.timers.tick(20000);
+  }
+  stop();
+  const hints = shown.filter((n) => !n.actions);
+  assert.deepEqual(hints, [{ title: 'Cora', body: `Cora can't see inside Google Chrome. ${HINT_TAIL}` }]);
 });
 
-test('the hint stays shown once even when the watcher is restarted in the same run', () => {
+test('a restarted watcher may hint again', () => {
   const h = harness();
   h.cd.start()();
   h.cd.start();
   h.watcher().onUnanswered(['Safari']);
+  assert.equal(h.shown.length, 1);
   h.cd.start();
   h.watcher().onUnanswered(['Safari']);
-  assert.equal(h.shown.length, 1);
+  assert.equal(h.shown.length, 2);
 });
 
 test('the hint names several browsers the way a sentence would', () => {
