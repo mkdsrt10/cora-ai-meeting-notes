@@ -59,3 +59,26 @@ App:
 - [ ] Move the chosen USB mic to a different port (unique ID changes): it is still selected by
       name.
 - [ ] Meeting detection still fires when a call starts, whichever Microphone is chosen.
+
+## Call detection
+
+Covers Call detection (docs/specs/call-detection.md). Needs an installed build on two Macs, Brave
+with Allow JavaScript from Apple Events on (View > Developer), a Slack workspace in a Brave tab and a
+Zoom meeting link. Check each prompt is the usual "<App> call detected. Start recording?" with a
+Start Recording button, and that nothing records until it is clicked. Each check logs one
+`[call-detect]` line in the main log.
+
+- [ ] Meet in Brave at a `meet.google.com/meet/xxx-xxxx-xxx` address: no prompt in the green room
+      (mic preview on); "Google Meet call detected" within a few seconds of clicking Join.
+- [ ] The Meet landing page, `/new` and `/landing` never prompt.
+- [ ] Leaving the Meet ends the Call; with a Recording running, it stops.
+- [ ] Slack huddle in a Brave tab, expanded: "Slack Huddle call detected".
+- [ ] Same huddle collapsed to the bottom mini-bar (rejoin, or restart Cora mid-huddle): still
+      detected. A Slack DM or channel tab with no huddle never prompts.
+- [ ] Zoom web client (`zoom.us/wc/...`, "Join from your browser"): "Zoom call detected".
+- [ ] Turn Allow JavaScript from Apple Events off in Brave and restart Cora, open a Meet: one
+      "Cora can't see inside Brave" notification for the app run (not repeated on the next
+      check), listed under Settings > Notifications & logs; Meet still prompts from the address
+      alone; a browser huddle does not prompt. Turn the setting back on afterwards.
+- [ ] The receiver (or "Show what Cora shares") has one `call_detected` event per prompt, with
+      `signal` `mic` or `poll` and no URL or title.

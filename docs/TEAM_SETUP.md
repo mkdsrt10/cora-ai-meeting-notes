@@ -35,14 +35,21 @@ click **Check again**:
 
 macOS may ask you to quit and reopen Cora after Screen Recording. These grants carry over to future updates.
 
-## 3. Let Cora read participant names in your browser (1 min, once per browser)
+## 3. Let Cora look inside your browser tabs (1 min, once per browser)
 
-Meet, Zoom web and Slack huddles in Chrome, Brave, Edge or Arc:
+Cora uses this to read participant names (Meet, Zoom web and Slack huddles in Chrome, Brave, Edge
+or Arc) and to tell when you are really in a Meet or a Slack huddle (Chrome, Brave, Edge or Safari):
 
-1. In the browser menu bar: **View › Developer › Allow JavaScript from Apple Events** (make sure it's ticked).
+1. In the browser menu bar, tick **Allow JavaScript from Apple Events**:
+   - Chrome, Brave, Edge (and Arc): **View › Developer › Allow JavaScript from Apple Events**.
+   - Safari: **Develop › Allow JavaScript from Apple Events** (turn on the Develop menu first in
+     Safari › Settings › Advanced).
 2. During your first meeting, macOS asks "Cora wants to control *Brave*". Click **OK**.
 
-Skip this and recordings still work, but everyone shows up as "Participant".
+Skip this and recordings still work, but everyone shows up as "Participant", huddles in a browser
+are not detected, and Meet may prompt while you are still in the green room. Cora reminds you once
+per app start with a notification: "Cora can't see inside *Brave*. Turn on View › Developer ›
+Allow JavaScript from Apple Events…". That notification means this step is missing for that browser.
 
 ## 4. Finish onboarding and add the Gemini key (2 min)
 
@@ -54,7 +61,12 @@ Skip this and recordings still work, but everyone shows up as "Participant".
 
 ## 5. Record your first meeting
 
-- Join a Meet, Zoom or Slack huddle. Cora detects it and starts recording (or click the menu-bar icon › **Start Recording**).
+- Join a Google Meet, Zoom (app or web client) or Slack huddle (app or browser, expanded or
+  collapsed to the mini-bar). Within a few seconds of your mic turning on, Cora shows
+  "*Google Meet* call detected. Start recording?". Click **Start Recording**. Nothing records until
+  you click; you can also start from the menu-bar icon › **Start Recording** at any time. For Meet,
+  the prompt comes after you click Join, not in the green room. When you leave the call, the
+  recording stops.
 - When the call ends, Cora transcribes with Gemini and writes the summary, decisions and action items.
   Allow a few minutes for an hour-long call.
 - Open the meeting from **Home**. If names are missing, the meeting page says why (usually step 3).
@@ -84,5 +96,7 @@ same install by hand.
 | "Gemini key was rejected" | Re-copy the key from the password manager; ask Mayank if it was rotated |
 | Everyone is "Participant" | Step 3 for the browser you used, then rejoin the call |
 | Nothing recorded from the other side | Screen Recording is off: System Settings › Privacy & Security › Screen Recording |
-| Meeting not auto-detected | Accessibility is off, or start manually from the menu-bar icon |
+| No "call detected" prompt | Check Accessibility is on (step 2) and, for a Meet or huddle in a browser, step 3 for that browser. Detection covers Chrome, Brave, Edge and Safari, not Arc. You can always start from the menu-bar icon |
+| "Cora can't see inside *browser*" notification | Step 3 is off for that browser: tick Allow JavaScript from Apple Events (Chrome/Brave/Edge: View › Developer; Safari: Develop). Shown once per app start |
+| Meet prompt appears before you join | Same cause: without step 3 Cora only sees the Meet address, not whether you joined |
 | Anything else | Send Mayank the file at `~/Library/Application Support/Cora AI Meeting Notes/logs` for that meeting (it never leaves your Mac otherwise) |

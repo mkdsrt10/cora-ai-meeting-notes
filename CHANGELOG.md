@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.2 — unreleased
+
+- Call detection for Google Meet: rooms at today's `meet.google.com/meet/xxx-xxxx-xxx` address are detected again (the old rule wanted the room code right after the host, so Meet never prompted since October). Cora asks the tab whether you have joined, so the "Google Meet call detected. Start recording?" prompt comes after you click Join, not in the green room. The landing page, `/new` and `/landing` never count.
+- Slack huddles in a browser (Chrome, Brave, Edge, Safari) are detected, expanded or collapsed to the bottom mini-bar. A Slack tab with no huddle never prompts.
+- Zoom's web client (`zoom.us/wc/...`) is detected like a Zoom join link.
+- The prompt still never records by itself: nothing starts until you click Start Recording. The mic turning on and the 20-second poll use the same check, and each check writes one `[call-detect]` line to the log.
+- When a browser does not allow "Allow JavaScript from Apple Events", Cora shows one notification per app start naming the setting (it is listed under Settings > Notifications & logs). Without it, Meet is still detected from the tab address alone (so it may prompt before you join) and browser huddles are not detected.
+- New Usage event `call_detected` (app, `mic` or `poll`, and whether the page or app confirmed the Call); no URL, title or names. Listed in `docs/TRACING.md`.
+- Developers: the "is a Call live in this tab?" check is one snippet, `capture/live-call-snippet.js`, shared by the detector and the speaker watcher (`scripts/gen-live-call-snippet.js` writes the Swift copy; a test fails if they drift).
+
 ## 0.4.1 — 2026-11-11
 
 - Fix: every recording on a Mac running an older macOS than the build machine failed at once with "capture helper exited with code null". The Swift helpers (dual-capture, mic-watch, speaker-watch, mac-ocr) were compiled without a deployment target, so they were linked against the build Mac's macOS and aborted at load elsewhere (dyld "Symbol not found", "built for macOS 27.0 which is newer than running OS"). They are now built for macOS 14.0, the app's minimum, and the build script refuses a helper built for anything else.
