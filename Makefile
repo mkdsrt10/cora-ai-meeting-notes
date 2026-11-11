@@ -1,6 +1,9 @@
 # Cora developer entry points. Run `make setup` once on a fresh Mac.
 SWIFTC ?= swiftc
-SWIFT_FLAGS ?= -O
+# Deployment target must match LSMinimumSystemVersion in package.json: without it swiftc links
+# against the build Mac's OS and the helper aborts at load on any older macOS (dyld "Symbol not found").
+MACOS_MIN ?= 14.0
+SWIFT_FLAGS ?= -O -target arm64-apple-macos$(MACOS_MIN)
 NATIVE := capture/dual-capture capture/mic-watch capture/speaker-watch bin/mac-ocr
 
 .PHONY: setup build-native dev lint test clean install-app app

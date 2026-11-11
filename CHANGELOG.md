@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 — 2026-11-11
+
+- Fix: every recording on a Mac running an older macOS than the build machine failed at once with "capture helper exited with code null". The Swift helpers (dual-capture, mic-watch, speaker-watch, mac-ocr) were compiled without a deployment target, so they were linked against the build Mac's macOS and aborted at load elsewhere (dyld "Symbol not found", "built for macOS 27.0 which is newer than running OS"). They are now built for macOS 14.0, the app's minimum, and the build script refuses a helper built for anything else.
+
 ## 0.4.0 — 2026-11-11
 
 Internal beta telemetry, feedback and in-app updates. What is shared, in plain words: `docs/BETA_POLICY.md`.

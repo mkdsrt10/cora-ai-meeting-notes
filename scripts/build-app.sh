@@ -42,6 +42,14 @@ fi
 
 say "Building native helpers"
 make build-native
+# Each helper must load on the oldest macOS the app claims (LSMinimumSystemVersion):
+# a helper linked without a deployment target aborts at load on an older macOS
+# with dyld "Symbol not found" (0.4.0 on the first teammate's Mac).
+MIN_OS="$(node -p "require('./package.json').build.mac.extendInfo.LSMinimumSystemVersion")"
+for helper in capture/dual-capture capture/mic-watch capture/speaker-watch bin/mac-ocr; do
+  minos="$(otool -l "$helper" | awk '/LC_BUILD_VERSION/{f=1} f && /minos/{print $2; exit}')"
+  [[ "$minos" == "$MIN_OS" ]] || { echo "$helper is built for macOS $minos, not $MIN_OS (see Makefile MACOS_MIN)" >&2; exit 1; }
+done
 
 say "Building bundled ffmpeg"
 ./scripts/build-ffmpeg.sh
