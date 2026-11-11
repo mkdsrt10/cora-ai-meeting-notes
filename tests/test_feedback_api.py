@@ -127,3 +127,20 @@ def test_a_comment_of_exactly_500_characters_is_accepted(clean, port):
     status, _ = api(port, "POST", "/api/feedback", {**VALID, "comment": "x" * 500})
     assert status == 200
     assert feedback_events()[0]["comment"] == "x" * 500
+
+
+def test_a_rating_is_kept_and_recorded_even_when_queueing_the_capture_fails(clean, port, monkeypatch):
+    import sqlite3
+
+    import capture
+
+    def locked(recording_id, reason):
+        raise sqlite3.OperationalError("database is locked")
+    monkeypatch.setattr(capture, "request", locked)
+
+    status, reply = api(port, "POST", "/api/feedback", VALID)
+
+    assert status == 200 and reply["ok"] is True and reply["capture_requested"] is False
+    [row] = feedback_rows()
+    assert row["id"] == reply["id"] and row["recording_id"] == RECORDING
+    assert [e["recording_id"] for e in feedback_events()] == [RECORDING]

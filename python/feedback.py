@@ -45,11 +45,13 @@ def _validated(recording_id, target, rating, reasons, comment) -> tuple:
 def submit(recording_id, target, rating, reasons=None, comment="") -> dict:
     """Store one Feedback; returns {id, capture_requested}. ValueError if
     invalid (including a recording id the receiver would refuse), in which
-    case nothing is stored or queued."""
+    case nothing is stored or queued. The row is written first: once the
+    input is valid, the rating is kept even if queueing its capture fails."""
     recording_id, target, rating, reasons, comment = _validated(recording_id, target, rating, reasons, comment)
+    if recording_id is not None and (not capture.SAFE_ID.fullmatch(recording_id) or recording_id in (".", "..")):
+        raise ValueError(f"unsafe recording id {recording_id!r}")
     event = usage_events.validate("feedback", {"recording_id": recording_id, "target": target, "rating": rating,
                                                "reasons": ",".join(reasons), "comment": comment})
-    capture_requested = capture.request(recording_id, "feedback") if recording_id else False
     created_at = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     with db.get_db() as conn:
         cur = conn.execute(
@@ -58,6 +60,12 @@ def submit(recording_id, target, rating, reasons=None, comment="") -> dict:
             (recording_id, target, rating, json.dumps(reasons), comment, created_at))
         conn.commit()
         feedback_id = cur.lastrowid
+    capture_requested = False
+    if recording_id:
+        try:
+            capture_requested = capture.request(recording_id, "feedback")
+        except Exception as e:  # noqa: BLE001 - the rating is stored; the capture is best effort
+            print(f"[feedback] capture request failed: {type(e).__name__}: {e}", flush=True)
     usage_events.record("feedback", event)
     try:
         beta_sender.flush_now()  # returns at once; the send happens on the sender's thread
