@@ -18,6 +18,12 @@ const { createProcessingQueue } = require('./recording/processing-queue');
 const { createBackendApi, createArchiveStep } = require('./recording/backend');
 const { buildInfoEnv } = require('./build-info');
 const os = require('os');
+const { createMainLog } = require('./main-log');
+
+// Mirror main-process console output to a local daily log (never uploaded).
+const mainLog = createMainLog({ logsDir: LOGS_DIR });
+mainLog.prune();
+mainLog.attach(console);
 const { appStartedPayload, lockdownEnabled, screenshotTakenPayload } = require('./main/usage');
 const { createUpdater } = require('./updater');
 const { createInstaller, bundlePathFromExe } = require('./main/update-install');

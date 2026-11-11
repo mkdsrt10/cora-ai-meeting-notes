@@ -44,7 +44,11 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Person**: someone Cora knows across Recordings: a People entry with a name, role, organization and optional voice reference, matched to speakers. _Avoid_: contact, user.
 
-**Call**: a live conversation in a meeting app or browser tab that Cora can notice, whether or not it is being recorded: Google Meet, Zoom, Microsoft Teams, a Slack huddle (expanded, collapsed to the mini-bar, or in the desktop app). "Call detected" is the moment Cora first notices one and offers to record; a Call ends when the app releases the microphone or its tab or window goes away. _Avoid_: meeting (that is the app, the Recording or the calendar event, depending on the sentence).
+**Call**: a live conversation in a meeting app or browser tab that Cora can notice, whether or not it is being recorded: Google Meet, Zoom, Microsoft Teams, a Slack huddle (expanded, collapsed to the mini-bar, or in the desktop app). "Call detected" is the moment Cora first notices one and offers to record; a Call exists only once you are in it (the page's own leave control or the app's meeting window is present), and ends when the app releases the microphone or its tab or window goes away. _Avoid_: meeting (that is the app, the Recording or the calendar event, depending on the sentence).
+
+**Green room**: the pre-join screen of a meeting app (Meet's "Ready to join?"). The tab and often the microphone are already open, but it is not a Call.
+
+**Call prompt**: what Cora shows when it detects a Call: an always-on-top panel offering Start recording and Dismiss, which stays until you act or the Call ends. Dismiss holds until that Call ends. The macOS banner is only the fallback when the panel cannot show. _Avoid_: notification (that is the banner).
 
 **Participant**: a name captured from the meeting app during one Recording (the roster). A Participant may be linked to a Person, renamed, hidden, or turned into a new Person from the Participants tab. _Avoid_: attendee (that is the calendar list).
 
