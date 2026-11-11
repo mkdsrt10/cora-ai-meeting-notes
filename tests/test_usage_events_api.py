@@ -94,6 +94,15 @@ def test_an_event_outside_the_catalog_is_refused_and_nothing_is_stored(port, bod
     assert exported(port) == []
 
 
+def test_call_detected_is_in_the_catalog_with_app_signal_and_confirmed_only(port):
+    body = {"name": "call_detected", "payload": {"app": "Google Meet", "signal": "mic", "confirmed": True}}
+    assert call(port, "POST", "/api/events", body)[0] == 200
+    leaky = {"name": "call_detected", "payload": {"app": "Google Meet", "url": "https://meet.google.com/abc-defg-hij"}}
+    status, payload = call(port, "POST", "/api/events", leaky)
+    assert status == 400 and "url" in payload["error"]
+    assert [r["payload"] for r in exported(port)] == [body["payload"]]
+
+
 def test_strings_up_to_the_limits_are_accepted(port):
     assert call(port, "POST", "/api/events", {"name": "error", "payload": {"scope": "main", "code": "x" * 200}})[0] == 200
     assert call(port, "POST", "/api/events", {"name": "feedback", "payload": {"comment": "y" * 500}})[0] == 200

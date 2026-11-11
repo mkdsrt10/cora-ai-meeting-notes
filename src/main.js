@@ -10,7 +10,8 @@ const {
   DASHBOARD_PORT, DASHBOARD_URL, API_TOKEN, PYTHON_ENV, postJson, fetchJson, fetchSetting, verifyOwnServer,
 } = require('./main/api-client');
 const { handleTrusted, installNavigationGuards } = require('./main/security');
-const { startMeetingWatcher, detectActiveMeeting } = require('./meeting-detector');
+const { createDetector } = require('./meeting-detector');
+const { createCallDetection } = require('./main/call-detection');
 const { createCaptureHelperFactory, listAudioDevices, startMicWatch } = require('./recording/capture-helper');
 const { createRecordingSession } = require('./recording/session');
 const { createProcessingQueue } = require('./recording/processing-queue');
@@ -43,7 +44,6 @@ let mainWindow = null;
 let pythonProcess = null;
 let stopMeetingWatcher = null;
 let stopMicWatcher = null;
-let meetingNotified = false;
 let floaterWindow = null;
 
 // The user's own name (from onboarding), used to tell "me" apart from other
@@ -654,36 +654,19 @@ function updateTrayMenu() {
   tray.setContextMenu(contextMenu);
 }
 
-function notifyMeetingDetected(meeting) {
-  if (meetingNotified || isCapturing()) return;
-  meetingNotified = true;
-
-  const notification = notify({
-    title: 'Cora',
-    body: `${meeting.label} call detected. Start recording?`,
-    actions: [{ type: 'button', text: 'Start Recording' }],
-    closeButtonText: 'Dismiss',
-  }, { show: false });
-  notification.on('click', () => startRecording(meeting.label));
-  notification.on('action', () => startRecording(meeting.label));
-  notification.show();
-}
-
+// One detector per app run: the mic-on check and the poll share it, so the
+// browser hint (onUnanswered) is fed by both and shown at most once.
 // The mic turning on is the fast, OS-level signal (matches how Notion's
-// desktop app reportedly detects meetings) — it fires the instant any app
-// opens the input device, well before an AppleScript poll would notice.
-// We still confirm it's actually a known meeting app/tab/huddle before
-// notifying, so mic use from Voice Memos, dictation, etc. doesn't false-fire.
-async function handleMicActive() {
-  console.log(`[debug ${new Date().toISOString()}] mic went active, checking for a known meeting...`);
-  if (meetingNotified || isCapturing()) {
-    console.log('[debug] skipping: meetingNotified=', meetingNotified, 'capturing=', isCapturing());
-    return;
-  }
-  const meeting = await detectActiveMeeting();
-  console.log(`[debug ${new Date().toISOString()}] detectActiveMeeting result:`, JSON.stringify(meeting));
-  if (meeting) notifyMeetingDetected(meeting);
-}
+// desktop app reportedly detects meetings); the poll is the backstop in case
+// mic-watch can't launch. See src/main/call-detection.js.
+const callDetection = createCallDetection({
+  detector: createDetector(),
+  notify,
+  startRecording,
+  stopRecording: (reason) => recording.stop(reason),
+  track: recordUsage,
+  isCapturing,
+});
 
 app.whenReady().then(async () => {
   refreshMicDevices();
@@ -730,26 +713,21 @@ app.whenReady().then(async () => {
   if (app.isPackaged || process.env.CORA_UPDATE_CHECK_URL) updater.start();
 
   stopMicWatcher = startMicWatch(MIC_WATCH_BIN, {
-    onMicOn: handleMicActive,
+    onMicOn: () => {
+      console.log(`[debug ${new Date().toISOString()}] mic went active, checking for a Call...`);
+      return callDetection.onMicOn();
+    },
+    // The mic going inactive while we're recording means whatever app had
+    // it open (the browser tab, Zoom, etc.) just released it — i.e. the
+    // Call ended. Stop and process automatically rather than requiring a
+    // manual "Stop Recording" click.
     onMicOff: () => {
       console.log(`[debug ${new Date().toISOString()}] onMicOff fired, capturing =`, isCapturing());
-      meetingNotified = false;
-      // The mic going inactive while we're recording means whatever app had
-      // it open (the browser tab, Zoom, etc.) just released it — i.e. the
-      // call ended. Stop and process automatically rather than requiring a
-      // manual "Stop Recording" click.
-      if (isCapturing()) recording.stop('mic-off');
+      callDetection.onMicOff();
     },
   });
 
-  // Backstop in case mic-watch can't launch (binary missing/build failed).
-  stopMeetingWatcher = startMeetingWatcher({
-    onMeetingDetected: notifyMeetingDetected,
-    onMeetingEnded: () => {
-      meetingNotified = false;
-      if (isCapturing()) recording.stop('meeting-ended');
-    },
-  });
+  stopMeetingWatcher = callDetection.start();
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
