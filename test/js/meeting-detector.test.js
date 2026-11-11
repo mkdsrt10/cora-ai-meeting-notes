@@ -89,10 +89,16 @@ test('a Slack chat tab with no huddle, no answer, or no snapshot is not a Call',
   assert.equal(await check({ urls: [SLACK_TAB] }), null);
 });
 
-test('Zoom join links and the Zoom web client are unconfirmed Calls', async () => {
-  for (const url of ['https://us02web.zoom.us/j/123456789?pwd=x', 'https://app.zoom.us/wc/123456789/join']) {
-    const call = await check({ urls: [url] });
-    assert.deepEqual(call, { label: 'Zoom', source: 'browser', url, confirmed: false, unanswered: [] }, url);
+const ZOOM_WEB = 'https://app.zoom.us/wc/123456789/join';
+const ZOOM_JOIN = 'https://us02web.zoom.us/j/123456789?pwd=x';
+
+test('a Zoom web tab is a Call only when its page says joined (shared snapshot)', async () => {
+  for (const url of [ZOOM_WEB, ZOOM_JOIN]) {
+    assert.deepEqual(await check({ urls: [url], snapshots: [{ url, live: true, label: 'Zoom' }] }),
+      { label: 'Zoom', source: 'browser', url, confirmed: true, unanswered: [] }, url);
+    assert.equal(await check({ urls: [url], snapshots: [{ url, live: false, label: 'Zoom' }] }), null, `${url} pre-join`);
+    assert.equal(await check({ urls: [url], snapshots: [{ url, live: null }] }), null, `${url} could not be asked`);
+    assert.equal(await check({ urls: [url] }), null, `${url} no snapshot`);
   }
   assert.equal(await check({ urls: ['https://zoom.us/pricing'] }), null);
 });
@@ -385,6 +391,8 @@ const PAGES = {
   slackCollapsed: () => runPage('app.slack.com', [el({ sel: ['[data-qa="huddle_details_title"]'], text: 'Huddle with Ana' })]),
   slackChat: () => runPage('app.slack.com', [el({ sel: ['button'], text: 'Send' })]),
   slackContainerOnly: () => runPage('app.slack.com', [el({ sel: ['[data-qa="huddle_window_content_container"]'] })]),
+  zoomJoined: () => runPage('app.zoom.us', [el({ sel: ['button'], text: 'Leave' })]),
+  zoomPreJoin: () => runPage('app.zoom.us', [el({ sel: ['button'], text: 'Join' })]),
   unanswered: () => 'null',
 };
 
@@ -409,6 +417,12 @@ test('snapshot answers from real Slack pages: expanded, collapsed, chat, empty c
   assert.equal(await checkRaw('Brave Browser', SLACK_TAB, PAGES.slackChat()), null);
   assert.equal(await checkRaw('Brave Browser', SLACK_TAB, PAGES.slackContainerOnly()), null);
   assert.equal(await checkRaw('Brave Browser', SLACK_TAB, PAGES.unanswered()), null);
+});
+
+test('snapshot answers from real Zoom web pages: joined, pre-join', async () => {
+  assert.deepEqual(await checkRaw('Safari', ZOOM_WEB, PAGES.zoomJoined()),
+    { label: 'Zoom', source: 'browser', url: ZOOM_WEB, confirmed: true, unanswered: [] });
+  assert.equal(await checkRaw('Safari', ZOOM_WEB, PAGES.zoomPreJoin()), null);
 });
 
 test('the script the detector hands its runner compiles as AppleScript', { skip: process.platform !== 'darwin' && 'macOS only' }, async () => {

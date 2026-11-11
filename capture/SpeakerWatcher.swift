@@ -451,6 +451,13 @@ function liveCall() {
       || String((mini && mini.innerText) || '').trim() !== '';
     return { live, label: 'Slack Huddle' };
   }
+  if (host === 'zoom.us' || host.endsWith('.zoom.us')) {
+    /* Zoom web client: joined means the footer Leave/End control exists; the
+       pre-join screen and the /j/ launch page have only Join/Launch buttons. */
+    const live = !!document.querySelector('button.footer__leave-btn')
+      || buttons(document).some(b => /^(?:leave|end)(?: the)?(?: meeting)?$/i.test(text(b)));
+    return { live, label: 'Zoom' };
+  }
   /* Meet: joined means a Leave call control exists; the green room has none.
      Only "Leave call" counts: other controls say Leave too (Leave feedback). */
   const live = !!document.querySelector('button[aria-label^="Leave call"], [data-tooltip^="Leave call"]')

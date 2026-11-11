@@ -1,5 +1,5 @@
-// The one place that decides "is a Call live in this tab?" for Google Meet and
-// Slack in a browser. Two consumers embed this exact text:
+// The one place that decides "is a Call live in this tab?" for Google Meet,
+// Slack and Zoom in a browser. Two consumers embed this exact text:
 //   - src/meeting-detector.js sends PAGE_EXPRESSION to each Meet/Slack tab
 //     through AppleScript and reads the JSON answer;
 //   - capture/SpeakerWatcher.swift carries a generated copy (the region between
@@ -31,6 +31,13 @@ const LIVE_CALL_JS = `function liveCall() {
       || buttons(document).some(isLeave)
       || String((mini && mini.innerText) || '').trim() !== '';
     return { live, label: 'Slack Huddle' };
+  }
+  if (host === 'zoom.us' || host.endsWith('.zoom.us')) {
+    /* Zoom web client: joined means the footer Leave/End control exists; the
+       pre-join screen and the /j/ launch page have only Join/Launch buttons. */
+    const live = !!document.querySelector('button.footer__leave-btn')
+      || buttons(document).some(b => /^(?:leave|end)(?: the)?(?: meeting)?$/i.test(text(b)));
+    return { live, label: 'Zoom' };
   }
   /* Meet: joined means a Leave call control exists; the green room has none.
      Only "Leave call" counts: other controls say Leave too (Leave feedback). */

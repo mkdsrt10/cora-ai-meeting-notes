@@ -54,7 +54,7 @@ const SCRIPT_TIMEOUT_MS = 20000;
 //    the WHOLE script fails to compile. The raw event code from the Chromium
 //    sdef (CrSuExJa, parameter JvSc) compiles everywhere and is the same event.
 //
-// Only tabs on meet.google.com, slack.com or *.slack.com are asked the
+// Only tabs on meet.google.com, slack.com, *.slack.com or Zoom web (/wc/, /j/) are asked the
 // live-call question (wantsSnapshot); every other tab is only listed by URL.
 // A tab that cannot be asked (JavaScript from Apple Events off, 2 s timeout,
 // script error) prints the literal null.
@@ -78,7 +78,9 @@ on wantsSnapshot(u)
     else
       set hostName to afterScheme
     end if
-    return hostName is "meet.google.com" or hostName is "slack.com" or hostName ends with ".slack.com"
+    if hostName is "meet.google.com" or hostName is "slack.com" or hostName ends with ".slack.com" then return true
+    if hostName is "zoom.us" or hostName ends with ".zoom.us" then return (u contains "/wc/" or u contains "/j/")
+    return false
   on error
     return false
   end try
@@ -325,13 +327,16 @@ function urlParts(url) {
 }
 
 const isMeetRoom = ({ host, path }) => host === 'meet.google.com' && MEET_ROOM_PATH.test(path);
+const isZoomHost = ({ host }) => host === 'zoom.us' || host.endsWith('.zoom.us');
 const isSlackHost = ({ host }) => host === 'slack.com' || host.endsWith('.slack.com');
 
 function urlRule(url) {
   const parts = urlParts(url);
   if (isMeetRoom(parts)) return { kind: 'meet', label: 'Google Meet', host: parts.host };
   if (isSlackHost(parts)) return { kind: 'slack', label: 'Slack Huddle', host: parts.host };
-  if (url.includes('zoom.us/j/') || url.includes('zoom.us/wc/')) return { kind: 'url', label: 'Zoom', host: parts.host };
+  if (isZoomHost(parts) && (parts.path.startsWith('/wc/') || parts.path.startsWith('/j/'))) {
+    return { kind: 'zoom', label: 'Zoom', host: parts.host };
+  }
   if (url.includes('teams.microsoft.com/l/meetup-join') || url.includes('teams.live.com/meet')) {
     return { kind: 'url', label: 'Microsoft Teams', host: parts.host };
   }
