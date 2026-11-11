@@ -173,6 +173,7 @@
         <span id="permAccessibilityStatus" class="stage-pill">Checking…</span>
         <button class="button secondary" id="permAccessibilityBtn">Open Settings</button>
       </div>
+      <p class="muted detect-hint" data-detect-hint hidden></p>
       <div class="onboarding-actions">
         <button class="button secondary" data-onboarding-back>Back</button>
         <button class="button secondary" id="permRecheckBtn">Check again</button>
@@ -605,6 +606,7 @@
           <div class="settings-panel" data-settings-content="logs" hidden>
             <h1 class="settings-title">Notifications &amp; logs</h1>
             <p class="settings-sub">A record of what Cora has shown you and the pipeline's own logs — useful for spotting failures after the fact, or sending to support.</p>
+            <p class="muted detect-hint" data-detect-hint hidden></p>
 
             <h4 style="margin-top:20px">Recent notifications</h4>
             <div id="notificationsList" class="settings-model-rows"><p class="muted">Loading…</p></div>
@@ -773,6 +775,7 @@
 <script src="/js/plugin-host.js"></script>
 <!-- Enabled plugins' page scripts (src/ui/web/plugins/<id>.js) are loaded by plugin-host.js here, before init runs load(). -->
 <script src="/js/update-banner.js"></script>
+<script src="/js/detect-hint.js"></script>
 <script src="/js/init.js"></script>
 </body>
 </html>

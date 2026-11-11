@@ -12,6 +12,7 @@ const {
 const { handleTrusted, installNavigationGuards } = require('./main/security');
 const { createDetector } = require('./meeting-detector');
 const { createCallDetection } = require('./main/call-detection');
+const { createDetectHint } = require('./main/detect-hint');
 const { createCaptureHelperFactory, listAudioDevices, startMicWatch } = require('./recording/capture-helper');
 const { createRecordingSession } = require('./recording/session');
 const { createProcessingQueue } = require('./recording/processing-queue');
@@ -713,6 +714,15 @@ function updateTrayMenu() {
 // The mic turning on is the fast, OS-level signal (matches how Notion's
 // desktop app reportedly detects meetings); the poll is the backstop in case
 // mic-watch can't launch. See src/main/call-detection.js.
+// Detection fallbacks (Accessibility untrusted, browser JavaScript off) show a
+// hint in the permissions area once per Install, never a notification.
+const detectHint = createDetectHint({
+  getFlag: async () => Boolean(await fetchSetting('detect_hint_shown')),
+  setFlag: () => postJson('/api/settings', { key: 'detect_hint_shown', value: true }),
+  send: (hint) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('detect-hint', hint); },
+});
+handleTrusted('get-detect-hint', () => detectHint.pending());
+
 const callDetection = createCallDetection({
   detector: createDetector({ probeBin: SPEAKER_WATCH_BIN }),
   notify,
@@ -721,8 +731,7 @@ const callDetection = createCallDetection({
   track: recordUsage,
   isCapturing,
   prompt: { show: showCallPrompt, hide: hideCallPrompt },
-  // T4 (green-room follow-up) stops on 'dismiss'; T6 reports the action.
-  onPromptClosed: (action) => console.log(`[call-prompt] closed: ${action}`),
+  onFallback: detectHint.onFallback,
 });
 
 handleTrusted('call-prompt-action', (_event, action) => callDetection.promptAction(action));
