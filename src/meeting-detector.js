@@ -417,7 +417,9 @@ function createDetector({ run = osascript } = {}) {
       // "no Call" for this check rather than a crash.
       const msg = String((err && err.message) || err).split('\n')[0];
       console.log(`[call-detect] candidates=error(${msg}) -> none`);
-      return { call: null, unanswered: [] };
+      // error: true tells the watcher this check saw nothing either way, so
+      // one failed poll does not read as "the Call ended".
+      return { call: null, unanswered: [], error: true };
     }
     const candidates = candidatesOf(parseScriptOutput(raw));
     const unanswered = unansweredOf(candidates);
@@ -456,8 +458,8 @@ function createDetector({ run = osascript } = {}) {
       if (stopped || running) return;
       running = true;
       try {
-        const call = await checkOnce();
-        if (stopped) return;
+        const { call, error } = await evaluate();
+        if (stopped || error) return;
         if (call && !inCall) {
           inCall = true;
           onDetected(call);

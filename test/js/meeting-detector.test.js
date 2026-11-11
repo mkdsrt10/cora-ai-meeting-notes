@@ -205,6 +205,31 @@ test('the watcher fires detected once when a Call appears and ended when it goes
   assert.deepEqual(events, [['detected', 'Google Meet', true], ['ended']]);
 });
 
+test('a failed poll while in a Call is not the Call ending; the next poll with no Call is', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const meetLive = scriptOutput({ urls: [MEET_ROOM_NEW], snapshots: [{ url: MEET_ROOM_NEW, live: true, label: 'Google Meet' }] });
+  let next = async () => meetLive;
+  const detector = createDetector({ run: () => next() });
+  const events = [];
+  const stop = detector.startWatcher({
+    onDetected: (call) => events.push(['detected', call.label]),
+    onEnded: () => events.push(['ended']),
+    intervalMs: 1000,
+  });
+  await flush();
+  next = async () => { throw Object.assign(new Error('Command failed: osascript'), { killed: true, signal: 'SIGTERM' }); };
+  t.mock.timers.tick(1000);
+  await flush();
+  assert.deepEqual(events, [['detected', 'Google Meet']], 'a runner error keeps the Call');
+  next = async () => scriptOutput({});
+  t.mock.timers.tick(1000);
+  await flush();
+  t.mock.timers.tick(1000);
+  await flush();
+  stop();
+  assert.deepEqual(events, [['detected', 'Google Meet'], ['ended']]);
+});
+
 test('onUnanswered fires once per watcher, even for a Slack tab that yields no Call', async (t) => {
   t.mock.timers.enable({ apis: ['setInterval'] });
   const { detector, set } = changingDetector(scriptOutput({ urls: [SLACK_TAB], snapshots: [{ browser: 'Google Chrome', url: SLACK_TAB, live: null }] }));
