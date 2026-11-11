@@ -25,7 +25,7 @@ When I join a Google Meet, a Slack huddle (in the Slack app or in a browser tab,
 11. As a Cora user who has not enabled "Allow JavaScript from Apple Events" in my browser, I want one notification per app start naming that setting, so that I know why browser huddles are not detected and why Meet prompts early.
 12. As a Cora user without that setting, I still want Meet detected from the tab address alone, so that the old behaviour is a floor, not a regression.
 13. As a Cora user, I want that hint shown once per app start and recorded under Settings > Notifications & logs like every other notification, so that it is not a nag and can be found later.
-14. As a Cora user, I want a detected Call to end (and a running Recording to stop) when I leave the Call, by the same signals as today (mic released, tab or window gone), so that nothing changes in how Recordings end.
+14. As a Cora user, I want a detected Call to end (and a running Recording to stop) when I leave the Call, by the same signals as today (mic released, tab or window gone; the latter stops only a Recording started from Cora's prompt), so that nothing changes in how Recordings end.
 15. As a Cora user with several Meet or Slack tabs, I want the live one to win, so that an idle tab does not hide the Call I am in.
 16. As a Cora user, I want the notification to name the app ("Google Meet", "Slack Huddle", "Zoom"), so that I can tell what Cora saw.
 17. As a Cora user, I want the page check to touch only Meet and Slack tabs, so that my other tabs are never scripted.

@@ -6,6 +6,7 @@
 - Slack huddles in a browser (Chrome, Brave, Edge, Safari) are detected, expanded or collapsed to the bottom mini-bar. A Slack tab with no huddle never prompts.
 - Zoom's web client (`zoom.us/wc/...`) is detected like a Zoom join link.
 - The prompt still never records by itself: nothing starts until you click Start Recording. The mic turning on and the 20-second poll use the same check, and each check writes one `[call-detect]` line to the log.
+- Leaving a Call stops only a Recording that Cora's prompt started: when the Call's tab or window goes away, a Recording you started from the tray or floater keeps going (the microphone being released still stops any Recording, as before).
 - When a browser does not allow "Allow JavaScript from Apple Events", Cora shows one notification per app start naming the setting (it is listed under Settings > Notifications & logs). Without it, Meet is still detected from the tab address alone (so it may prompt before you join) and browser huddles are not detected.
 - New Usage event `call_detected` (app, `mic` or `poll`, and whether the page or app confirmed the Call); no URL, title or names. Listed in `docs/TRACING.md`.
 - Developers: the "is a Call live in this tab?" check is one snippet, `capture/live-call-snippet.js`, shared by the detector and the speaker watcher (`scripts/gen-live-call-snippet.js` writes the Swift copy; a test fails if they drift).

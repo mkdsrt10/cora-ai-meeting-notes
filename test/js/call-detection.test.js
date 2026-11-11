@@ -94,16 +94,46 @@ test('while a Recording is capturing, neither signal asks, tracks or notifies', 
   assert.deepEqual(h.log, []);
 });
 
-test('the Call ending stops a capturing Recording and lets the next Call be offered', () => {
+test('the Call ending stops a Recording started from its notification and lets the next Call be offered', () => {
+  for (const how of ['click', 'action']) {
+    const h = harness();
+    h.cd.start();
+    h.watcher().onDetected(MEET);
+    h.lastNotification().emit(how);
+    h.state.capturing = true;
+    h.watcher().onEnded();
+    assert.deepEqual(h.stopped, ['meeting-ended'], how);
+    h.state.capturing = false;
+    h.watcher().onDetected(MEET);
+    assert.equal(h.shown.length, 2, how);
+  }
+});
+
+test('the Call ending leaves a Recording started elsewhere running', () => {
   const h = harness();
   h.cd.start();
   h.watcher().onDetected(MEET);
   h.state.capturing = true;
   h.watcher().onEnded();
-  assert.deepEqual(h.stopped, ['meeting-ended']);
-  h.state.capturing = false;
+  assert.deepEqual(h.stopped, []);
+
+  const manual = harness({ capturing: true });
+  manual.cd.start();
+  manual.watcher().onDetected(MEET);
+  manual.watcher().onEnded();
+  assert.deepEqual(manual.stopped, []);
+});
+
+test('once mic-off has stopped a notification-started Recording, a later Call ending leaves a manual one running', () => {
+  const h = harness();
+  h.cd.start();
   h.watcher().onDetected(MEET);
-  assert.equal(h.shown.length, 2);
+  h.lastNotification().emit('click');
+  h.state.capturing = true;
+  h.cd.onMicOff();
+  assert.deepEqual(h.stopped, ['mic-off']);
+  h.watcher().onEnded();
+  assert.deepEqual(h.stopped, ['mic-off']);
 });
 
 test('the mic going off stops a capturing Recording and lets the next Call be offered', async () => {
@@ -117,6 +147,9 @@ test('the mic going off stops a capturing Recording and lets the next Call be of
   h.state.capturing = true;
   h.cd.onMicOff();
   assert.deepEqual(h.stopped, ['mic-off']);
+  h.lastNotification().emit('click');
+  h.cd.onMicOff();
+  assert.deepEqual(h.stopped, ['mic-off', 'mic-off'], 'a notification-started Recording stops on mic-off too');
 });
 
 test('the Call ending with nothing capturing stops nothing', () => {

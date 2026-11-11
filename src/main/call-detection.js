@@ -14,6 +14,9 @@ function joinNames(names) {
 
 function createCallDetection({ detector, notify, startRecording, stopRecording, track, isCapturing }) {
   let notified = false;
+  // The capturing Recording was started from a Call notification (click or
+  // action), so the poll seeing that Call end may stop it.
+  let startedFromCall = false;
 
   // A Meet or Slack tab the page could not be asked about: say which browser
   // setting lets Cora see inside. The watcher fires onUnanswered at most once
@@ -37,8 +40,12 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
       actions: [{ type: 'button', text: 'Start Recording' }],
       closeButtonText: 'Dismiss',
     }, { show: false });
-    notification.on('click', () => startRecording(call.label));
-    notification.on('action', () => startRecording(call.label));
+    const start = () => {
+      startedFromCall = true;
+      startRecording(call.label);
+    };
+    notification.on('click', start);
+    notification.on('action', start);
     notification.show();
   }
 
@@ -51,11 +58,16 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
     if (call) detected(call, 'mic');
   }
 
-  // The Call ended (the app released the mic, or its tab or window went
-  // away): the next one may be offered, and a capturing Recording stops.
+  // The Call ended: the next one may be offered. The app releasing the mic
+  // stops any capturing Recording, as before; the poll no longer seeing the
+  // tab or window stops only a Recording that Cora's prompt started, so a
+  // Recording started from the tray or floater outlives a Call it overlaps.
   function ended(reason) {
     notified = false;
-    if (isCapturing()) stopRecording(reason);
+    const fromCall = startedFromCall;
+    startedFromCall = false;
+    if (!isCapturing()) return;
+    if (reason === 'mic-off' || fromCall) stopRecording(reason);
   }
 
   const onMicOff = () => ended('mic-off');
