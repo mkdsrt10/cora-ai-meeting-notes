@@ -7,10 +7,13 @@
   const bridge = window.electronAPI;
   if(!bridge || !bridge.onDetectHint) return;  // dashboard opened outside the app
 
-  function render(hint){
+  const byReason = new Map();
+  function render(hints){
+    for (const h of [].concat(hints || [])) if (h && h.reason) byReason.set(h.reason, h.text);
+    const text = [...byReason.values()].join(' ');
     document.querySelectorAll('[data-detect-hint]').forEach(el => {
-      el.textContent = hint ? hint.text : '';
-      el.hidden = !hint;
+      el.textContent = text;
+      el.hidden = !text;
     });
   }
 

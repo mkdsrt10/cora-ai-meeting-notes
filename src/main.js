@@ -717,11 +717,15 @@ function updateTrayMenu() {
 // Detection fallbacks (Accessibility untrusted, browser JavaScript off) show a
 // hint in the permissions area once per Install, never a notification.
 const detectHint = createDetectHint({
-  getFlag: async () => Boolean(await fetchSetting('detect_hint_shown')),
-  setFlag: () => postJson('/api/settings', { key: 'detect_hint_shown', value: true }),
-  send: (hint) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('detect-hint', hint); },
+  getFlag: async (reason) => Boolean(await fetchSetting(`detect_hint_shown_${reason}`)),
+  setFlag: (reason) => postJson('/api/settings', { key: `detect_hint_shown_${reason}`, value: true }),
+  send: (hint) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    mainWindow.webContents.send('detect-hint', hint);
+    return true;
+  },
 });
-handleTrusted('get-detect-hint', () => detectHint.pending());
+handleTrusted('get-detect-hint', () => detectHint.pending({ delivered: true }));
 
 const callDetection = createCallDetection({
   detector: createDetector({ probeBin: SPEAKER_WATCH_BIN }),

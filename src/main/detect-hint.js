@@ -21,25 +21,44 @@ function hintText(reason, apps) {
 }
 
 function createDetectHint({ getFlag, setFlag, send }) {
-  let current = null;
-  let busy = false;
+  const hints = new Map();   // reason -> hint offered this run (kept for pending())
+  const stored = new Set();  // reasons whose flag is persisted (a window got the hint)
+  const busy = new Set();
 
-  async function onFallback({ reason, apps }) {
-    if (current || busy) return;
-    busy = true;
+  async function markShown(reason) {
+    if (stored.has(reason)) return;
     try {
-      if (await getFlag()) return;
-      await setFlag();
-      current = { reason, text: hintText(reason, apps) };
-      send(current);
+      await setFlag(reason);
+      stored.add(reason);
     } catch (err) {
-      console.warn('[detect-hint] not shown:', err && err.message);
-    } finally {
-      busy = false;
+      console.warn('[detect-hint] flag not stored:', err && err.message);
     }
   }
 
-  return { onFallback, pending: () => current };
+  async function onFallback({ reason, apps }) {
+    if (stored.has(reason) || busy.has(reason)) return;
+    busy.add(reason);
+    try {
+      if (await getFlag(reason)) { stored.add(reason); return; }
+      const hint = { reason, text: hintText(reason, apps) };
+      hints.set(reason, hint);
+      if (send(hint) === true) await markShown(reason);
+    } catch (err) {
+      console.warn('[detect-hint] not shown:', err && err.message);
+    } finally {
+      busy.delete(reason);
+    }
+  }
+
+  // Hints to render. `delivered: true` means a live window is asking (and so
+  // is getting them): that is the moment their flags are stored.
+  function pending({ delivered = false } = {}) {
+    const list = [...hints.values()];
+    if (delivered) for (const h of list) markShown(h.reason);
+    return list;
+  }
+
+  return { onFallback, pending };
 }
 
 module.exports = { createDetectHint };
