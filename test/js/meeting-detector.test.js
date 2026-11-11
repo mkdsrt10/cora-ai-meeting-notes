@@ -204,6 +204,9 @@ test('the watcher fires detected once when a Call appears and ended when it goes
   set({ urls: [MEET_ROOM_NEW], snapshots: [{ url: MEET_ROOM_NEW, live: false, label: 'Google Meet' }] });
   t.mock.timers.tick(1000);
   await flush();
+  assert.deepEqual(events, [['detected', 'Google Meet', true]], 'one miss is not the end');
+  t.mock.timers.tick(1000);
+  await flush();
   stop();
   set({ processes: ['zoom.us'] });
   t.mock.timers.tick(1000);
@@ -295,6 +298,68 @@ test('a runner error logs the AppleScript error text and how osascript exited', 
     '[call-detect] candidates=error(0:42: execution error: Not authorized to send Apple events to System Events. (-1743); exit 1) -> none',
     '[call-detect] candidates=error(Command failed: osascript -e <script>; killed SIGTERM) -> none',
   ]);
+});
+
+// ---- failed vs empty, tick budget, two-miss rule ----
+const failingRun = async () => { throw Object.assign(new Error('Command failed: osascript'), { killed: true, signal: 'SIGTERM' }); };
+
+test('check tells found, empty and failed apart; checkOnce still resolves the Call or null', async () => {
+  const live = scriptOutput({ urls: [MEET_ROOM_NEW], snapshots: [{ url: MEET_ROOM_NEW, live: true, label: 'Google Meet' }] });
+  const found = await createDetector({ run: async () => live }).check();
+  assert.equal(found.status, 'found');
+  assert.equal(found.call.label, 'Google Meet');
+  const empty = await createDetector({ run: async () => scriptOutput({}) }).check();
+  assert.deepEqual({ status: empty.status, call: empty.call }, { status: 'empty', call: null });
+  const failed = await createDetector({ run: failingRun }).check();
+  assert.deepEqual({ status: failed.status, call: failed.call }, { status: 'failed', call: null });
+  assert.equal(await createDetector({ run: failingRun }).checkOnce(), null);
+});
+
+test('a runner that hangs past the tick budget is a failed check', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const detector = createDetector({ run: () => new Promise(() => {}) });
+  const pending = detector.check({ budgetMs: 2500 });
+  t.mock.timers.tick(2500);
+  assert.equal((await pending).status, 'failed');
+});
+
+test('a tick still running when the next is due is skipped, not overlapped', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval', 'setTimeout'] });
+  let calls = 0;
+  const detector = createDetector({ run: () => { calls += 1; return new Promise(() => {}); } });
+  const stop = detector.startWatcher({ intervalMs: 1000 });
+  await flush();
+  t.mock.timers.tick(1000);
+  await flush();
+  t.mock.timers.tick(1000);
+  await flush();
+  assert.equal(calls, 1, 'ticks at 1s and 2s are skipped while the first runs');
+  t.mock.timers.tick(500); // 2.5s budget spent
+  await flush();
+  t.mock.timers.tick(500); // next interval tick runs again
+  await flush();
+  stop();
+  assert.equal(calls, 2);
+});
+
+test('the watcher ends a Call only after two consecutive real misses', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const live = scriptOutput({ urls: [MEET_ROOM_NEW], snapshots: [{ url: MEET_ROOM_NEW, live: true, label: 'Google Meet' }] });
+  let next = async () => live;
+  const detector = createDetector({ run: () => next() });
+  const events = [];
+  const stop = detector.startWatcher({ onDetected: () => events.push('detected'), onEnded: () => events.push('ended'), intervalMs: 1000 });
+  const tickOnce = async (run) => { next = run; t.mock.timers.tick(1000); await flush(); };
+  await flush();
+  await tickOnce(async () => scriptOutput({}));   // miss 1
+  await tickOnce(failingRun);                      // failed: not a miss
+  await tickOnce(async () => live);                // found: resets
+  await tickOnce(async () => scriptOutput({}));   // miss 1 again
+  assert.deepEqual(events, ['detected']);
+  await tickOnce(failingRun);
+  await tickOnce(async () => scriptOutput({}));   // miss 2
+  stop();
+  assert.deepEqual(events, ['detected', 'ended']);
 });
 
 test('the module exports the detector factory and its pure helpers only', () => {
