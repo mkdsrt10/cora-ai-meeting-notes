@@ -60,6 +60,11 @@ def call(rx, method, path, body=None, headers=None, token=TOKEN):
     return resp.status, json.loads(raw) if raw else None
 
 
+def request_log(rx):
+    path = rx.root / "logs" / "receiver.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
 DEFAULT_CONFIG = {"telemetry_enabled": True, "capture_sample_rate": 0.25,
                   "capture_max_minutes": 60, "min_app_version": None}
 
@@ -157,6 +162,114 @@ def test_an_oversized_batch_is_refused_before_it_is_read(receiver):
     assert day_lines(receiver)[1] == []
 
 
+def test_every_request_is_logged_as_jsonl_without_the_token(receiver):
+    post_events(receiver, BATCH)
+    post_events(receiver, BATCH, token="wrong-token")
+    call(receiver, "GET", "/v1/config", token=None)
+    log = request_log(receiver)
+    assert [(e["method"], e["path"], e["status"]) for e in log] == [
+        ("POST", "/v1/events", 202), ("POST", "/v1/events", 401), ("GET", "/v1/config", 200)]
+    assert log[0]["install_id"] == "inst-1" and log[0]["accepted"] == 2
+    assert all("ms" in e and "ts" in e for e in log)
+    raw = (receiver.root / "logs" / "receiver.jsonl").read_text()
+    assert TOKEN not in raw and "wrong-token" not in raw
+
+
 def test_an_empty_batch_is_accepted_and_writes_nothing(receiver):
     assert post_events(receiver, {**BATCH, "events": []}) == (202, {"accepted": 0})
     assert day_lines(receiver)[1] == []
+
+
+# ---- captured recordings ----------------------------------------------------------
+
+ARCHIVE = bytes(range(256)) * 4096  # 1 MiB of opaque bytes; the receiver never opens archives
+UPLOAD_HEADERS = {"X-Cora-Install": "inst-1", "X-Cora-Recording": "20261111-0900-standup",
+                  "X-Cora-Reason": "feedback", "X-Cora-Version": "0.3.1", "X-Cora-Display-Name": "Priya",
+                  "Content-Type": "application/gzip"}
+
+
+def upload(rx, body=ARCHIVE, token=TOKEN, **overrides):
+    headers = {**UPLOAD_HEADERS, **overrides}
+    return call(rx, "POST", "/v1/recordings", body, {k: v for k, v in headers.items() if v is not None},
+                token=token)
+
+
+def test_an_upload_lands_in_its_install_and_recording_folder_with_a_sidecar(receiver):
+    assert upload(receiver) == (201, {"stored": "inst-1/20261111-0900-standup"})
+    folder = receiver.root / "recordings" / "inst-1" / "20261111-0900-standup"
+    assert sorted(p.name for p in folder.iterdir()) == ["archive.tar.gz", "meta.json"]
+    assert folder.joinpath("archive.tar.gz").read_bytes() == ARCHIVE
+    meta = json.loads(folder.joinpath("meta.json").read_text())
+    assert {k: meta[k] for k in ("install_id", "recording_id", "reason", "app_version", "display_name", "size")} == {
+        "install_id": "inst-1", "recording_id": "20261111-0900-standup", "reason": "feedback",
+        "app_version": "0.3.1", "display_name": "Priya", "size": len(ARCHIVE)}
+    assert meta["received_at"].endswith("Z")
+
+
+def test_a_second_upload_of_the_same_recording_is_a_conflict_and_keeps_the_first(receiver):
+    assert upload(receiver)[0] == 201
+    assert upload(receiver, body=b"different")[0] == 409
+    folder = receiver.root / "recordings" / "inst-1" / "20261111-0900-standup"
+    assert folder.joinpath("archive.tar.gz").read_bytes() == ARCHIVE
+    assert upload(receiver, **{"X-Cora-Install": "inst-2"}) == (201, {"stored": "inst-2/20261111-0900-standup"})
+
+
+@pytest.mark.parametrize("token", [None, "wrong-token"])
+def test_an_upload_without_the_right_token_is_refused_and_not_stored(receiver, token):
+    assert upload(receiver, token=token)[0] == 401
+    assert not (receiver.root / "recordings").exists()
+
+
+def test_a_client_that_expects_100_continue_is_refused_before_it_sends_the_archive(receiver):
+    conn = http.client.HTTPConnection("127.0.0.1", receiver.port, timeout=15)
+    conn.putrequest("POST", "/v1/recordings")
+    for k, v in {**UPLOAD_HEADERS, "Authorization": "Bearer wrong-token", "Expect": "100-continue",
+                 "Content-Length": str(len(ARCHIVE))}.items():
+        conn.putheader(k, v)
+    conn.endheaders()
+    assert conn.getresponse().status == 401
+    assert not (receiver.root / "recordings").exists()
+
+
+def test_an_upload_over_2_gb_is_refused_by_its_length_before_any_byte_is_read(receiver):
+    conn = http.client.HTTPConnection("127.0.0.1", receiver.port, timeout=15)
+    conn.putrequest("POST", "/v1/recordings")
+    for k, v in {**UPLOAD_HEADERS, "Authorization": f"Bearer {TOKEN}",
+                 "Content-Length": str(2 * 1024 ** 3 + 1)}.items():
+        conn.putheader(k, v)
+    conn.endheaders()
+    resp = conn.getresponse()
+    assert resp.status == 413
+    assert not (receiver.root / "recordings").exists()
+
+
+@pytest.mark.parametrize("override", [
+    {"X-Cora-Install": None}, {"X-Cora-Recording": None}, {"X-Cora-Install": ".."},
+    {"X-Cora-Recording": "../../events"}, {"X-Cora-Recording": "a/b"}, {"X-Cora-Install": "."},
+    {"X-Cora-Reason": "because"}, {"X-Cora-Reason": None},
+], ids=["no-install", "no-recording", "dotdot-install", "traversal", "slash", "dot", "bad-reason", "no-reason"])
+def test_an_upload_with_missing_or_unsafe_ids_is_refused(receiver, override):
+    status, payload = upload(receiver, **override)
+    assert status == 400 and payload["error"]
+    assert not any((receiver.root / "recordings").rglob("archive.tar.gz"))
+    assert not (receiver.root / "events").exists()
+
+
+def test_a_cut_off_upload_stores_nothing_and_can_be_retried(receiver):
+    conn = http.client.HTTPConnection("127.0.0.1", receiver.port, timeout=15)
+    conn.putrequest("POST", "/v1/recordings")
+    for k, v in {**UPLOAD_HEADERS, "Authorization": f"Bearer {TOKEN}", "Content-Length": str(len(ARCHIVE))}.items():
+        conn.putheader(k, v)
+    conn.endheaders()
+    conn.send(ARCHIVE[:1000])
+    conn.close()
+    deadline = time.monotonic() + 10
+    while not [e for e in request_log(receiver) if e["path"] == "/v1/recordings"]:
+        assert time.monotonic() < deadline, "the receiver never logged the cut-off upload"
+        time.sleep(0.05)
+    entry = request_log(receiver)[-1]
+    assert entry["status"] == 400 and "cut off" in entry["error"]
+    folder = receiver.root / "recordings" / "inst-1" / "20261111-0900-standup"
+    assert not folder.exists()
+    assert upload(receiver)[0] == 201
+    assert folder.joinpath("archive.tar.gz").read_bytes() == ARCHIVE
