@@ -435,6 +435,22 @@ def update_recording_data(recording_id, field, data):
         conn.execute(f"UPDATE recordings SET {field} = ? WHERE id = ?", (json.dumps(data), recording_id))
         conn.commit()
 
+
+def set_recording_metadata(recording_id, **fields):
+    """Set top-level metadata keys on a Recording in one statement, so a
+    concurrent read-modify-write of other keys is not lost. A no-op for an
+    id with no row."""
+    if not fields:
+        return
+    args = []
+    for key, value in fields.items():
+        args += [f"$.{key}", json.dumps(value)]
+    pairs = ", ".join("?, json(?)" for _ in fields)
+    with get_db() as conn:
+        conn.execute(f"UPDATE recordings SET metadata = json_set(COALESCE(NULLIF(metadata, ''), '{{}}'), {pairs})"
+                     " WHERE id = ?", (*args, recording_id))
+        conn.commit()
+
 def get_recording_data(recording_id, field):
     allowed_fields = {"metadata", "diarization", "coaching", "delivery_metrics", "call_summary", "speaker_labels", "identity"}
     if field not in allowed_fields:

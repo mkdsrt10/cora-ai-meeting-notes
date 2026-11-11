@@ -58,12 +58,15 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
     import beta_sender
     beta_sender.start()  # the port is bound; config fetch and first flush run on its thread
+    import audio_pruning
+    audio_pruning.start()  # first pass now on its thread, then after each job and every 6 h
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        audio_pruning.stop()
         beta_sender.stop(final_flush=True)
 
 

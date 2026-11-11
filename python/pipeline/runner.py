@@ -477,6 +477,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
             ai_trace.reassign_recording(live_rec_id, parent_folder.name)
         db.delete_recording(folder.name)
         shutil.rmtree(folder, ignore_errors=True)
+        import capture
+        capture.drop(folder.name)  # a capture asked for the child can never be built now
         print(f"[Local Pipeline] Continuation merged directly into parent {parent_folder.name} and child removed.", flush=True)
 
     print(f"[Local Pipeline] All artifacts saved for {folder.name}", flush=True)

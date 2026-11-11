@@ -119,6 +119,15 @@ def mark_uploaded(recording_id: str) -> None:
         conn.commit()
 
 
+def drop(recording_id: str) -> None:
+    """Take a Recording that no longer exists (deleted, merged into its
+    parent) off the queue. No event: there is nothing the Cora team lost."""
+    with db.get_db() as conn:
+        conn.execute(f"UPDATE captures SET dropped_at = ? WHERE recording_id = ? AND {_PENDING}",
+                     (_iso(_now()), recording_id))
+        conn.commit()
+
+
 def drop_expired() -> int:
     """Drop captures still not uploaded more than 7 days after they were
     asked for, recording one `capture_dropped` event each. Returns how many."""

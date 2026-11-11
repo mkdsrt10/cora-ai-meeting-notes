@@ -172,11 +172,19 @@ def _upload_one_capture() -> None:
     capture = _capture_module()
     if capture is None:
         return
-    pending = capture.next_pending()
-    if not pending:
-        return
-    recording_id, reason = pending["recording_id"], pending["reason"]
-    archive = capture.build_archive(recording_id)
+    while True:
+        pending = capture.next_pending()
+        if not pending:
+            return
+        recording_id, reason = pending["recording_id"], pending["reason"]
+        try:
+            archive = capture.build_archive(recording_id)
+            break
+        except FileNotFoundError:
+            # The Recording was deleted since it was queued: drop it, try the next.
+            if not hasattr(capture, "drop"):
+                raise
+            capture.drop(recording_id)
     try:
         version, _commit = usage_events._versions()
         headers = {

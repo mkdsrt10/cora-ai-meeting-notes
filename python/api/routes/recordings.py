@@ -218,6 +218,7 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
     # exists now).
     # Every failure is answered as {"error", "code", "retryable"} so the
     # Processing queue can tell permanent from transient (api.processing_errors).
+    import audio_pruning
     try:
         return _process_recording(req, path, body)
     except Exception as exc:
@@ -225,6 +226,8 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
         status, payload = classify(exc)
         print(f"[process-recording] failed: {type(exc).__name__} -> {payload['code']}", flush=True)
         return req.send_json(payload, status)
+    finally:
+        audio_pruning.trigger()  # every Processing queue job ends here, ok or not
 
 
 def _process_recording(req, path: str, body: dict) -> None:

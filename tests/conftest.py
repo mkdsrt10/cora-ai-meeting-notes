@@ -8,6 +8,9 @@ from pathlib import Path
 _DATA = tempfile.mkdtemp(prefix="cora-test-")
 os.environ["VOICECOACH_DATA_DIR"] = _DATA
 os.environ.pop("VOICECOACH_ENTERPRISE_LOCKDOWN", None)
+# No background audio pruning against other suites' fixture Recordings;
+# tests/test_audio_pruning.py turns it back on where it needs it.
+os.environ["CORA_AUDIO_PRUNING_DISABLED"] = "1"
 os.environ.pop("LANGFUSE_PUBLIC_KEY", None)
 os.environ.pop("LANGFUSE_SECRET_KEY", None)
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
