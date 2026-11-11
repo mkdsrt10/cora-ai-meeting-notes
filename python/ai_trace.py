@@ -26,6 +26,7 @@ from __future__ import annotations
 import contextvars
 import hashlib
 import json
+import os
 import platform
 import resource
 import sqlite3
@@ -200,7 +201,14 @@ def to_jsonable(value: Any, depth: int = 0) -> Any:
 
 @lru_cache(maxsize=1)
 def app_versions() -> dict[str, Any]:
+    """Version and commit of the running app. Electron stamps them into the
+    server's environment (a packaged app has no package.json or .git at its
+    root); a bare checkout falls back to reading them from the repo."""
     info: dict[str, Any] = {"app_version": None, "git_commit": None, "git_dirty": None}
+    stamped_version, stamped_commit = os.environ.get("CORA_APP_VERSION"), os.environ.get("CORA_GIT_COMMIT")
+    if stamped_version or stamped_commit:
+        info.update(app_version=stamped_version or None, git_commit=stamped_commit or None)
+        return info
     try:
         info["app_version"] = json.loads((paths.APP_ROOT / "package.json").read_text()).get("version")
     except (OSError, ValueError):
