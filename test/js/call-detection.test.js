@@ -6,7 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('events');
 const { createCallDetection } = require('../../src/main/call-detection');
-const { createDetector } = require('../../src/meeting-detector');
+const { createDetector, TICK_BUDGET_MS } = require('../../src/meeting-detector');
 const { fakeClock } = require('./fakes');
 
 const MEET = { label: 'Google Meet', source: 'browser', url: 'https://meet.google.com/abc-defg-hij', confirmed: true, unanswered: [] };
@@ -81,6 +81,47 @@ test('the mic turning on asks the detector once and reports signal mic', async (
   assert.equal(asked, 1);
   assert.deepEqual(h.log[0], { name: 'call_detected', payload: { app: 'Slack Huddle', trigger: 'mic', confirmed: false, seconds_to_prompt: 0 } });
   assert.equal(h.shown.length, 1);
+});
+
+test('the mic-on check runs on the 2.5s tick budget, not the detector\'s 20s default', async () => {
+  const budgets = [];
+  const h = harness({ check: async (o) => { budgets.push(o && o.budgetMs); return { status: 'empty', call: null, unanswered: [] }; } });
+  await h.cd.onMicOn();
+  assert.equal(budgets[0], TICK_BUDGET_MS);
+  assert.equal(TICK_BUDGET_MS, 2500);
+});
+
+test('a mic-on check that finishes after mic-off is dropped: no prompt, no follow-up', async () => {
+  let release;
+  const h = harness({ check: () => new Promise((r) => { release = r; }) });
+  const pending = h.cd.onMicOn();
+  await h.clock.advance(0);
+  await h.cd.onMicOff();
+  release({ status: 'found', call: MEET, unanswered: [] });
+  await pending;
+  assert.deepEqual(h.log, []);
+  assert.equal(h.shown.length, 0);
+
+  let release2;
+  const g = harness({ check: () => new Promise((r) => { release2 = r; }) });
+  const pending2 = g.cd.onMicOn();
+  await g.cd.onMicOff();
+  release2({ status: 'empty', call: null, unanswered: [] });
+  await pending2;
+  assert.equal(g.clock.pendingTimers(), 0, 'no follow-up started for a mic that is off');
+});
+
+test('seconds_to_prompt is measured from the mic-on before this prompt, null once a Call has ended since', async () => {
+  const h = harness();
+  h.cd.start();
+  await h.cd.onMicOn();            // mic on at t0, nothing found yet
+  await h.clock.advance(7000);
+  h.watcher().onDetected(MEET);    // first Call, 7 s after mic-on
+  h.watcher().onEnded();           // Call ends, mic stays on
+  await h.clock.advance(600000);
+  h.watcher().onDetected({ ...MEET, label: 'Zoom' });
+  const sent = h.log.filter((e) => e.name === 'call_detected').map((e) => e.payload.seconds_to_prompt);
+  assert.deepEqual(sent, [7, null]);
 });
 
 test('the mic turning on with no Call shows nothing and sends nothing', async () => {

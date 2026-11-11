@@ -4,7 +4,9 @@
 // check has a budget. The owner stops it on a Call found, mic off, a Recording
 // starting or Dismiss; after the bound only the watcher's slow poll remains.
 // timers is injectable: { now, setTimeout, clearTimeout }.
-function createFollowup({ check, onFound, timers = { now: Date.now, setTimeout, clearTimeout }, intervalMs = 3000, boundMs = 120000, budgetMs = 2500 }) {
+const { TICK_BUDGET_MS } = require('../meeting-detector');
+
+function createFollowup({ check, onFound, timers = { now: Date.now, setTimeout, clearTimeout }, intervalMs = 3000, boundMs = 120000, budgetMs = TICK_BUDGET_MS }) {
   let active = false;
   let timer = null;
   let micOnAt = 0;

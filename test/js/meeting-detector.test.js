@@ -513,7 +513,7 @@ test('the watcher ends a Call only after two consecutive real misses', async (t)
 });
 
 test('the module exports the detector factory and its pure helpers only', () => {
-  assert.deepEqual(Object.keys(require('../../src/meeting-detector')).sort(), ['createDetector', 'decide', 'parseScriptOutput']);
+  assert.deepEqual(Object.keys(require('../../src/meeting-detector')).sort(), ['TICK_BUDGET_MS', 'createDetector', 'decide', 'parseScriptOutput']);
 });
 
 test('decide is the same pure rule on already-parsed output', () => {

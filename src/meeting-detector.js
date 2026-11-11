@@ -626,4 +626,4 @@ function createDetector({ run = osascript, probe = null, probeBin = null, probeT
   return { check, checkOnce, startWatcher };
 }
 
-module.exports = { createDetector, decide, parseScriptOutput };
+module.exports = { createDetector, decide, parseScriptOutput, TICK_BUDGET_MS };

@@ -7,6 +7,7 @@
 
 const { initialPromptState, promptStep } = require('./call-prompt-state');
 const { createFollowup } = require('./call-followup');
+const { TICK_BUDGET_MS } = require('../meeting-detector');
 
 // prompt (optional): { show(call), hide() } for the Call prompt panel; show may
 // throw, which falls back to the macOS banner. onPromptClosed(action, call):
@@ -18,6 +19,9 @@ const { createFollowup } = require('./call-followup');
 // recording starts into onRecordingStarted().
 function createCallDetection({ detector, notify, startRecording, stopRecording, track, isCapturing, prompt = null, onPromptClosed = () => {}, onPrompted = () => {}, onFallback = () => {}, clock = { now: Date.now, setTimeout, clearTimeout } }) {
   let micOnAt = null;
+  // Bumped on every mic-on and mic-off: a mic-on check that finishes under a
+  // different token is stale (the mic went off meanwhile) and is dropped.
+  let micToken = 0;
   const followup = createFollowup({
     check: async (opts) => checked(await detector.check(opts)),
     onFound: (call) => detected(call, 'followup'),
@@ -127,7 +131,9 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
   async function onMicOn() {
     if (promptState.phase !== 'idle' || isCapturing()) return;
     micOnAt = clock.now();
-    const { call } = checked(await detector.check());
+    const token = ++micToken;
+    const { call } = checked(await detector.check({ budgetMs: TICK_BUDGET_MS }));
+    if (token !== micToken) return;
     if (call) detected(call, 'mic');
     else if (promptState.phase === 'idle' && !isCapturing()) followup.start(micOnAt);
   }
@@ -137,6 +143,7 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
   // tab or window stops only a Recording that Cora's prompt started, so a
   // Recording started from the tray or floater outlives a Call it overlaps.
   function ended(reason) {
+    micOnAt = null; // a later Call is not timed from a mic-on that preceded this one
     step({ type: 'call-ended' });
     const fromCall = startedFromCall;
     startedFromCall = false;
@@ -144,7 +151,7 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
     if (reason === 'mic-off' || fromCall) stopRecording(reason);
   }
 
-  const onMicOff = () => { followup.stop(); micOnAt = null; ended('mic-off'); };
+  const onMicOff = () => { followup.stop(); micToken += 1; ended('mic-off'); };
 
   function start() {
     return detector.startWatcher({
