@@ -13,13 +13,23 @@ function joinNames(names) {
 }
 
 const { initialPromptState, promptStep } = require('./call-prompt-state');
+const { createFollowup } = require('./call-followup');
 
 // prompt (optional): { show(call), hide() } for the Call prompt panel; show may
 // throw, which falls back to the macOS banner. onPromptClosed(action, call):
 // action is 'start' | 'dismiss' | 'expired' (Call ended or a Recording started
-// elsewhere). Main feeds the panel's buttons into promptAction(action) and
+// elsewhere). onPrompted({call, signal, secondsFromMicOn}) fires when a Call
+// is offered (signal 'mic' | 'poll' | 'followup'; secondsFromMicOn is null when
+// no mic-on is known): the hook for Usage events. clock = { now, setTimeout,
+// clearTimeout } drives the green-room follow-up (injectable for tests). Main feeds the panel's buttons into promptAction(action) and
 // recording starts into onRecordingStarted().
-function createCallDetection({ detector, notify, startRecording, stopRecording, track, isCapturing, prompt = null, onPromptClosed = () => {} }) {
+function createCallDetection({ detector, notify, startRecording, stopRecording, track, isCapturing, prompt = null, onPromptClosed = () => {}, onPrompted = () => {}, clock = { now: Date.now, setTimeout, clearTimeout } }) {
+  let micOnAt = null;
+  const followup = createFollowup({
+    check: (opts) => detector.check(opts),
+    onFound: (call) => detected(call, 'followup'),
+    timers: clock,
+  });
   let promptState = initialPromptState();
   let currentCall = null;
   // The capturing Recording was started from a Call notification (click or
@@ -47,7 +57,11 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
       if (effect.type === 'show') showPrompt();
       else if (effect.type === 'banner') showBanner();
       else if (effect.type === 'hide') { try { prompt.hide(); } catch (err) { console.warn('[call-prompt] hide failed:', err && err.message); } }
-      else if (effect.type === 'closed') onPromptClosed(effect.action, currentCall);
+      else if (effect.type === 'closed') {
+        // Dismiss or Start ends the follow-up; so does a Recording starting.
+        followup.stop();
+        onPromptClosed(effect.action, currentCall);
+      }
     }
   }
 
@@ -83,10 +97,13 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
   }
 
   function detected(call, signal) {
+    followup.stop(); // a live Call found by any signal ends the follow-up
     if (promptState.phase !== 'idle' || isCapturing()) return;
     currentCall = call;
     track('call_detected', { app: call.label, signal, confirmed: Boolean(call.confirmed) });
     step({ type: 'detected', capturing: false });
+    const secondsFromMicOn = micOnAt === null ? null : Math.round((clock.now() - micOnAt) / 1000);
+    onPrompted({ call, signal, secondsFromMicOn });
   }
 
   // The panel's buttons ('start' | 'dismiss').
@@ -100,15 +117,17 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
     }
   }
 
-  const onRecordingStarted = () => step({ type: 'recording-started' });
+  const onRecordingStarted = () => { followup.stop(); step({ type: 'recording-started' }); };
 
   // The mic turning on is the fast, OS-level signal; the detector still has
   // to find a known app, tab or huddle, so dictation or Voice Memos never
   // prompt.
   async function onMicOn() {
     if (promptState.phase !== 'idle' || isCapturing()) return;
-    const call = await detector.checkOnce();
+    micOnAt = clock.now();
+    const { call } = await detector.check();
     if (call) detected(call, 'mic');
+    else if (promptState.phase === 'idle' && !isCapturing()) followup.start(micOnAt);
   }
 
   // The Call ended: the next one may be offered. The app releasing the mic
@@ -123,7 +142,7 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
     if (reason === 'mic-off' || fromCall) stopRecording(reason);
   }
 
-  const onMicOff = () => ended('mic-off');
+  const onMicOff = () => { followup.stop(); micOnAt = null; ended('mic-off'); };
 
   function start() {
     return detector.startWatcher({

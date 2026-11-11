@@ -7,10 +7,11 @@ const assert = require('node:assert/strict');
 const { EventEmitter } = require('events');
 const { createCallDetection } = require('../../src/main/call-detection');
 const { createDetector } = require('../../src/meeting-detector');
+const { fakeClock } = require('./fakes');
 
 const MEET = { label: 'Google Meet', source: 'browser', url: 'https://meet.google.com/abc-defg-hij', confirmed: true, unanswered: [] };
 
-function harness({ checkOnce = async () => null, capturing = false } = {}) {
+function harness({ checkOnce = async () => null, check = null, capturing = false, clock = fakeClock(), onPrompted } = {}) {
   const log = [];
   const shown = [];
   const started = [];
@@ -19,6 +20,8 @@ function harness({ checkOnce = async () => null, capturing = false } = {}) {
   const state = { capturing };
   const detector = {
     checkOnce,
+    // check(): { status, call }. Defaults to the checkOnce answer, found or empty.
+    check: check || (async () => { const call = await checkOnce(); return { status: call ? 'found' : 'empty', call, unanswered: [] }; }),
     startWatcher(handlers) {
       watcher = handlers;
       return () => { watcher = null; log.push('watcher-stopped'); };
@@ -41,8 +44,10 @@ function harness({ checkOnce = async () => null, capturing = false } = {}) {
     isCapturing: () => state.capturing,
     startRecording: (label) => started.push(label),
     stopRecording: (reason) => stopped.push(reason),
+    clock,
+    onPrompted,
   });
-  return { cd, log, shown, started, stopped, state, watcher: () => watcher, lastNotification: () => last };
+  return { cd, clock, log, shown, started, stopped, state, watcher: () => watcher, lastNotification: () => last };
 }
 
 test('a Call found by the poll sends call_detected, then offers to record it once', () => {
@@ -208,4 +213,115 @@ test('the hint names several browsers the way a sentence would', () => {
   three.cd.start();
   three.watcher().onUnanswered(['Google Chrome', 'Brave Browser', 'Safari', 'Safari']);
   assert.equal(three.shown[0].body, `Cora can't see inside Google Chrome, Brave Browser and Safari. ${HINT_TAIL}`);
+});
+
+// Green-room follow-up: the mic is on, no live Call yet (Green room); re-check
+// every 3s for 2 minutes from mic-on.
+function sequence(results) {
+  let i = 0;
+  const calls = { n: 0 };
+  const check = async () => { calls.n += 1; return results[Math.min(i++, results.length - 1)]; };
+  return { check, calls };
+}
+const EMPTY = { status: 'empty', call: null, unanswered: [] };
+const FOUND = { status: 'found', call: MEET, unanswered: [] };
+
+test('follow-up: clicking Join after mic-on prompts on the next 3s re-check, as trigger followup', async () => {
+  const s = sequence([EMPTY, EMPTY, FOUND]);
+  const prompted = [];
+  const h = harness({ check: s.check, onPrompted: (p) => prompted.push(p) });
+  h.cd.start();
+  await h.cd.onMicOn();
+  assert.equal(h.shown.length, 0);
+  await h.clock.advance(2999);
+  assert.equal(s.calls.n, 1, 'no re-check before 3s');
+  await h.clock.advance(1);
+  assert.equal(h.shown.length, 0);
+  await h.clock.advance(3000);
+  assert.equal(h.shown.length, 1);
+  assert.deepEqual(h.log[0], { name: 'call_detected', payload: { app: 'Google Meet', signal: 'followup', confirmed: true } });
+  assert.deepEqual(prompted, [{ call: MEET, signal: 'followup', secondsFromMicOn: 6 }]);
+  const n = s.calls.n;
+  await h.clock.advance(30000);
+  assert.equal(s.calls.n, n, 'stops once the Call is found');
+});
+
+test('follow-up: stops after 2 minutes from mic-on, leaving only the poll', async () => {
+  const s = sequence([EMPTY]);
+  const h = harness({ check: s.check });
+  h.cd.start();
+  await h.cd.onMicOn();
+  await h.clock.advance(120000);
+  assert.equal(s.calls.n, 1 + 40, 'mic-on check plus a re-check every 3s for 120s');
+  await h.clock.advance(60000);
+  assert.equal(s.calls.n, 41);
+  assert.equal(h.clock.pendingTimers(), 0);
+});
+
+test('follow-up: stops when the mic goes off', async () => {
+  const s = sequence([EMPTY]);
+  const h = harness({ check: s.check });
+  h.cd.start();
+  await h.cd.onMicOn();
+  await h.clock.advance(3000);
+  h.cd.onMicOff();
+  await h.clock.advance(60000);
+  assert.equal(s.calls.n, 2);
+});
+
+test('follow-up: stops when a Recording starts', async () => {
+  const s = sequence([EMPTY]);
+  const h = harness({ check: s.check });
+  h.cd.start();
+  await h.cd.onMicOn();
+  h.cd.onRecordingStarted();
+  await h.clock.advance(60000);
+  assert.equal(s.calls.n, 1);
+});
+
+test('follow-up: a Call found by the poll ends it, and Dismiss or Start leaves it ended', async () => {
+  for (const action of ['dismiss', 'start']) {
+    const s = sequence([EMPTY]);
+    const h = harness({ check: s.check });
+    h.cd.start();
+    await h.cd.onMicOn();
+    h.watcher().onDetected(MEET);
+    assert.equal(h.clock.pendingTimers(), 0);
+    h.cd.promptAction(action);
+    await h.clock.advance(60000);
+    assert.equal(s.calls.n, 1);
+  }
+});
+
+test('follow-up: never overlaps, and a failed check keeps it going', async () => {
+  let inflight = 0;
+  let maxInflight = 0;
+  let n = 0;
+  const check = async () => {
+    n += 1;
+    inflight += 1;
+    maxInflight = Math.max(maxInflight, inflight);
+    await new Promise((r) => setImmediate(r));
+    inflight -= 1;
+    if (n === 3) return FOUND;
+    return n === 2 ? { status: 'failed', call: null, unanswered: [] } : EMPTY;
+  };
+  const h = harness({ check });
+  h.cd.start();
+  await h.cd.onMicOn();
+  await h.clock.advance(9000);
+  assert.equal(maxInflight, 1);
+  assert.equal(h.shown.length, 1);
+});
+
+test('follow-up: asks with the 2.5s tick budget, and does not run while a Recording is capturing', async () => {
+  const budgets = [];
+  const h = harness({ check: async (o) => { budgets.push(o && o.budgetMs); return EMPTY; } });
+  h.cd.start();
+  await h.cd.onMicOn();
+  await h.clock.advance(3000);
+  assert.equal(budgets[1], 2500);
+  const c = harness({ capturing: true, check: async () => EMPTY });
+  await c.cd.onMicOn();
+  assert.equal(c.clock.pendingTimers(), 0);
 });
