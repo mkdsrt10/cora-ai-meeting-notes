@@ -414,3 +414,36 @@ def test_a_capture_queued_before_lockdown_is_never_uploaded_under_it(no_events, 
 
     assert no_events.requests == []
     assert capture.has_pending(recording_id)
+
+
+def test_a_capture_whose_recording_was_deleted_is_dropped_quietly_and_the_next_one_uploads(no_events, port):  # noqa: F811
+    import beta_sender
+    import capture
+    import db
+    import paths
+    no_events.replies["/v1/recordings"] = (201, {"stored": "x/y"})
+    gone, kept = make_recording(), make_recording()
+    capture.request(gone, "feedback")
+    capture.request(kept, "sample")
+    shutil.rmtree(paths.RECORDINGS_DIR / gone)
+    db.delete_recording(gone)
+
+    beta_sender.start()
+
+    assert wait_for(lambda: uploads(no_events))
+    assert [u["headers"]["X-Cora-Recording"] for u in uploads(no_events)] == [kept]
+    assert not capture.has_pending(gone)
+    assert dropped_events() == []
+    assert api(port, "GET", "/api/beta/status")[1]["last_error"] is None
+
+
+def test_dropping_a_capture_takes_it_off_the_queue_without_an_event(no_events):
+    import capture
+    recording_id = make_recording()
+    capture.request(recording_id, "feedback")
+
+    capture.drop(recording_id)
+
+    assert not capture.has_pending(recording_id) and capture.next_pending() is None
+    assert dropped_events() == []
+    assert capture.request(recording_id, "sample") is False  # asked for once, whatever became of it
