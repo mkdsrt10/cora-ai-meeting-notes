@@ -24,7 +24,7 @@ print_env() {
 
 if [[ "${1:-}" == "--env" ]]; then print_env; exit 0; fi
 
-mkdir -p "$RX/receiver" "$ROOT/logs"
+mkdir -p "$RX/receiver" "$ROOT/logs" "$(dirname "$PL")"
 chmod 700 "$ROOT"
 cp "$REPO/receiver/receiver.py" "$RX/receiver/receiver.py"
 [[ -s "$ROOT/config.json" ]] || cp "$REPO/receiver/config.example.json" "$ROOT/config.json"
