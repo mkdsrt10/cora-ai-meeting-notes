@@ -56,5 +56,7 @@ function readProcessingControls(hostId) {
 }
 
 async function saveProcessingControls(hostId) {
-  await api('/api/processing', {method:'POST', body:JSON.stringify(readProcessingControls(hostId))});
+  const options = readProcessingControls(hostId);
+  await api('/api/processing', {method:'POST', body:JSON.stringify(options)});
+  trackSettingChanged('processing_mode', options.mode);
 }

@@ -151,6 +151,7 @@ $('#notepadParticipants')?.addEventListener('change', async (e) => {
     select.disabled = true;
     try{
       const created = await api('/api/people/create', { method: 'POST', body: JSON.stringify({ name }) });
+      track('person_added', { source: 'participants_tab' });
       await api('/api/recording/participant', { method: 'POST', body: JSON.stringify({ id: record.id, raw_name: rawName, action: 'map', person_id: created.person.id }) });
       const entry = (selectedDetail?.participants || []).find(p => p.raw_name === rawName);
       if(entry) entry.person_id = created.person.id;

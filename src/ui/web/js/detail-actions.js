@@ -291,4 +291,11 @@ async function openInRecordings(id){
   showView('recording-detail');
   $('#detailTitle').textContent = 'Loading...';
   await loadSelectedRecording(id);
+  // Opening a finished Recording is a view of its notes.
+  const record = selectedRecording();
+  if(record && !PENDING_STAGES.has(record.analysis_stage)){
+    track('notes_viewed', { recording_id: record.id });
+    const items = record.call_summary?.action_items;
+    if(Array.isArray(items)) track('action_items_counted', { recording_id: record.id, count: items.length });
+  }
 }
