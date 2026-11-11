@@ -778,6 +778,43 @@ func scanMeetingApps() {
     }
 }
 
+// One-shot liveness probe (`speaker-watch --probe`): the same Accessibility
+// checks scanMeetingApps runs (Zoom: a window titled "Meeting"; Slack: a huddle
+// root with a leave control), answered once as a single JSON line, then exit.
+// {"ax":"ok"|"untrusted","zoomMeeting":bool,"slackHuddle":bool}. "untrusted" =
+// Accessibility is not granted (AXError -25211 / apiDisabled), so the caller
+// falls back to process-only. The caller enforces the 1.5 s hard timeout.
+func runProbe() -> Never {
+    var zoomMeeting = false
+    var slackHuddle = false
+    var untrusted = !AXIsProcessTrusted()
+    for app in NSWorkspace.shared.runningApplications {
+        guard let name = app.localizedName else { continue }
+        let isZoom = name.localizedCaseInsensitiveCompare("zoom.us") == .orderedSame
+        let isSlack = name.localizedCaseInsensitiveCompare("Slack") == .orderedSame
+        if !isZoom && !isSlack { continue }
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        var windowsVal: AnyObject?
+        let result = AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &windowsVal)
+        if result == .apiDisabled { untrusted = true; continue }
+        guard result == .success, let windows = windowsVal as? [AXUIElement] else { continue }
+        for win in windows {
+            var titleVal: AnyObject?
+            AXUIElementCopyAttributeValue(win, kAXTitleAttribute as CFString, &titleVal)
+            let title = (titleVal as? String) ?? ""
+            if isZoom && title.localizedCaseInsensitiveContains("Meeting") { zoomMeeting = true }
+            if isSlack && findSlackHuddleRoot(win) != nil { slackHuddle = true }
+        }
+    }
+    if untrusted {
+        print("{\"ax\":\"untrusted\",\"zoomMeeting\":false,\"slackHuddle\":false}")
+    } else {
+        print("{\"ax\":\"ok\",\"zoomMeeting\":\(zoomMeeting),\"slackHuddle\":\(slackHuddle)}")
+    }
+    fflush(stdout)
+    exit(0)
+}
+
 if CommandLine.arguments.contains("--self-test") {
     precondition(extractParticipantName("More options for Jane R.T.") == "Jane R.T.")
     precondition(extractParticipantName("Video settings") == nil)
@@ -793,6 +830,8 @@ if CommandLine.arguments.contains("--self-test") {
     print("Speaker watcher parser checks passed")
     exit(0)
 }
+
+if CommandLine.arguments.contains("--probe") { runProbe() }
 
 // Main execution
 let args = CommandLine.arguments
