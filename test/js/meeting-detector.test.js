@@ -275,6 +275,22 @@ test('each check logs one line with the candidates and the decision', async (t) 
   ]);
 });
 
+test('a runner error logs the AppleScript error text and how osascript exited', async (t) => {
+  const lines = [];
+  t.mock.method(console, 'log', (...args) => lines.push(args.join(' ')));
+  const failWith = (err) => createDetector({ run: async () => { throw err; } }).checkOnce();
+  await failWith({
+    message: 'Command failed: osascript -e <script>\n0:42: execution error',
+    stderr: '0:42: execution error: Not authorized to send Apple events to System Events. (-1743)\nmore\n',
+    code: 1,
+  });
+  await failWith(Object.assign(new Error('Command failed: osascript -e <script>'), { stderr: '', killed: true, signal: 'SIGTERM', code: null }));
+  assert.deepEqual(lines, [
+    '[call-detect] candidates=error(0:42: execution error: Not authorized to send Apple events to System Events. (-1743); exit 1) -> none',
+    '[call-detect] candidates=error(Command failed: osascript -e <script>; killed SIGTERM) -> none',
+  ]);
+});
+
 test('decide is the same pure rule on already-parsed output', () => {
   const { decide } = require('../../src/meeting-detector');
   const parsed = { processes: [], urls: [MEET_ROOM_NEW], slackWindows: [], snapshots: [{ browser: 'Safari', url: MEET_ROOM_NEW, live: null, label: null }] };

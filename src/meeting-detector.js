@@ -385,6 +385,19 @@ function logLine(candidates, call) {
   console.log(`[call-detect] candidates=${seen} -> ${call ? call.label : 'none'}`);
 }
 
+// One line for the log: osascript's own error text (stderr, e.g. "Not
+// authorized to send Apple events") over execFile's generic "Command failed",
+// then how the process ended. An execFile timeout shows as killed + SIGTERM.
+function runnerError(err) {
+  const firstLine = (v) => String(v || '').trim().split('\n')[0].trim();
+  const msg = firstLine(err && err.stderr) || firstLine((err && err.message) || err);
+  const how = [];
+  if (err && err.killed) how.push(`killed ${err.signal || ''}`.trim());
+  else if (err && err.signal) how.push(`signal ${err.signal}`);
+  if (err && typeof err.code === 'number') how.push(`exit ${err.code}`);
+  return how.length ? `${msg}; ${how.join(', ')}` : msg;
+}
+
 function osascript(script, { timeoutMs }) {
   return new Promise((resolve, reject) => {
     execFile('osascript', ['-e', script], { timeout: timeoutMs }, (error, stdout, stderr) => {
@@ -415,8 +428,7 @@ function createDetector({ run = osascript } = {}) {
     } catch (err) {
       // No Automation/Accessibility permission yet, timeout, script error:
       // "no Call" for this check rather than a crash.
-      const msg = String((err && err.message) || err).split('\n')[0];
-      console.log(`[call-detect] candidates=error(${msg}) -> none`);
+      console.log(`[call-detect] candidates=error(${runnerError(err)}) -> none`);
       // error: true tells the watcher this check saw nothing either way, so
       // one failed poll does not read as "the Call ended".
       return { call: null, unanswered: [], error: true };
