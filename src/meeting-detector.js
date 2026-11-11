@@ -405,6 +405,8 @@ function runnerError(err) {
   return how.length ? `${msg}; ${how.join(', ')}` : msg;
 }
 
+const TICK_BUDGET_MS = 2500;
+
 function osascript(script, { timeoutMs }) {
   return new Promise((resolve, reject) => {
     execFile('osascript', ['-e', script], { timeout: timeoutMs }, (error, stdout, stderr) => {
@@ -428,17 +430,17 @@ function createDetector({ run = osascript } = {}) {
   // rather than only on the Call.
   const unansweredListeners = new Set();
 
-  async function evaluate() {
+  async function evaluate(timeoutMs = SCRIPT_TIMEOUT_MS) {
     let raw;
     try {
-      raw = await run(APPLESCRIPT, { timeoutMs: SCRIPT_TIMEOUT_MS });
+      raw = await run(APPLESCRIPT, { timeoutMs });
     } catch (err) {
       // No Automation/Accessibility permission yet, timeout, script error:
       // "no Call" for this check rather than a crash.
       console.log(`[call-detect] candidates=error(${runnerError(err)}) -> none`);
-      // error: true tells the watcher this check saw nothing either way, so
-      // one failed poll does not read as "the Call ended".
-      return { call: null, unanswered: [], error: true };
+      // failed: this check saw nothing either way, so it must not count as
+      // "checked, found nothing" (a miss).
+      return { status: 'failed', call: null, unanswered: [] };
     }
     const candidates = candidatesOf(parseScriptOutput(raw));
     const unanswered = unansweredOf(candidates);
@@ -446,25 +448,50 @@ function createDetector({ run = osascript } = {}) {
     const call = picked ? { ...picked, unanswered } : null;
     logLine(candidates, call);
     if (unanswered.length) for (const fn of unansweredListeners) fn(unanswered);
-    return { call, unanswered };
+    return { status: call ? 'found' : 'empty', call, unanswered };
   }
 
-  /** One check. Resolves the Call or null; never rejects. */
+  /**
+   * One check, with its outcome: { status: 'found' | 'empty' | 'failed', call,
+   * unanswered }. 'empty' = checked, nothing there; 'failed' = the check itself
+   * broke (runner error, osascript timeout, or budgetMs spent). Only 'empty'
+   * is a real miss. Never rejects. budgetMs (optional) bounds the whole check.
+   */
+  async function check({ budgetMs } = {}) {
+    if (!budgetMs) return evaluate();
+    let timer;
+    const budget = new Promise((resolve) => {
+      timer = setTimeout(() => {
+        console.log(`[call-detect] candidates=error(tick budget ${budgetMs}ms spent) -> none`);
+        resolve({ status: 'failed', call: null, unanswered: [] });
+      }, budgetMs);
+    });
+    try {
+      return await Promise.race([evaluate(budgetMs), budget]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** One check. Resolves the Call or null (failed reads as null); never rejects. */
   async function checkOnce() {
     return (await evaluate()).call;
   }
 
   /**
    * Polls and calls back on transitions: onDetected(call) when a Call first
-   * appears, onEnded() when it goes away, onUnanswered(browsers) at most once
-   * per watcher. The mic-on signal is the fast path; this poll is the backstop
-   * for when the mic watcher cannot start. Returns stop().
+   * appears, onEnded() after two consecutive real misses (failed checks do not
+   * count), onUnanswered(browsers) at most once per watcher. A tick has a
+   * tickBudgetMs budget; a tick still running when the next is due is skipped.
+   * The mic-on signal is the fast path; this poll is the backstop for when the
+   * mic watcher cannot start. Returns stop().
    */
-  function startWatcher({ onDetected = () => {}, onEnded = () => {}, onUnanswered = () => {}, intervalMs = 20000 } = {}) {
+  function startWatcher({ onDetected = () => {}, onEnded = () => {}, onUnanswered = () => {}, intervalMs = 20000, tickBudgetMs = TICK_BUDGET_MS } = {}) {
     let inCall = false;
     let stopped = false;
     let running = false;
     let hinted = false;
+    let misses = 0;
 
     const listener = (browsers) => {
       if (hinted || stopped) return;
@@ -477,13 +504,17 @@ function createDetector({ run = osascript } = {}) {
       if (stopped || running) return;
       running = true;
       try {
-        const { call, error } = await evaluate();
-        if (stopped || error) return;
-        if (call && !inCall) {
-          inCall = true;
-          onDetected(call);
-        } else if (!call && inCall) {
+        const { status, call } = await check({ budgetMs: tickBudgetMs });
+        if (stopped || status === 'failed') return;
+        if (call) {
+          misses = 0;
+          if (!inCall) {
+            inCall = true;
+            onDetected(call);
+          }
+        } else if (inCall && ++misses >= 2) {
           inCall = false;
+          misses = 0;
           onEnded();
         }
       } finally {
@@ -500,7 +531,7 @@ function createDetector({ run = osascript } = {}) {
     };
   }
 
-  return { checkOnce, startWatcher };
+  return { check, checkOnce, startWatcher };
 }
 
 module.exports = { createDetector, decide, parseScriptOutput };
