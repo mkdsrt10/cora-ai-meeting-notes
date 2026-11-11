@@ -7,6 +7,7 @@ This module fixes up the process environment and starts the server.
 from __future__ import annotations
 
 import os
+import signal
 import sys
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -50,12 +51,27 @@ def main() -> None:
     credentials._sanitize_db()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Cora: http://{args.host}:{args.port}", flush=True)
+    # Electron stops the server with SIGTERM (pythonProcess.kill()); turn it
+    # into the same clean exit as Ctrl-C so the beta sender's final flush runs.
+    signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
+    import beta_sender
+    # The port is bound; the daily people_snapshot (a walk of the Recordings
+    # folder), the config fetch and the first flush all run on its thread.
+    beta_sender.start()
+    import audio_pruning
+    audio_pruning.start()  # first pass now on its thread, then after each job and every 6 h
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        audio_pruning.stop()
+        beta_sender.stop(final_flush=True)
+
+
+def _raise_keyboard_interrupt(signum, frame) -> None:
+    raise KeyboardInterrupt
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ function node(selector){
 let fail=false;
 const context=vm.createContext({console,document:{querySelector:node,querySelectorAll:()=>[]},
  fetch:async(path,options)=>{requests.push([path,options]);return {ok:!fail,status:500,json:async()=>fail?{error:'Database unavailable'}:path==='/api/people/create'?{person:{name:'Jane Doe'}}:{people:[]}};}});
-vm.runInContext(fs.readFileSync(process.argv[2]+'/src/ui/web/js/core.js','utf8'),context);
+for(const f of ['core.js','usage.js']) vm.runInContext(fs.readFileSync(process.argv[2]+'/src/ui/web/js/'+f,'utf8'),context);
 (async()=>{
  const submit=callbacks.get('#createPersonForm:submit');assert.ok(submit);
  node('#createPersonName').value=' Jane Doe ';node('#createPersonRole').value='Engineer';

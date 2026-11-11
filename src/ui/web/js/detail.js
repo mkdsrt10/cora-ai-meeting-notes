@@ -37,6 +37,7 @@ function resetProcessingStatus(){
   if(reprocess){
     reprocess.disabled = !!record && activeReprocess.has(record.id);
     reprocess.textContent = reprocess.disabled ? '🔁 Initializing pipeline…' : '🔁 Retranscribe & Re-summarize';
+    if(record?.audio_pruned) reprocess.disabled = true;
   }
   const summarize = $('#notepadAiSummarizeBtn');
   if(summarize){
@@ -178,10 +179,15 @@ async function pollLiveFeedIfRecording(){
   }, 2000);
 }
 
+// The notepad text as first loaded for the open Recording: notes_edited
+// measures each save against it (re-renders of the same Recording keep it).
+let notesBaseline = { id: null, text: '' };
+
 function loadNotepad(){
   const record = selectedRecording();
   const notesEl = $('#notepadNotes');
   if(notesEl) notesEl.value = record?.notes || '';
+  if(record && notesBaseline.id !== record.id) notesBaseline = { id: record.id, text: record.notes || '' };
 
   const notesToggle = $('#notepadNotesToggle');
   if(hasEnhancedNotes(record)){
@@ -302,6 +308,7 @@ function loadNotepad(){
       reprocessBtn.textContent = '🔁 Retranscribe & Re-summarize';
     }
   }
+  renderAudioState(record);
   const aiSummarizeBtn = $('#notepadAiSummarizeBtn');
   if(aiSummarizeBtn && record){
     aiSummarizeBtn.style.display = !PENDING_STAGES.has(record.analysis_stage) ? '' : 'none';
@@ -348,6 +355,37 @@ function renderProcessingNotices(record){
   enginesHost.style.display = '';
 }
 
+// Audio pruning (python/audio_pruning.py) removed this Recording's audio:
+// say why where the player would be, and keep Retranscribe (which needs the
+// audio) disabled. record.audio_pruned = {at, reason: retention|cap, limit}.
+function audioPrunedText(record){
+  const pruned = record?.audio_pruned;
+  if(!pruned) return '';
+  const why = pruned.reason === 'cap' ? `to stay under the ${Number(pruned.limit)} MB cap`
+    : `after ${Number(pruned.limit)} days`;
+  return `Audio removed ${why}. The transcript and notes are kept.`;
+}
+
+const REPROCESS_TITLE = 'Re-run transcription and notes generation from the original audio — the current transcript and notes are archived first, so this is safe to redo';
+
+function renderAudioState(record){
+  const text = audioPrunedText(record);
+  const notice = $('#notepadAudioNotice');
+  if(notice){
+    notice.textContent = text;
+    notice.style.display = text ? '' : 'none';
+  }
+  const reprocess = $('#notepadReprocessBtn');
+  if(reprocess && record){
+    if(text){
+      reprocess.disabled = true;
+      reprocess.title = 'Unavailable: this recording\'s audio was removed to save space';
+    } else {
+      reprocess.title = REPROCESS_TITLE;
+    }
+  }
+}
+
 $('#notepadFolder')?.addEventListener('change', async (e) => {
   const record = selectedRecording();
   if(!record) return;
@@ -361,6 +399,23 @@ $('#notepadFolder')?.addEventListener('change', async (e) => {
   }catch(error){ toast(error.message, true); }
 });
 
+// Every notepad save is manual_notes_written (during the meeting or after);
+// a save after the meeting of notes that already had text is also
+// notes_edited, measured against the text first loaded (see editRatio).
+function trackNotesSaved(record, text){
+  const phase = PENDING_STAGES.has(record.analysis_stage) ? 'during' : 'after';
+  track('manual_notes_written', { recording_id: record.id, chars: text.length, phase });
+  if(phase === 'after' && notesBaseline.id === record.id && notesBaseline.text){
+    track('notes_edited', { recording_id: record.id, edit_ratio: editRatio(notesBaseline.text, text) });
+  }
+}
+
+// Text copied out of the generated notes leaves Cora: an export by copy.
+$('#notepadEnhancedNotes')?.addEventListener('copy', () => {
+  const record = selectedRecording();
+  if(record) track('notes_exported', { recording_id: record.id, kind: 'copy' });
+});
+
 $('#notepadNotes')?.addEventListener('input', () => {
   clearTimeout(notepadSaveTimer);
   const status = $('#notepadSaveStatus');
@@ -369,9 +424,11 @@ $('#notepadNotes')?.addEventListener('input', () => {
     const record = selectedRecording();
     if(!record) return;
     try{
-      await api('/api/recording/notes', { method: 'POST', body: JSON.stringify({ id: record.id, text: $('#notepadNotes').value }) });
+      const text = $('#notepadNotes').value;
+      await api('/api/recording/notes', { method: 'POST', body: JSON.stringify({ id: record.id, text }) });
       if(status) status.textContent = 'Saved';
-      if(selectedDetail) selectedDetail.notes = $('#notepadNotes').value;
+      if(selectedDetail) selectedDetail.notes = text;
+      trackNotesSaved(record, text);
     }catch(error){ if(status) status.textContent = 'Failed to save'; }
   }, 1500);
 });

@@ -363,6 +363,11 @@ def recording_item(folder: Path | dict, detailed: bool = False) -> dict[str, Any
         "size_bytes": audio.stat().st_size if audio else 0,
         # Minutes the cloud engine did not transcribe (pipeline/windowed.py engine_summary).
         "transcription_engines": metadata.get("transcription_engines"),
+        # Set once audio pruning removed this Recording's audio (audio_pruning.py):
+        # {at, reason: retention|cap, limit: days or MB}; the notes view says why.
+        "audio_pruned": ({"at": metadata["audio_pruned_at"], "reason": metadata.get("audio_pruned_reason"),
+                          "limit": metadata.get("audio_pruned_limit")}
+                         if metadata.get("audio_pruned_at") else None),
     }
     failure = metadata.get("processing_failure") or {}
     if stage == "failed":

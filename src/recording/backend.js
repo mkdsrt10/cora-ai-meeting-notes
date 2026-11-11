@@ -48,6 +48,8 @@ function createBackendApi({ postJson, fetchJson }) {
     appendNote: (id, text) => postJson('/api/recording/notes/append', { id, text }),
     setTitle: (id, title) => postJson('/api/recording/title', { id, title }),
     addLiveEntry: (entry) => postJson('/api/recording/live-entry', entry),
+    // One Usage event (python/usage_events.py CATALOG); rejects on a 400.
+    recordEvent: (name, payload) => postJson('/api/events', { name, payload }),
     processRecording: async (id) => {
       let raw;
       try {

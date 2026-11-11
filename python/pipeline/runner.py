@@ -25,7 +25,7 @@ from .text_model import text_model
 from .vocabulary import learn_from_transcript
 
 
-def log_resource_usage(recording_id: str, stage_timings: dict[str, float], audio_duration: float, speech_duration: float, llm_stats: dict[str, Any] | None = None) -> None:
+def log_resource_usage(recording_id: str, stage_timings: dict[str, float], audio_duration: float, speech_duration: float, llm_stats: dict[str, Any] | None = None) -> dict[str, Any]:
     """Append a JSONL entry with wall-clock, CPU, and peak-memory usage for a
     local processing run. GPU/power draw aren't available from plain Python on
     macOS without root (that needs `powermetrics`, which requires sudo) — this
@@ -55,6 +55,7 @@ def log_resource_usage(recording_id: str, stage_timings: dict[str, float], audio
     with log_path.open("a") as f:
         f.write(json.dumps(entry) + "\n")
     print(f"[Local Pipeline] Resource usage: {entry}", flush=True)
+    return entry
 
 
 def load_slides_ocr(folder: Path) -> list[dict[str, Any]]:
@@ -111,7 +112,10 @@ def process_recording_local(folder: Path, options: dict | None = None) -> dict[s
 
 
 def _process_recording_selected(folder: Path, profile: dict[str, Any]) -> dict[str, Any]:
-    """Complete end-to-end local processing: MLX Whisper + AX Speakers + OCR Slides + Qwen3-4B."""
+    """Complete end-to-end local processing: MLX Whisper + AX Speakers + OCR Slides + Qwen3-4B.
+    Every run, ok or failed, ends with exactly one processing_finished Usage event."""
+    import usage_emitters
+    started, run_id = time.time(), None
     try:
         audio_file = next((p for p in folder.iterdir() if p.is_file() and p.name.startswith("audio.")), None)
         if not audio_file:
@@ -119,19 +123,23 @@ def _process_recording_selected(folder: Path, profile: dict[str, Any]) -> dict[s
             raise NoAudioError()
         _archive_previous_outputs(folder)
         _write_progress(folder, "starting", "Initializing selected processing pipeline...", percent=5)
-        with ai_trace.run("local_meeting_pipeline", recording_id=folder.name, audio_file=audio_file.name):
+        with ai_trace.run("local_meeting_pipeline", recording_id=folder.name, audio_file=audio_file.name) as run_id:
             result = _process_recording_local_inner(folder, audio_file, profile)
     except Exception as exc:
-        _record_failure(folder, exc)
+        code = _record_failure(folder, exc)
+        # The transcriber model comes from the run's traced transcription span, if it got that far.
+        usage_emitters.processing_finished(folder.name, profile, run_id=run_id, started=started, error_code=code)
         raise
+    usage = result.pop("usage", None) or {}
+    usage_emitters.processing_finished(result["recording_id"], profile, run_id=run_id, started=started, **usage)
     (folder / ".pipeline_progress.json").unlink(missing_ok=True)
     db.set_processing_failure(result["recording_id"], None)
     return result
 
 
-def _record_failure(folder: Path, exc: BaseException) -> None:
+def _record_failure(folder: Path, exc: BaseException) -> str:
     """The "Processing failed" Stage: store the classified code and its fixed,
-    plain-language message (never exception text) on the Recording."""
+    plain-language message (never exception text) on the Recording. Returns the code."""
     from api.processing_errors import classify
     _, payload = classify(exc)
     if folder.is_dir():
@@ -141,6 +149,7 @@ def _record_failure(folder: Path, exc: BaseException) -> None:
         "message": payload["error"],
         "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     })
+    return payload["code"]
 
 
 def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict[str, Any]) -> dict[str, Any]:
@@ -375,7 +384,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
     db.update_recording_data(folder.name, "diarization", diarization_payload)
     db.update_recording_data(folder.name, "call_summary", call_summary_payload)
 
-    log_resource_usage(folder.name, stage_timings, audio_duration, speech_duration, llm_stats=_last_llm_stats or None)
+    resource_entry = log_resource_usage(folder.name, stage_timings, audio_duration, speech_duration,
+                                        llm_stats=_last_llm_stats or None)
 
     try:
         import tracing
@@ -459,6 +469,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
             ai_trace.reassign_recording(live_rec_id, parent_folder.name)
         db.delete_recording(folder.name)
         shutil.rmtree(folder, ignore_errors=True)
+        import capture
+        capture.drop(folder.name)  # a capture asked for the child can never be built now
         print(f"[Local Pipeline] Continuation merged directly into parent {parent_folder.name} and child removed.", flush=True)
 
     print(f"[Local Pipeline] All artifacts saved for {folder.name}", flush=True)
@@ -468,6 +480,10 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
         "diarization": diarization_payload,
         "call_summary": call_summary_payload,
         "speaker_profiles": speaker_profiles,
+        # For the processing_finished Usage event; popped by the caller.
+        "usage": {"resource": resource_entry,
+                  "window_fallbacks": len(metadata["transcription_engines"]["windows"]),
+                  "transcriber_model": asr.model},
     }
 
 

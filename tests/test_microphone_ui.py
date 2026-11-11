@@ -80,7 +80,7 @@ const context = vm.createContext({console, setTimeout, Promise, JSON,
   window: {electronAPI: {getPermissionStatus: async () => ({microphone: permission, screen:'granted', accessibility:'granted'}),
                          requestMicrophoneAccess: async () => { permission = 'granted'; }}},
 });
-for(const file of ['settings.js', 'onboarding.js']){
+for(const file of ['usage.js', 'settings.js', 'onboarding.js']){
   vm.runInContext(fs.readFileSync(ROOT+'/src/ui/web/js/'+file, 'utf8'), context);
 }
 const showRecordingSection = () => fire('nav:recording');

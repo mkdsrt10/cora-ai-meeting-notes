@@ -228,6 +228,17 @@
   </aside>
 
   <main>
+    <div class="update-banner" id="updateBanner" role="status" hidden>
+      <div class="update-banner-copy">
+        <strong id="updateBannerText"></strong>
+        <span class="update-banner-reason" id="updateBannerReason"></span>
+        <span class="update-banner-error" id="updateBannerError"></span>
+      </div>
+      <div class="update-banner-actions">
+        <button class="button secondary" id="updateLaterBtn">Later</button>
+        <button class="button primary" id="updateNowBtn">Update</button>
+      </div>
+    </div>
     <header class="topbar">
       <div><h1 id="viewTitle">Home</h1><p id="viewSubtitle" class="view-subtitle">Click a recording to view its analysis.</p></div>
       <div class="top-actions">
@@ -296,6 +307,7 @@
         <div id="notepadContinuationBanner" class="notepad-continuation-banner" style="display:none"></div>
         <div id="notepadFailureBanner" class="notepad-continuation-banner failure-notice" role="alert" style="display:none"></div>
         <div id="notepadEnginesBanner" class="notepad-continuation-banner" style="display:none"></div>
+        <div id="notepadAudioNotice" class="notepad-continuation-banner" style="display:none"></div>
 
         <div class="key-phrase-row" id="notepadKeyPhrases" title="Terms Cora biases transcription toward — add names, jargon, or product names it should spell correctly">
           <span class="key-phrase-label">Key phrases</span>
@@ -321,6 +333,39 @@
           <button class="notepad-tab" data-notepad-tab="processing">Processing</button>
         </div>
         <div class="notepad-panel" data-notepad-panel="notes">
+          <div class="feedback-widget" id="feedbackWidget" hidden>
+            <div id="feedbackForm">
+              <div class="feedback-row">
+                <span class="feedback-label">Rate</span>
+                <div class="segmented" role="group" aria-label="What you are rating">
+                  <button type="button" class="segmented-btn" data-feedback-target="recording">Recording</button>
+                  <button type="button" class="segmented-btn" data-feedback-target="notes">Notes</button>
+                  <button type="button" class="segmented-btn" data-feedback-target="overall">Overall</button>
+                </div>
+                <button type="button" class="feedback-thumb" data-feedback-rating="up" title="Good" aria-label="Thumbs up">👍</button>
+                <button type="button" class="feedback-thumb" data-feedback-rating="down" title="Needs work" aria-label="Thumbs down">👎</button>
+              </div>
+              <div id="feedbackDetails" class="feedback-details" hidden>
+                <div class="feedback-chips">
+                  <button type="button" class="feedback-chip" data-feedback-reason="missed_items">Missed items</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="wrong_items">Wrong items</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="wrong_speakers">Wrong speakers</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="too_long">Too long</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="other">Other</button>
+                </div>
+                <textarea id="feedbackComment" maxlength="500" rows="2" placeholder="Optional comment for the Cora team"></textarea>
+                <div class="feedback-foot">
+                  <small class="muted">Please don't include customer names</small>
+                  <span class="muted feedback-count" id="feedbackCount">0/500</span>
+                  <button type="button" class="button small" id="feedbackSubmit" disabled>Send</button>
+                </div>
+              </div>
+            </div>
+            <div id="feedbackRated" class="feedback-row" hidden>
+              <span class="feedback-label">Rated</span>
+              <button type="button" class="button secondary small" id="feedbackRateAgain">Rate again</button>
+            </div>
+          </div>
           <div id="notepadProcessingStatus" class="notepad-processing-status" style="display:none"></div>
           <div class="notepad-notes-toggle" id="notepadNotesToggle" style="display:none">
             <button type="button" class="notes-toggle-btn active" data-notes-view="enhanced">Enhanced Notes</button>
@@ -400,6 +445,7 @@
           <button class="settings-nav-item" data-settings-panel="cloud-models">Where models run</button>
           <button class="settings-nav-item" data-settings-panel="mcp">Claude / ChatGPT (MCP)</button>
           <button class="settings-nav-item" data-settings-panel="privacy">Data &amp; privacy</button>
+          <button class="settings-nav-item" data-settings-panel="beta">Beta</button>
           <button class="settings-nav-item" data-settings-panel="logs">Notifications &amp; logs</button>
         </div>
         <div class="settings-content">
@@ -525,6 +571,33 @@
             <p class="settings-sub">Cora's coaching plugin is the only part that calls a cloud API — see plugins/coaching/README.md.</p>
             <div class="storage-grid"><article><span>Archive size</span><strong id="archiveSize">—</strong></article><article><span>Audio size</span><strong id="audioSize">—</strong></article><article><span>Free space</span><strong id="storageFree">—</strong></article><article><span>Estimated runway</span><strong id="storageDays">—</strong></article></div>
             <button class="button secondary" id="settingsOpenFolder">Open local data folder</button>
+          </div>
+
+          <div class="settings-panel" data-settings-content="beta" hidden>
+            <h1 class="settings-title">Beta</h1>
+            <p class="settings-sub">Help the Cora team improve the beta. What is sent, where it goes, who sees it and how to stop: <a href="https://github.com/mkdsrt10/cora-ai-meeting-notes/blob/production/docs/BETA_POLICY.md" target="_blank" rel="noopener">the beta policy (docs/BETA_POLICY.md)</a>.</p>
+            <div class="settings-row">
+              <div><strong>Share usage and sample recordings with the Cora team</strong><small>Usage events, every Recording you rate, and about one in four Recordings under an hour. See <a href="https://github.com/mkdsrt10/cora-ai-meeting-notes/blob/production/docs/BETA_POLICY.md" target="_blank" rel="noopener">docs/BETA_POLICY.md</a>.</small></div>
+              <label class="switch"><input type="checkbox" id="settingsShareUsage"><span class="slider"></span></label>
+            </div>
+            <div class="settings-field"><label for="settingsBetaName">Your name for the Cora team</label><input type="text" id="settingsBetaName" maxlength="100" placeholder="Optional, e.g. Priya"></div>
+            <button class="button secondary" id="settingsShowShared" type="button" style="align-self:flex-start">Show what Cora shares</button>
+            <h4 style="margin-top:24px">Send feedback</h4>
+            <p class="muted" style="margin:4px 0 8px;">Anything not tied to one Recording: a bug, an idea, what works.</p>
+            <div class="feedback-row">
+              <button type="button" class="feedback-thumb" data-general-rating="up" title="Something good" aria-label="Thumbs up">👍</button>
+              <button type="button" class="feedback-thumb" data-general-rating="down" title="Something to fix" aria-label="Thumbs down">👎</button>
+            </div>
+            <textarea id="settingsFeedbackMessage" maxlength="500" rows="3" placeholder="Your message to the Cora team"></textarea>
+            <div class="feedback-foot">
+              <small class="muted">Please don't include customer names</small>
+              <span class="muted feedback-count" id="settingsFeedbackCount">0/500</span>
+              <button type="button" class="button small" id="settingsFeedbackSend" disabled>Send</button>
+            </div>
+            <h4 style="margin-top:24px">Audio on this Mac</h4>
+            <p class="muted" style="margin:4px 0 8px;">Older audio is removed first; transcripts and notes are kept.</p>
+            <div class="settings-field"><label for="settingsAudioRetentionDays">Keep audio for (days)</label><input type="number" id="settingsAudioRetentionDays" min="1" step="1"></div>
+            <div class="settings-field"><label for="settingsAudioCapMb">Keep at most (MB of audio)</label><input type="number" id="settingsAudioCapMb" min="50" step="50"></div>
           </div>
 
           <div class="settings-panel" data-settings-content="logs" hidden>
@@ -675,6 +748,7 @@
 <script src="/pixel-icons.js?v=cora-v4"></script>
 <!-- App scripts: classic scripts sharing one global scope; order matters (see scripts/lint-ui.js). -->
 <script src="/js/core.js"></script>
+<script src="/js/usage.js"></script>
 <script src="/js/folders.js"></script>
 <script src="/js/recording.js"></script>
 <script src="/js/sessions.js"></script>
@@ -688,6 +762,7 @@
 <script src="/js/transcript.js"></script>
 <script src="/js/detail.js"></script>
 <script src="/js/detail-actions.js"></script>
+<script src="/js/feedback.js"></script>
 <script src="/js/navigation.js"></script>
 <script src="/js/credentials.js"></script>
 <script src="/js/onboarding.js"></script>
@@ -695,6 +770,7 @@
 <script src="/js/search.js"></script>
 <script src="/js/plugin-host.js"></script>
 <!-- Enabled plugins' page scripts (src/ui/web/plugins/<id>.js) are loaded by plugin-host.js here, before init runs load(). -->
+<script src="/js/update-banner.js"></script>
 <script src="/js/init.js"></script>
 </body>
 </html>

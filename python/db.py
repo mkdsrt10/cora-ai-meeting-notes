@@ -154,6 +154,47 @@ def init_db():
             )
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at)')
+
+        # Usage events (beta telemetry): written locally regardless of the
+        # share toggle; sent_at is set once the sender delivered the row.
+        # See python/usage_events.py.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                name TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                sent_at TEXT
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_usage_events_unsent ON usage_events(sent_at, id)')
+
+        # Captured Recordings (beta): one row per Recording asked for, by a
+        # rating or the sample; uploaded_at / dropped_at end it. See python/capture.py.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS captures (
+                recording_id TEXT PRIMARY KEY,
+                reason TEXT NOT NULL,
+                requested_at TEXT NOT NULL,
+                uploaded_at TEXT,
+                dropped_at TEXT
+            )
+        ''')
+
+        # Feedback (beta): a thumbs up/down on a Recording, its notes, or Cora
+        # overall (recording_id NULL for the Settings general message);
+        # reasons is a JSON list. See python/api/routes/beta.py.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recording_id TEXT,
+                target TEXT NOT NULL,
+                rating TEXT NOT NULL,
+                reasons TEXT NOT NULL DEFAULT '[]',
+                comment TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+        ''')
         conn.commit()
 
 
@@ -392,6 +433,22 @@ def update_recording_data(recording_id, field, data):
         raise ValueError(f"Invalid field: {field}")
     with get_db() as conn:
         conn.execute(f"UPDATE recordings SET {field} = ? WHERE id = ?", (json.dumps(data), recording_id))
+        conn.commit()
+
+
+def set_recording_metadata(recording_id, **fields):
+    """Set top-level metadata keys on a Recording in one statement, so a
+    concurrent read-modify-write of other keys is not lost. A no-op for an
+    id with no row."""
+    if not fields:
+        return
+    args = []
+    for key, value in fields.items():
+        args += [f"$.{key}", json.dumps(value)]
+    pairs = ", ".join("?, json(?)" for _ in fields)
+    with get_db() as conn:
+        conn.execute(f"UPDATE recordings SET metadata = json_set(COALESCE(NULLIF(metadata, ''), '{{}}'), {pairs})"
+                     " WHERE id = ?", (*args, recording_id))
         conn.commit()
 
 def get_recording_data(recording_id, field):

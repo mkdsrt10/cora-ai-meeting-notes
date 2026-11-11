@@ -36,7 +36,7 @@ const context = vm.createContext({
   },
   setTimeout, clearTimeout,
 });
-vm.runInContext(fs.readFileSync(ROOT + '/src/ui/web/js/notepad.js', 'utf8'), context);
+for(const f of ['usage.js', 'notepad.js']) vm.runInContext(fs.readFileSync(ROOT + '/src/ui/web/js/' + f, 'utf8'), context);
 (async () => {
   await context.renderParticipants(record);
   assert.match(host.innerHTML, /Add "Pendem Chanakya" to People/, 'every row offers to create a Person');
