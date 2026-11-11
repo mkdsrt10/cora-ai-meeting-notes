@@ -154,6 +154,20 @@ def init_db():
             )
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at)')
+
+        # Usage events (beta telemetry): written locally regardless of the
+        # share toggle; sent_at is set once the sender delivered the row.
+        # See python/usage_events.py.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                name TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                sent_at TEXT
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_usage_events_unsent ON usage_events(sent_at, id)')
         conn.commit()
 
 
