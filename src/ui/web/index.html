@@ -400,6 +400,7 @@
           <button class="settings-nav-item" data-settings-panel="cloud-models">Where models run</button>
           <button class="settings-nav-item" data-settings-panel="mcp">Claude / ChatGPT (MCP)</button>
           <button class="settings-nav-item" data-settings-panel="privacy">Data &amp; privacy</button>
+          <button class="settings-nav-item" data-settings-panel="beta">Beta</button>
           <button class="settings-nav-item" data-settings-panel="logs">Notifications &amp; logs</button>
         </div>
         <div class="settings-content">
@@ -525,6 +526,21 @@
             <p class="settings-sub">Cora's coaching plugin is the only part that calls a cloud API — see plugins/coaching/README.md.</p>
             <div class="storage-grid"><article><span>Archive size</span><strong id="archiveSize">—</strong></article><article><span>Audio size</span><strong id="audioSize">—</strong></article><article><span>Free space</span><strong id="storageFree">—</strong></article><article><span>Estimated runway</span><strong id="storageDays">—</strong></article></div>
             <button class="button secondary" id="settingsOpenFolder">Open local data folder</button>
+          </div>
+
+          <div class="settings-panel" data-settings-content="beta" hidden>
+            <h1 class="settings-title">Beta</h1>
+            <p class="settings-sub">Help the Cora team improve the beta. What is sent, where it goes, who sees it and how to stop: docs/BETA_POLICY.md.</p>
+            <div class="settings-row">
+              <div><strong>Share usage and sample recordings with the Cora team</strong><small>Usage events, every Recording you rate, and about one in four Recordings under an hour. See docs/BETA_POLICY.md.</small></div>
+              <label class="switch"><input type="checkbox" id="settingsShareUsage"><span class="slider"></span></label>
+            </div>
+            <div class="settings-field"><label for="settingsBetaName">Your name for the Cora team</label><input type="text" id="settingsBetaName" maxlength="100" placeholder="Optional, e.g. Priya"></div>
+            <button class="button secondary" id="settingsShowShared" type="button" style="align-self:flex-start">Show what Cora shares</button>
+            <h4 style="margin-top:24px">Audio on this Mac</h4>
+            <p class="muted" style="margin:4px 0 8px;">Older audio is removed first; transcripts and notes are kept.</p>
+            <div class="settings-field"><label for="settingsAudioRetentionDays">Keep audio for (days)</label><input type="number" id="settingsAudioRetentionDays" min="1" step="1"></div>
+            <div class="settings-field"><label for="settingsAudioCapMb">Keep at most (MB of audio)</label><input type="number" id="settingsAudioCapMb" min="50" step="50"></div>
           </div>
 
           <div class="settings-panel" data-settings-content="logs" hidden>
