@@ -10,8 +10,11 @@ const { DASHBOARD_URL } = require('./api-client');
 // a navigated-away frame, an injected iframe — is refused.
 const FLOATER_FILE_URL = pathToFileURL(path.join(__dirname, '..', 'ui', 'floater.html')).href;
 
+const CALL_PROMPT_FILE_URL = pathToFileURL(path.join(__dirname, '..', 'ui', 'call-prompt.html')).href;
+
 function isTrustedUrl(url) {
-  return url === FLOATER_FILE_URL
+  return url === CALL_PROMPT_FILE_URL
+    || url === FLOATER_FILE_URL
     || url.startsWith(FLOATER_FILE_URL + '#')
     || url === DASHBOARD_URL
     || url.startsWith(DASHBOARD_URL + '/');
@@ -42,4 +45,4 @@ function installNavigationGuards() {
   });
 }
 
-module.exports = { FLOATER_FILE_URL, isTrustedUrl, handleTrusted, installNavigationGuards };
+module.exports = { FLOATER_FILE_URL, CALL_PROMPT_FILE_URL, isTrustedUrl, handleTrusted, installNavigationGuards };
