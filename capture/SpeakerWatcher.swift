@@ -424,8 +424,42 @@ func recordBrowserCapture(_ browser: String, errorCode: Int?, detail: String? = 
 // NOTE: this script is flattened onto ONE line before it reaches the browser
 // (see scanBrowserGoogleMeet), so it must contain no `//` line comments; use
 // /* block comments */ only. tests/test_speaker_watch_js.py checks that.
+// Whether a call is live in a Meet or Slack tab comes from liveCall(), the
+// snippet shared with the Node detector (src/meeting-detector.js). Edit
+// capture/live-call-snippet.js, never the region below; `make build-native`
+// regenerates it and test/js/live-call-snippet-drift.test.js guards it.
+// BEGIN live-call-snippet (generated from capture/live-call-snippet.js by scripts/gen-live-call-snippet.js; do not edit)
+let liveCallSnippetJS = #"""
+function liveCall() {
+  /* Answers {live, label} for the current tab. Slack hosts get the huddle
+     rules; anything else (Meet) gets the leave-call rules. */
+  const host = typeof location !== 'undefined' && location.hostname ? String(location.hostname).toLowerCase() : '';
+  const text = el => String((el && (el.getAttribute('aria-label') || el.innerText)) || '').trim();
+  const buttons = root => Array.from(root.querySelectorAll('button, [role="button"]'));
+  if (host === 'slack.com' || host.endsWith('.slack.com')) {
+    /* Expanded huddle: participant tiles or the content container. Older
+       layouts: a huddle dialog holding a Leave/End huddle button. Collapsed
+       to the bottom mini-bar: a non-empty huddle_details_title. */
+    const isLeave = b => /^(?:leave|end)(?: the)? huddle/i.test(text(b));
+    const isHuddleRoot = r => /huddle/i.test(r.getAttribute('aria-label') || r.getAttribute('data-qa') || r.getAttribute('data-testid') || '');
+    const mini = document.querySelector('[data-qa="huddle_details_title"]');
+    const live = !!document.querySelector('[data-qa^="huddle_peer_tile_userId_"]')
+      || !!document.querySelector('[data-qa="huddle_window_content_container"]')
+      || Array.from(document.querySelectorAll('[role="dialog"], [data-qa*="huddle"], [data-testid*="huddle"]')).some(r => isHuddleRoot(r) && buttons(r).some(isLeave))
+      || String((mini && mini.innerText) || '').trim() !== '';
+    return { live, label: 'Slack Huddle' };
+  }
+  /* Meet: joined means a Leave call control exists; the green room has none. */
+  const live = !!document.querySelector('button[aria-label^="Leave call"], [data-tooltip^="Leave call"], [jsname][aria-label*="Leave"]')
+    || buttons(document).some(b => /^(?:leave|end)(?: the)? call/i.test(text(b)));
+  return { live, label: 'Google Meet' };
+}
+"""#
+// END live-call-snippet
+
 let googleMeetSnapshotJS = #"""
 (() => {
+    \#(liveCallSnippetJS)
     const names = new Set();
     const speaking = new Set();
     const clean = value => (value || '').trim();
@@ -460,7 +494,6 @@ let googleMeetSnapshotJS = #"""
         return JSON.stringify({active: live, participants: [...names], speaking_names: [...speaking], meeting_title: document.title});
     }
     let scope = document;
-    let slackActive = false;
     let slackTitle = '';
     if (slack) {
         /* Slack huddle UI (2026-11): one tile per participant,
@@ -488,9 +521,9 @@ let googleMeetSnapshotJS = #"""
            other party there; "Huddle in #channel" names nobody. */
         const miniEl = document.querySelector('[data-qa="huddle_details_title"]');
         const miniTitle = clean(miniEl && miniEl.innerText);
-        if (!tiles.length && !container && !miniTitle) return JSON.stringify({active: false, participants: [], speaking_names: [], meeting_title: ''});
+        /* Live or not is the shared liveCall() decision; the rest only gathers names. */
+        if (!liveCall().live) return JSON.stringify({active: false, participants: [], speaking_names: [], meeting_title: ''});
         scope = container || document;
-        slackActive = tiles.length > 0 || !!dialog;
         const profileRe = /^(?:View )?(.+?)(?:['’]s)? profile$/i;
         scope.querySelectorAll('[aria-label]').forEach(el => {
             const match = clean(el.getAttribute('aria-label')).match(profileRe);
@@ -513,7 +546,6 @@ let googleMeetSnapshotJS = #"""
             const withMatch = miniTitle.match(/^Huddle with (.+)$/i);
             if (withMatch) {
                 withMatch[1].split(/,\s*|\s+and\s+/).map(clean).forEach(name => { if (name && name.length <= 60) names.add(name); });
-                slackActive = true;
             }
         }
     }
@@ -537,7 +569,7 @@ let googleMeetSnapshotJS = #"""
         }
     });
     const title = document.querySelector('[data-meeting-title], [data-call-title]');
-    const active = slackActive || [...scope.querySelectorAll('button, [role="button"]')].some(button => /^(?:leave|end)(?: the)? (?:call|huddle)/i.test(button.getAttribute('aria-label') || button.innerText || ''));
+    const active = liveCall().live;
     return JSON.stringify({active, participants: [...names], speaking_names: [...speaking], meeting_title: slackTitle || (title ? title.innerText.trim() : document.title)});
 })()
 """#

@@ -17,7 +17,10 @@ def embedded_snapshot_js() -> str:
     source = SWIFT.read_text()
     match = re.search(r'let googleMeetSnapshotJS = #"""\n(.*?)\n"""#', source, re.S)
     assert match, "snapshot script literal not found"
-    return match.group(1)
+    # The shared live-call snippet is interpolated in Swift; resolve it the same way.
+    snippet = re.search(r'let liveCallSnippetJS = #"""\n(.*?)\n"""#', source, re.S)
+    assert snippet, "live-call snippet literal not found"
+    return match.group(1).replace("\\#(liveCallSnippetJS)", snippet.group(1))
 
 
 def test_snapshot_js_has_no_line_comments():

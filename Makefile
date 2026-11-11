@@ -16,6 +16,10 @@ build-native: $(NATIVE)
 capture/dual-capture: capture/DualCapture.swift
 capture/mic-watch: capture/MicWatcher.swift
 capture/speaker-watch: capture/SpeakerWatcher.swift
+# The live-call snippet shared with src/meeting-detector.js is generated into
+# SpeakerWatcher.swift (see scripts/gen-live-call-snippet.js); regenerate it first.
+capture/SpeakerWatcher.swift: capture/live-call-snippet.js scripts/gen-live-call-snippet.js
+	node scripts/gen-live-call-snippet.js
 bin/mac-ocr: bin/mac_ocr.swift
 
 $(NATIVE):
