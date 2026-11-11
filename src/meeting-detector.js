@@ -1,11 +1,11 @@
 const { execFile } = require('child_process');
 
-// Detects an active Zoom / Google Meet / Microsoft Teams / Slack Huddle call
-// by asking macOS (via AppleScript/System Events) whether the known meeting
-// apps are running, whether an open browser tab points at a meeting URL, or
-// whether Slack has a window titled "Huddle" open. No third-party dependency.
-// Polls at a short interval rather than using an OS-level launch event, so
-// there's no need for a compiled helper — feels near-instant in practice.
+// Detects a Call (see GLOSSARY.md): a known meeting app running, a browser tab
+// on a meeting URL, or a Slack window titled "Huddle". One AppleScript round
+// per check lists processes, tab URLs and Slack window titles; for Meet and
+// Slack tabs it also prints a SNAPSHOT line with the page's own answer to "is
+// a call live here?" (T2 adds those lines to the script). The script runner is
+// injectable so the decision can be tested with canned output.
 
 const MEETING_APP_PROCESSES = [
   { process: 'zoom.us', label: 'Zoom' },
@@ -13,17 +13,13 @@ const MEETING_APP_PROCESSES = [
   { process: 'Teams', label: 'Microsoft Teams' },
 ];
 
-// meet.google.com/ alone also matches the plain landing page (/home, /new,
-// /landing, etc.) — require an actual room code (e.g. /abc-defg-hij) so
-// browsing to Meet without joining a call doesn't false-fire.
-const GOOGLE_MEET_ROOM = /meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}(?:[/?#]|$)/;
+// A Meet room code after the host, with one optional path segment before it
+// (today's /meet/abc-defg-hij). The landing pages (/, /landing, /new, /home)
+// carry no code and so never match.
+const MEET_ROOM_PATH = /^\/(?:[^/]+\/)?[a-z]{3}-[a-z]{4}-[a-z]{3}(?:\/|$)/;
 
-const BROWSER_URL_PATTERNS = [
-  { test: (url) => GOOGLE_MEET_ROOM.test(url), label: 'Google Meet' },
-  { test: (url) => url.includes('zoom.us/j/'), label: 'Zoom' },
-  { test: (url) => url.includes('teams.microsoft.com/l/meetup-join'), label: 'Microsoft Teams' },
-  { test: (url) => url.includes('teams.live.com/meet'), label: 'Microsoft Teams' },
-];
+const LIST_DELIM = '@@@';
+const SCRIPT_TIMEOUT_MS = 8000;
 
 // NOTE on two AppleScript gotchas fixed here, both confirmed by hand:
 // 1. "tell application appName" where appName is a variable passed into a
@@ -156,98 +152,236 @@ end try
 return my joinList(output, linefeed)
 `;
 
-function parseAppleScriptOutput(raw) {
-  const lines = raw.split('\n');
+function splitList(value) {
+  const v = value.trim();
+  return v ? v.split(LIST_DELIM).map((s) => s.trim()).filter(Boolean) : [];
+}
+
+// SNAPSHOT:<browser>|<url>|<json>. The browser name has no "|" and the JSON
+// (or the literal null) has none either, so the URL is whatever lies between.
+function parseSnapshot(value) {
+  const first = value.indexOf('|');
+  const last = value.lastIndexOf('|');
+  if (first < 0 || last <= first) return null;
+  const browser = value.slice(0, first).trim();
+  const url = value.slice(first + 1, last).trim();
+  let answer = null;
+  try {
+    answer = JSON.parse(value.slice(last + 1).trim());
+  } catch {
+    answer = null;
+  }
+  const live = answer && typeof answer.live === 'boolean' ? answer.live : null;
+  const label = answer && typeof answer.label === 'string' ? answer.label : null;
+  return { browser, url, live, label };
+}
+
+/** Raw AppleScript output -> { processes, urls, slackWindows, snapshots }. */
+function parseScriptOutput(raw) {
   const processes = [];
   const urls = [];
   const slackWindows = [];
-
-  for (const line of lines) {
-    if (line.startsWith('PROCESSES:')) {
-      processes.push(...line.slice('PROCESSES:'.length).split('@@@').map((s) => s.trim()));
-    } else if (
-      line.startsWith('CHROME_URLS:') ||
-      line.startsWith('EDGE_URLS:') ||
-      line.startsWith('BRAVE_URLS:') ||
-      line.startsWith('SAFARI_URLS:')
-    ) {
-      const value = line.slice(line.indexOf(':') + 1).trim();
-      if (value) urls.push(...value.split('@@@').map((s) => s.trim()));
-    } else if (line.startsWith('SLACK_WINDOWS:')) {
-      const value = line.slice('SLACK_WINDOWS:'.length).trim();
-      if (value) slackWindows.push(...value.split('@@@').map((s) => s.trim()));
+  const snapshots = [];
+  for (const line of String(raw || '').split('\n')) {
+    const colon = line.indexOf(':');
+    if (colon < 0) continue;
+    const key = line.slice(0, colon);
+    const value = line.slice(colon + 1);
+    if (key === 'PROCESSES') processes.push(...splitList(value));
+    else if (key === 'URLS' || /^[A-Z]+_URLS$/.test(key)) urls.push(...splitList(value));
+    else if (key === 'SLACKWINDOWS' || key === 'SLACK_WINDOWS') slackWindows.push(...splitList(value));
+    else if (key === 'SNAPSHOT') {
+      const snap = parseSnapshot(value);
+      if (snap) snapshots.push(snap);
     }
   }
-  return { processes, urls, slackWindows };
+  return { processes, urls, slackWindows, snapshots };
 }
 
-function detectMeeting(processes, urls, slackWindows) {
-  for (const { process, label } of MEETING_APP_PROCESSES) {
-    if (processes.some((p) => p === process)) {
-      return { label, source: 'app' };
-    }
+function urlParts(url) {
+  try {
+    const u = new URL(url);
+    return { host: u.hostname.toLowerCase(), path: u.pathname };
+  } catch {
+    return { host: '', path: '' };
   }
-  for (const url of urls) {
-    for (const { test, label } of BROWSER_URL_PATTERNS) {
-      if (test(url)) {
-        return { label, source: 'browser', url };
-      }
-    }
-  }
-  if (slackWindows.some((name) => /huddle/i.test(name))) {
-    return { label: 'Slack Huddle', source: 'app' };
+}
+
+const isMeetRoom = ({ host, path }) => host === 'meet.google.com' && MEET_ROOM_PATH.test(path);
+const isSlackHost = ({ host }) => host === 'slack.com' || host.endsWith('.slack.com');
+
+function urlRule(url) {
+  const parts = urlParts(url);
+  if (isMeetRoom(parts)) return { kind: 'meet', label: 'Google Meet', host: parts.host };
+  if (isSlackHost(parts)) return { kind: 'slack', label: 'Slack Huddle', host: parts.host };
+  if (url.includes('zoom.us/j/') || url.includes('zoom.us/wc/')) return { kind: 'url', label: 'Zoom', host: parts.host };
+  if (url.includes('teams.microsoft.com/l/meetup-join') || url.includes('teams.live.com/meet')) {
+    return { kind: 'url', label: 'Microsoft Teams', host: parts.host };
   }
   return null;
 }
 
-function checkOnce() {
-  return new Promise((resolve) => {
-    execFile('osascript', ['-e', APPLESCRIPT], { timeout: 8000 }, (error, stdout, stderr) => {
+// Every candidate seen, in precedence order (apps, URLs, Slack windows), each
+// with the Call it yields (or null) and whether its page answered.
+function candidatesOf(parsed) {
+  const out = [];
+  for (const { process, label } of MEETING_APP_PROCESSES) {
+    if (parsed.processes.includes(process)) {
+      out.push({ host: process, answer: 'none', call: { label, source: 'app', confirmed: true } });
+    }
+  }
+  const urls = [...parsed.urls];
+  for (const s of parsed.snapshots) if (!urls.includes(s.url)) urls.push(s.url);
+  for (const url of urls) {
+    const rule = urlRule(url);
+    if (!rule) continue;
+    if (rule.kind === 'url') {
+      out.push({ host: rule.host, answer: 'none', call: { label: rule.label, source: 'browser', url, confirmed: false } });
+      continue;
+    }
+    const snaps = parsed.snapshots.filter((s) => s.url === url);
+    const live = snaps.some((s) => s.live === true) ? true : snaps.some((s) => s.live === false) ? false : null;
+    const unanswered = snaps.filter((s) => s.live === null).map((s) => s.browser);
+    const answer = !snaps.length ? 'none' : live === null ? 'unanswered' : 'answered';
+    let call = null;
+    if (live === true) call = { label: rule.label, source: 'browser', url, confirmed: true };
+    else if (live === null && rule.kind === 'meet') call = { label: rule.label, source: 'browser', url, confirmed: false };
+    out.push({ host: rule.host, answer, unanswered, call });
+  }
+  if (parsed.slackWindows.some((name) => /huddle/i.test(name))) {
+    out.push({ host: 'Slack', answer: 'none', call: { label: 'Slack Huddle', source: 'app', confirmed: true } });
+  }
+  return out;
+}
+
+function unansweredOf(candidates) {
+  return [...new Set(candidates.flatMap((c) => c.unanswered || []))];
+}
+
+function pick(candidates) {
+  const calls = candidates.map((c) => c.call).filter(Boolean);
+  return calls.find((c) => c.confirmed) || calls[0] || null;
+}
+
+/** Parsed script output -> the Call to offer, or null. Pure. */
+function decide(parsed) {
+  const candidates = candidatesOf(parsed);
+  const call = pick(candidates);
+  return call ? { ...call, unanswered: unansweredOf(candidates) } : null;
+}
+
+function logLine(candidates, call) {
+  const seen = candidates.map((c) => `${c.host}:${c.answer}`).join(',');
+  console.log(`[call-detect] candidates=${seen} -> ${call ? call.label : 'none'}`);
+}
+
+function osascript(script, { timeoutMs }) {
+  return new Promise((resolve, reject) => {
+    execFile('osascript', ['-e', script], { timeout: timeoutMs }, (error, stdout, stderr) => {
       if (error) {
-        // System Events / browser scripting permission not yet granted, or
-        // no supported apps installed. Treat as "no meeting" rather than crash.
-        console.error('[debug] meeting-detector osascript failed:', error.message, stderr);
-        return resolve(null);
+        error.stderr = stderr;
+        return reject(error);
       }
-      const { processes, urls, slackWindows } = parseAppleScriptOutput(stdout || '');
-      const result = detectMeeting(processes, urls, slackWindows);
-      console.log(`[debug ${new Date().toISOString()}] meeting-detector checkOnce ->`, JSON.stringify(result));
-      resolve(result);
+      resolve(stdout || '');
     });
   });
 }
 
 /**
- * Polls for an active meeting and calls back on state transitions. This is a
- * fallback for when mic-watch (see recording/capture-helper.js) isn't available — the mic
- * going active is the fast, primary signal; this polls independently so a
- * meeting is still caught even if the native mic-watch binary fails to
- * launch. onMeetingDetected(meeting) fires once when a meeting first
- * appears. onMeetingEnded() fires once when a previously-detected meeting
- * disappears. Returns a stop() function.
+ * createDetector({ run }) -> { checkOnce, startWatcher }.
+ * run(script, { timeoutMs }) -> Promise<string>; defaults to osascript.
  */
-function startMeetingWatcher({ onMeetingDetected, onMeetingEnded, intervalMs = 20000 }) {
-  let currentlyInMeeting = false;
-  let stopped = false;
+function createDetector({ run = osascript } = {}) {
+  // Watchers listening for "a Meet/Slack page could not be asked". Any check
+  // of this detector (the poll or a mic-on checkOnce) can report it, and a
+  // Slack tab that could not be asked yields no Call, so it travels here
+  // rather than only on the Call.
+  const unansweredListeners = new Set();
 
-  async function tick() {
-    if (stopped) return;
-    const meeting = await checkOnce();
-    if (meeting && !currentlyInMeeting) {
-      currentlyInMeeting = true;
-      onMeetingDetected(meeting);
-    } else if (!meeting && currentlyInMeeting) {
-      currentlyInMeeting = false;
-      onMeetingEnded();
+  async function evaluate() {
+    let raw;
+    try {
+      raw = await run(APPLESCRIPT, { timeoutMs: SCRIPT_TIMEOUT_MS });
+    } catch (err) {
+      // No Automation/Accessibility permission yet, timeout, script error:
+      // "no Call" for this check rather than a crash.
+      const msg = String((err && err.message) || err).split('\n')[0];
+      console.log(`[call-detect] candidates=error(${msg}) -> none`);
+      return { call: null, unanswered: [] };
     }
+    const candidates = candidatesOf(parseScriptOutput(raw));
+    const unanswered = unansweredOf(candidates);
+    const picked = pick(candidates);
+    const call = picked ? { ...picked, unanswered } : null;
+    logLine(candidates, call);
+    if (unanswered.length) for (const fn of unansweredListeners) fn(unanswered);
+    return { call, unanswered };
   }
 
-  tick();
-  const timer = setInterval(tick, intervalMs);
-  return () => {
-    stopped = true;
-    clearInterval(timer);
-  };
+  /** One check. Resolves the Call or null; never rejects. */
+  async function checkOnce() {
+    return (await evaluate()).call;
+  }
+
+  /**
+   * Polls and calls back on transitions: onDetected(call) when a Call first
+   * appears, onEnded() when it goes away, onUnanswered(browsers) at most once
+   * per watcher. The mic-on signal is the fast path; this poll is the backstop
+   * for when the mic watcher cannot start. Returns stop().
+   */
+  function startWatcher({ onDetected = () => {}, onEnded = () => {}, onUnanswered = () => {}, intervalMs = 20000 } = {}) {
+    let inCall = false;
+    let stopped = false;
+    let running = false;
+    let hinted = false;
+
+    const listener = (browsers) => {
+      if (hinted || stopped) return;
+      hinted = true;
+      onUnanswered(browsers);
+    };
+    unansweredListeners.add(listener);
+
+    async function tick() {
+      if (stopped || running) return;
+      running = true;
+      try {
+        const call = await checkOnce();
+        if (stopped) return;
+        if (call && !inCall) {
+          inCall = true;
+          onDetected(call);
+        } else if (!call && inCall) {
+          inCall = false;
+          onEnded();
+        }
+      } finally {
+        running = false;
+      }
+    }
+
+    tick();
+    const timer = setInterval(tick, intervalMs);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      unansweredListeners.delete(listener);
+    };
+  }
+
+  return { checkOnce, startWatcher };
 }
 
-module.exports = { startMeetingWatcher, detectActiveMeeting: checkOnce };
+// Backwards-compatible entry points for main.js until T3 rewires it.
+let defaultDetector = null;
+const getDefaultDetector = () => (defaultDetector ||= createDetector());
+
+function startMeetingWatcher({ onMeetingDetected, onMeetingEnded, intervalMs } = {}) {
+  return getDefaultDetector().startWatcher({ onDetected: onMeetingDetected, onEnded: onMeetingEnded, intervalMs });
+}
+
+function detectActiveMeeting() {
+  return getDefaultDetector().checkOnce();
+}
+
+module.exports = { createDetector, decide, parseScriptOutput, startMeetingWatcher, detectActiveMeeting };
