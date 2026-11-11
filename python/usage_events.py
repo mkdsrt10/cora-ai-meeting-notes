@@ -129,12 +129,10 @@ def sharing_enabled() -> bool:
 
 
 def _versions() -> tuple[str | None, str | None]:
-    version, commit = os.environ.get("CORA_APP_VERSION") or None, os.environ.get("CORA_GIT_COMMIT") or None
-    if version and commit:
-        return version, commit
+    """The Electron-stamped version and commit (repo lookup from source)."""
     import ai_trace
     info = ai_trace.app_versions()
-    return version or info.get("app_version"), commit or info.get("git_commit")
+    return info.get("app_version"), info.get("git_commit")
 
 
 # ---- the send queue --------------------------------------------------------------

@@ -203,6 +203,9 @@ def test_the_batch_carries_the_install_identity_and_build_stamp(port, monkeypatc
     monkeypatch.setenv("CORA_APP_VERSION", "0.4.0")
     monkeypatch.setenv("CORA_GIT_COMMIT", "abc1234")
     monkeypatch.setenv("CORA_BUILD_VARIANT", "team")
+    import ai_trace  # the stamp is read once per process; Electron sets it at spawn
+    ai_trace.app_versions.cache_clear()
+    monkeypatch.setattr(ai_trace, "app_versions", ai_trace.app_versions.__wrapped__)
     call(port, "POST", "/api/settings", {"key": "beta_display_name", "value": "Priya"})
     _, first = call(port, "POST", "/api/events", {"name": "notes_viewed", "payload": {"recording_id": "r1"}})
     _, second = call(port, "POST", "/api/events", {"name": "person_added", "payload": {"source": "people_page"}})
