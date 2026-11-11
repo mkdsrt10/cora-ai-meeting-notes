@@ -10,6 +10,7 @@ import json
 import re
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -123,3 +124,44 @@ def test_comment_html_is_escaped(tmp_path):
     comments = section(run_report(tmp_path), "## Comments")
     assert "<script>" not in comments and "&lt;script&gt;a&lt;/script&gt;" in comments
     assert "&lt;b&gt;x&lt;/b&gt;" in comments
+
+
+def stamp(days_ago):
+    return (datetime.now(timezone.utc) - timedelta(days=days_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def started(install, days_ago, event_id=1):
+    return {"id": event_id, "name": "app_started", "ts": stamp(days_ago), "payload": {}, "install_id": install,
+            "display_name": None, "app_version": "0.4.0", "received_at": stamp(days_ago)}
+
+
+def test_since_keeps_only_what_was_received_in_the_window(tmp_path):
+    write_events(tmp_path, [started("i-old", 20), started("i-new", 1)])
+    for install, days_ago in (("i-old", 20), ("i-new", 1)):
+        folder = tmp_path / "recordings" / install / "rec"
+        folder.mkdir(parents=True)
+        (folder / "meta.json").write_text(json.dumps({"install_id": install, "recording_id": "rec",
+                                                      "reason": "sample", "app_version": "0.4.0",
+                                                      "received_at": stamp(days_ago)}))
+    everything = section(run_report(tmp_path), "## 0.4.0")
+    assert row(everything, "Active installs")[1] == "2"
+    assert row(everything, "Captured recordings")[1] == "2 (sample 2)"
+    report = run_report(tmp_path, "--since", "7")
+    assert "last 7 days" in report
+    recent = section(report, "## 0.4.0")
+    assert row(recent, "Active installs")[1] == "1"
+    assert row(recent, "Captured recordings")[1] == "1 (sample 1)"
+
+
+def test_resent_events_count_once(tmp_path):
+    # The sender may resend a batch the receiver accepted (e.g. the app quit before mark_sent).
+    failed = {"id": 7, "name": "processing_finished", "ts": stamp(1), "install_id": "i-1", "display_name": "A",
+              "app_version": "0.4.0", "received_at": stamp(1), "payload": {"recording_id": "r", "status": "error"}}
+    ok = {**failed, "id": 8, "payload": {"recording_id": "r2", "status": "ok"}}
+    write_events(tmp_path, [failed, failed, ok])
+    assert row(section(run_report(tmp_path), "## 0.4.0"), "Processing failure rate")[1] == "50% (1 of 2)"
+
+
+def test_missing_root_is_an_error(tmp_path):
+    out = subprocess.run([sys.executable, str(SCRIPT), str(tmp_path / "nope")], capture_output=True, text=True)
+    assert out.returncode != 0 and "not a receiver root" in out.stderr

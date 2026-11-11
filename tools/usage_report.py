@@ -13,7 +13,7 @@ import re
 import statistics
 import sys
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -22,7 +22,9 @@ LOCAL_PROVIDERS = frozenset({"local_mlx", "local"})
 
 
 def load_events(root):
-    events = []
+    """Every event line, oldest day first. A batch the sender resent (same install, event id, name and ts)
+    counts once."""
+    events, seen = [], set()
     for day_file in sorted((root / "events").glob("*.jsonl")):
         with open(day_file, encoding="utf-8") as f:
             for line in f:
@@ -33,8 +35,14 @@ def load_events(root):
                     event = json.loads(line)
                 except ValueError:
                     continue
-                if isinstance(event, dict):
-                    events.append(event)
+                if not isinstance(event, dict):
+                    continue
+                if event.get("id") is not None:
+                    key = json.dumps([event.get("install_id"), event.get("id"), event.get("name"), event.get("ts")])
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                events.append(event)
     return events
 
 
@@ -179,15 +187,31 @@ def table(header, rows):
     return out
 
 
-def render(root):
+def received_since(cutoff):
+    """Filter on the receiver's received_at stamp; everything passes when there is no cutoff."""
+    def keep(record):
+        if cutoff is None:
+            return True
+        moment = parse_ts(record.get("received_at"))
+        return moment is not None and moment >= cutoff
+    return keep
+
+
+def render(root, since_days=None, now=None):
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=since_days) if since_days is not None else None
+    keep = received_since(cutoff)
     by_version = defaultdict(list)
-    for event in load_events(root):
+    for event in filter(keep, load_events(root)):
         by_version[version_of(event)].append(event)
     captures_by_version = defaultdict(list)
-    for meta in load_captures(root):
+    for meta in filter(keep, load_captures(root)):
         captures_by_version[version_of(meta)].append(meta)
     names = display_names(e for v in by_version.values() for e in v)
-    out = ["# Cora beta usage report", ""]
+    window = (f"last {since_days:g} days (received since {cutoff:%Y-%m-%d %H:%M} UTC)" if cutoff
+              else "everything received")
+    out = ["# Cora beta usage report", "", f"Receiver root `{root}`, {window}; generated {now:%Y-%m-%d %H:%M} UTC.",
+           ""]
     for version in sorted(set(by_version) | set(captures_by_version), key=version_key, reverse=True):
         events, captures = by_version.get(version, []), captures_by_version.get(version, [])
         out += [f"## {version}", ""] + table(("Metric", "Value"), version_metrics(events, captures)) + [""]
@@ -219,8 +243,15 @@ def render(root):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("root", type=Path, help="receiver root directory")
+    parser.add_argument("--since", type=float, metavar="DAYS",
+                        help="only events and Captured Recordings received in the last DAYS days")
     args = parser.parse_args(argv)
-    sys.stdout.write(render(args.root))
+    if not args.root.is_dir():
+        print(f"usage_report: {args.root} is not a receiver root (no such directory)", file=sys.stderr)
+        return 2
+    if args.since is not None and args.since <= 0:
+        parser.error("--since must be a positive number of days")
+    sys.stdout.write(render(args.root, args.since))
     return 0
 
 
