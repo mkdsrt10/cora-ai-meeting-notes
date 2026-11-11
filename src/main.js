@@ -18,6 +18,8 @@ const { createBackendApi, createArchiveStep } = require('./recording/backend');
 const { buildInfoEnv } = require('./build-info');
 const os = require('os');
 const { appStartedPayload, lockdownEnabled, screenshotTakenPayload } = require('./main/usage');
+const { createUpdater } = require('./updater');
+const { createInstaller, bundlePathFromExe } = require('./main/update-install');
 
 // Python children get the version stamp (CORA_APP_VERSION, CORA_GIT_COMMIT,
 // CORA_BUILD_VARIANT, CORA_BETA_RECEIVER_URL, CORA_BETA_TOKEN): a packaged
@@ -137,6 +139,67 @@ async function recordAppStarted() {
   }));
 }
 
+// In-app updates (src/updater.js). Busy = the Recording session is not idle
+// (live, paused or a stopped Recording still finishing) or the Processing
+// queue has a running or pending job; Update is refused with this reason.
+function updateBusyReason() {
+  const s = recording.state();
+  if (s.phase === 'recording' || s.phase === 'paused') {
+    return 'A meeting is being recorded. You can update when it ends.';
+  }
+  if (s.finishing.length || processingQueue.busy()) {
+    return 'Cora is still processing a recording. You can update when it is done.';
+  }
+  return null;
+}
+
+const UPDATE_CHECK_URL = process.env.CORA_UPDATE_CHECK_URL
+  || 'https://api.github.com/repos/mkdsrt10/cora-ai-meeting-notes/releases/latest';
+
+const updater = createUpdater({
+  currentVersion: app.getVersion(),
+  checkUrl: UPDATE_CHECK_URL,
+  fetch: (...args) => globalThis.fetch(...args),
+  clock,
+  isBusy: updateBusyReason,
+  // min_app_version and the lockdown veto come from the local server (main's
+  // own config read also counts); if the server cannot answer, the updater
+  // skips the check.
+  remoteConfig: async () => {
+    const config = JSON.parse(await fetchJson('/api/remote-config'));
+    let configText = null;
+    try { configText = fs.readFileSync(path.join(DATA_DIR, 'config.json'), 'utf8'); } catch {}
+    return { ...config, lockdown: Boolean(config.lockdown) || lockdownEnabled({ env: process.env, configText }) };
+  },
+  install: (release) => createInstaller({
+    bundlePath: bundlePathFromExe(app.getPath('exe')),
+    log: (msg) => console.log(`[Cora updater] ${msg}`),
+  })(release),
+  // The new bundle is in place and nothing is recording or processing: stop
+  // the Python server (app.exit skips before-quit) and start the new app.
+  relaunch: () => {
+    isQuitting = true;
+    if (stopMeetingWatcher) stopMeetingWatcher();
+    if (stopMicWatcher) stopMicWatcher();
+    if (pythonProcess) pythonProcess.kill();
+    app.relaunch();
+    app.exit(0);
+  },
+  emitEvent: (name, payload) => backendApi.recordEvent(name, payload),
+  log: (msg) => console.log(`[Cora updater] ${msg}`),
+});
+
+// Push the banner state when it changes (the updater's own changes, and the
+// busy reason following the Recording session and Processing queue).
+let publishedUpdateState = null;
+function publishUpdateState(s = updater.state()) {
+  const json = JSON.stringify(s);
+  if (json === publishedUpdateState) return;
+  publishedUpdateState = json;
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update-state', s);
+}
+updater.on('state', publishUpdateState);
+
 installNavigationGuards();
 
 function createFloaterWindow() {
@@ -253,6 +316,7 @@ function publishState() {
   }
 
   if (tray) updateTrayMenu();
+  publishUpdateState();
 }
 
 let lastPhase = 'idle';
@@ -341,6 +405,12 @@ function startRecording(meetingTool = null) {
 handleTrusted('get-recording-state', () => rendererState());
 
 handleTrusted('get-mic-device', () => recording.state().micDevice);
+
+handleTrusted('get-update-state', () => updater.state());
+
+handleTrusted('update-now', () => updater.update());
+
+handleTrusted('update-later', () => updater.snooze());
 
 handleTrusted('get-permission-status', () => ({
   microphone: systemPreferences.getMediaAccessStatus('microphone'),
@@ -634,6 +704,10 @@ app.whenReady().then(async () => {
   tray.setToolTip(APP_NAME);
   publishState();
 
+  // From source there is no installed bundle to replace, so the update check
+  // runs only in the packaged app (or when a test points it elsewhere).
+  if (app.isPackaged || process.env.CORA_UPDATE_CHECK_URL) updater.start();
+
   stopMicWatcher = startMicWatch(MIC_WATCH_BIN, {
     onMicOn: handleMicActive,
     onMicOff: () => {
@@ -677,6 +751,7 @@ app.on('before-quit', (event) => {
   if (shutdownStarted) return;
   shutdownStarted = true;
   processingQueue.setDeferred(true);
+  updater.stop();
   if (stopMeetingWatcher) stopMeetingWatcher();
   if (stopMicWatcher) stopMicWatcher();
   recording.shutdown()
