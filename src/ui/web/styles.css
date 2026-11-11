@@ -201,8 +201,8 @@ select option{background:var(--surface);color:var(--text)}
 .pulse-text{animation:pulse 1.8s ease-in-out infinite}
 .suggestion-badge{font-size:10px;color:var(--teal);background:var(--teal-soft);border-radius:6px;padding:4px 8px;margin:8px 0}
 
-.onboarding-overlay{position:fixed;inset:0;background:var(--bg);z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px;overflow-y:auto}
-.onboarding-card{max-width:540px;width:100%;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:36px}
+.onboarding-overlay{position:fixed;inset:0;background:var(--bg);z-index:1000;display:flex;align-items:flex-start;justify-content:center;padding:24px;overflow-y:auto}
+.onboarding-card{margin:auto;max-width:540px;width:100%;background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:36px}
 .onboarding-steps{display:flex;gap:6px;margin-bottom:20px}
 .onboarding-steps span{height:4px;flex:1;border-radius:2px;background:var(--border)}
 .onboarding-steps span.done{background:var(--teal)}

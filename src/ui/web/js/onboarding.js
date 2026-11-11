@@ -60,9 +60,24 @@ function renderOnboardingPeopleList(){
   }));
 }
 
+function onboardingIsLocalMode(){
+  const mode = $('#onboardingProcessing [data-processing="mode"]')?.value;
+  return !!mode && mode.startsWith('local');
+}
+
+// Whisper/Qwen lists only apply to local modes; cloud mode needs no model choice.
+function syncOnboardingLocalModels(){
+  $('#onboardingLocalModels').hidden = !onboardingIsLocalMode();
+}
+
 async function loadOnboardingModels(){
   try{
     await loadProcessingControls("#onboardingProcessing");
+    // Finish setup saves these controls; the standalone save button is redundant here.
+    $('#onboardingProcessing [data-save-processing]')?.remove();
+    const modeSelect = $('#onboardingProcessing [data-processing="mode"]');
+    modeSelect?.addEventListener('change', syncOnboardingLocalModels);
+    syncOnboardingLocalModels();
     const res = await api('/api/onboarding/models');
     if(!onboardingSelectedWhisperModel) onboardingSelectedWhisperModel = (res.whisper_options || [])[0]?.id;
     if(!onboardingSelectedLiquidModel) onboardingSelectedLiquidModel = res.selected_liquid_model;
@@ -210,8 +225,10 @@ $('#onboardingFinish')?.addEventListener('click', async () => {
     if(name) await api('/api/onboarding/name', { method: 'POST', body: JSON.stringify({ name }) });
     if(profession) await saveSetting('profession', profession);
     await saveSetting('meeting_types', [...onboardingSelectedMeetingTypes]);
-    if(onboardingSelectedWhisperModel) await saveSetting('whisper_model_choice', onboardingSelectedWhisperModel);
-    if(onboardingSelectedLiquidModel) await saveSetting('liquid_model', onboardingSelectedLiquidModel);
+    if(onboardingIsLocalMode()){
+      if(onboardingSelectedWhisperModel) await saveSetting('whisper_model_choice', onboardingSelectedWhisperModel);
+      if(onboardingSelectedLiquidModel) await saveSetting('liquid_model', onboardingSelectedLiquidModel);
+    }
     await saveSetting('retain_audio', $('#onboardingRetainAudio').checked);
     await saveProcessingControls("#onboardingProcessing");
     await api('/api/onboarding/complete', { method: 'POST', body: '{}' });

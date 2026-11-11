@@ -3,6 +3,7 @@
 ## 0.4.1 — 2026-11-11
 
 - Fix: every recording on a Mac running an older macOS than the build machine failed at once with "capture helper exited with code null". The Swift helpers (dual-capture, mic-watch, speaker-watch, mac-ocr) were compiled without a deployment target, so they were linked against the build Mac's macOS and aborted at load elsewhere (dyld "Symbol not found", "built for macOS 27.0 which is newer than running OS"). They are now built for macOS 14.0, the app's minimum, and the build script refuses a helper built for anything else.
+- Onboarding: the last step could not be scrolled back to its top on a small screen (the centered card overflowed above the window), and it showed the local Whisper and notes-model lists plus a redundant Save button to everyone. The card now scrolls from its top, the model lists appear only when a local processing mode is chosen, and Finish setup saves the processing choices.
 
 ## 0.4.0 — 2026-11-11
 
