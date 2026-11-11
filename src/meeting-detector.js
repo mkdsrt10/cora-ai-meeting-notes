@@ -503,16 +503,4 @@ function createDetector({ run = osascript } = {}) {
   return { checkOnce, startWatcher };
 }
 
-// Backwards-compatible entry points for main.js until T3 rewires it.
-let defaultDetector = null;
-const getDefaultDetector = () => (defaultDetector ||= createDetector());
-
-function startMeetingWatcher({ onMeetingDetected, onMeetingEnded, intervalMs } = {}) {
-  return getDefaultDetector().startWatcher({ onDetected: onMeetingDetected, onEnded: onMeetingEnded, intervalMs });
-}
-
-function detectActiveMeeting() {
-  return getDefaultDetector().checkOnce();
-}
-
-module.exports = { createDetector, decide, parseScriptOutput, startMeetingWatcher, detectActiveMeeting };
+module.exports = { createDetector, decide, parseScriptOutput };

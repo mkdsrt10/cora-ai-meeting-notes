@@ -297,6 +297,10 @@ test('a runner error logs the AppleScript error text and how osascript exited', 
   ]);
 });
 
+test('the module exports the detector factory and its pure helpers only', () => {
+  assert.deepEqual(Object.keys(require('../../src/meeting-detector')).sort(), ['createDetector', 'decide', 'parseScriptOutput']);
+});
+
 test('decide is the same pure rule on already-parsed output', () => {
   const { decide } = require('../../src/meeting-detector');
   const parsed = { processes: [], urls: [MEET_ROOM_NEW], slackWindows: [], snapshots: [{ browser: 'Safari', url: MEET_ROOM_NEW, live: null, label: null }] };
