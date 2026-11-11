@@ -67,10 +67,15 @@ async function stubReleaseServer(tag = 'v0.4.0') {
 }
 
 // Everything main injects, as stubs a test can steer.
-async function rig(t, { currentVersion = '0.3.3', tag = 'v0.4.0', config = {} } = {}) {
+// The JSON-file store main backs with userData/updater.json, in memory.
+function memoryStore(initial = {}) {
+  const data = { ...initial };
+  return { data, get: (key) => data[key], set: (key, value) => { data[key] = value; } };
+}
+
+async function rig(t, { currentVersion = '0.3.3', tag = 'v0.4.0', config = {}, clock = fakeClock(), store } = {}) {
   const release = await stubReleaseServer(tag);
   t.after(() => release.close());
-  const clock = fakeClock();
   const events = [];
   const installs = [];
   const r = {
@@ -101,6 +106,7 @@ async function rig(t, { currentVersion = '0.3.3', tag = 'v0.4.0', config = {} } 
       };
     },
     relaunch: () => { r.relaunches += 1; events.push({ name: 'relaunched' }); },
+    store,
     emitEvent: async (name, payload) => { events.push({ name, payload }); },
     log: () => {},
   });
@@ -192,6 +198,38 @@ test('Later hides the banner for 24 hours, then it is back', async (t) => {
   await r.clock.advance(1);
   assert.equal(r.updater.state().snoozedUntil, null);
   assert.equal(seen.at(-1).snoozedUntil, null, 'renderer told the banner is back');
+});
+
+test('Later survives a restart: a new updater on the same store stays snoozed until the 24 hours are up', async (t) => {
+  const clock = fakeClock();
+  const store = memoryStore();
+  const first = await rig(t, { clock, store });
+  await first.updater.check();
+  first.updater.snooze();
+  const until = clock.now() + 24 * HOUR;
+  first.updater.stop();
+
+  await clock.advance(2 * HOUR); // Cora quit and started again
+  const second = await rig(t, { clock, store });
+  const seen = [];
+  second.updater.on('state', (s) => seen.push(s));
+  await second.updater.check();
+  assert.equal(second.updater.state().snoozedUntil, until);
+  await clock.advance(22 * HOUR);
+  assert.equal(second.updater.state().snoozedUntil, null);
+  assert.equal(seen.at(-1).snoozedUntil, null, 'renderer told the banner is back');
+});
+
+test('a snooze that ran out while Cora was closed, or an unreadable store, shows the banner', async (t) => {
+  const clock = fakeClock();
+  const expired = await rig(t, { clock, store: memoryStore({ snoozedUntil: clock.now() - 1 }) });
+  await expired.updater.check();
+  assert.equal(expired.updater.state().snoozedUntil, null);
+  const broken = { get() { throw new Error('corrupt json'); }, set() { throw new Error('read-only'); } };
+  const r = await rig(t, { clock, store: broken });
+  await r.updater.check();
+  assert.equal(r.updater.snooze(), true, 'Later still works for this session');
+  assert.equal(r.updater.state().snoozedUntil, clock.now() + 24 * HOUR);
 });
 
 test('below min_app_version the banner is forced and Later does nothing', async (t) => {

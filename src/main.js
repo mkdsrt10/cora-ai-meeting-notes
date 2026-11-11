@@ -156,6 +156,26 @@ function updateBusyReason() {
 const UPDATE_CHECK_URL = process.env.CORA_UPDATE_CHECK_URL
   || 'https://api.github.com/repos/mkdsrt10/cora-ai-meeting-notes/releases/latest';
 
+// Small JSON file in userData for updater state that must survive a restart
+// (Later's snoozedUntil). Read and write errors reach the updater, which logs
+// and carries on without it.
+const updaterStorePath = () => path.join(app.getPath('userData'), 'updater.json');
+const updaterStore = {
+  get(key) {
+    let data = {};
+    try { data = JSON.parse(fs.readFileSync(updaterStorePath(), 'utf8')); } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+    return data && typeof data === 'object' ? data[key] : undefined;
+  },
+  set(key, value) {
+    let data = {};
+    try { data = JSON.parse(fs.readFileSync(updaterStorePath(), 'utf8')) || {}; } catch {}
+    data[key] = value;
+    fs.writeFileSync(updaterStorePath(), JSON.stringify(data, null, 2));
+  },
+};
+
 const updater = createUpdater({
   currentVersion: app.getVersion(),
   checkUrl: UPDATE_CHECK_URL,
@@ -186,6 +206,7 @@ const updater = createUpdater({
     app.exit(0);
   },
   emitEvent: (name, payload) => backendApi.recordEvent(name, payload),
+  store: updaterStore,
   log: (msg) => console.log(`[Cora updater] ${msg}`),
 });
 

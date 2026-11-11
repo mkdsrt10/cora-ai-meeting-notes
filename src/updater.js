@@ -3,7 +3,9 @@
 // event reporting, so the whole decision logic runs under node:test.
 //
 //   createUpdater({ currentVersion, checkUrl, fetch, clock, isBusy, install, emitEvent, log,
-//                   remoteConfig, relaunch })
+//                   remoteConfig, relaunch, store })
+//     store = { get(key), set(key, value) } keeps snoozedUntil across restarts
+//     (main backs it with userData/updater.json); errors from it are ignored
 //     check()   -> one check of the latest GitHub release (skipped under lockdown)
 //     start()   -> check now, then every 6 h
 //     stop()    -> cancel the periodic check
@@ -80,7 +82,7 @@ function releaseFrom(body) {
 
 function createUpdater({
   currentVersion, checkUrl, fetch, clock, isBusy = () => null, install, emitEvent = async () => {},
-  log = () => {}, remoteConfig = async () => ({}), relaunch = () => {},
+  log = () => {}, remoteConfig = async () => ({}), relaunch = () => {}, store = null,
 }) {
   const events = new EventEmitter();
   let release = null;
@@ -90,6 +92,36 @@ function createUpdater({
   let snoozedUntil = null;
   let snoozeTimer = null;
   let installing = false;
+
+  function stored(key) {
+    try {
+      return store ? store.get(key) : undefined;
+    } catch (err) {
+      log(`could not read ${key}: ${err && err.message}`);
+      return undefined;
+    }
+  }
+
+  function persist(key, value) {
+    try {
+      if (store) store.set(key, value);
+    } catch (err) {
+      log(`could not save ${key}: ${err && err.message}`);
+    }
+  }
+
+  // Tell the renderer the banner is back once the snooze runs out.
+  function scheduleSnoozeEnd() {
+    if (snoozeTimer !== null) clock.clearTimeout(snoozeTimer);
+    snoozeTimer = clock.setTimeout(() => { snoozeTimer = null; emitState(); }, snoozedUntil - clock.now());
+  }
+
+  // A Later clicked before the last restart still holds until it runs out.
+  const savedSnooze = Number(stored('snoozedUntil'));
+  if (Number.isFinite(savedSnooze) && savedSnooze > clock.now()) {
+    snoozedUntil = savedSnooze;
+    scheduleSnoozeEnd();
+  }
 
   function report(name, payload) {
     return Promise.resolve()
@@ -237,8 +269,8 @@ function createUpdater({
     snooze() {
       if (!release || isForced()) return false;
       snoozedUntil = clock.now() + SNOOZE_MS;
-      if (snoozeTimer !== null) clock.clearTimeout(snoozeTimer);
-      snoozeTimer = clock.setTimeout(() => { snoozeTimer = null; emitState(); }, SNOOZE_MS);
+      persist('snoozedUntil', snoozedUntil);
+      scheduleSnoozeEnd();
       emitState();
       return true;
     },
