@@ -34,6 +34,18 @@ Diagnosed, not yet fixed. Each entry says what was observed, the cause found in 
 
 **Fix.** Render the step as: processing mode + notes template + the keep-audio toggle. Show the Whisper/Liquid lists only when mode is a local one (toggle on the mode select), and hide the embedded "Save processing defaults" button inside onboarding (`loadProcessingControls` gets an `embedded` flag). Rename the step "Processing & privacy". Keep the "models download on first use" line.
 
+## Teams desktop still counts as a Call from the bare process (2026-11-11)
+
+**Observed.** `MEETING_APP_PROCESSES` treats a running `Microsoft Teams` / `Teams` process as a Call, so the 20s backstop poll can prompt whenever Teams is merely open. Zoom and Slack desktop are being moved to window- and control-based liveness in the follow-up to #20 (`docs/planning/call-detection.draft.md`); Teams was left out on purpose.
+
+**Fix.** Same rule as the others: Teams desktop (meeting window via the `speaker-watch` probe) and `teams.microsoft.com` tabs (page snapshot) count only when live. Until then Teams is the one exception to the **Call** definition in `GLOSSARY.md`.
+
+## Arc is not enumerated by the meeting detector (2026-11-11)
+
+**Observed.** The detector's AppleScript lists tabs for Chrome, Edge, Brave and Safari only. A Meet, Slack huddle or Zoom web call in Arc is never detected, although `SpeakerWatcher.swift` already knows Arc for participant capture.
+
+**Fix.** Add an Arc tab-listing handler (literal `tell application "Arc"`, guarded by the running-process check) and include Arc in the page-snapshot path. Out of 0.4.2.
+
 ## Earlier todos
 
 - ASR validator: a consistency rule (accept when two attempts agree) and a strict-speech >= 30 % gate for sparse-speech Windows; the coverage rule alone rejected correct Gemini output on a 38-second recording (2026-11-10).
