@@ -256,3 +256,55 @@ test('decide is the same pure rule on already-parsed output', () => {
   assert.deepEqual(decide(parsed), { label: 'Google Meet', source: 'browser', url: MEET_ROOM_NEW, confirmed: false, unanswered: ['Safari'] });
   assert.equal(decide({ processes: [], urls: [], slackWindows: [], snapshots: [] }), null);
 });
+
+// T2: SNAPSHOT lines whose JSON is what the shared live-call snippet answers on
+// a fake page, so the detector and the page agree end to end. `null` is what
+// the script prints when the tab could not be asked.
+const { el, runPage } = require('./fake-page');
+
+const PAGES = {
+  meetJoined: () => runPage('meet.google.com', [el({ sel: ['button[aria-label^="Leave call"]'] })]),
+  meetGreenRoom: () => runPage('meet.google.com', [el({ sel: ['button'], text: 'Join now' })]),
+  slackExpanded: () => runPage('app.slack.com', [el({ sel: ['[data-qa^="huddle_peer_tile_userId_"]'] })]),
+  slackCollapsed: () => runPage('app.slack.com', [el({ sel: ['[data-qa="huddle_details_title"]'], text: 'Huddle with Ana' })]),
+  slackChat: () => runPage('app.slack.com', [el({ sel: ['button'], text: 'Send' })]),
+  unanswered: () => 'null',
+};
+
+async function checkRaw(browser, url, answer) {
+  const raw = [`PROCESSES:Finder@@@${browser}`, `URLS:${url}`, `SNAPSHOT:${browser}|${url}|${answer}`].join('\n');
+  return detectorReturning(raw).checkOnce();
+}
+
+test('snapshot answers from real Meet pages: joined, green room, could not ask', async () => {
+  assert.deepEqual(await checkRaw('Google Chrome', MEET_ROOM_NEW, PAGES.meetJoined()),
+    { label: 'Google Meet', source: 'browser', url: MEET_ROOM_NEW, confirmed: true, unanswered: [] });
+  assert.equal(await checkRaw('Google Chrome', MEET_ROOM_NEW, PAGES.meetGreenRoom()), null);
+  assert.deepEqual(await checkRaw('Microsoft Edge', MEET_ROOM, PAGES.unanswered()),
+    { label: 'Google Meet', source: 'browser', url: MEET_ROOM, confirmed: false, unanswered: ['Microsoft Edge'] });
+});
+
+test('snapshot answers from real Slack pages: expanded, collapsed, chat, could not ask', async () => {
+  for (const page of ['slackExpanded', 'slackCollapsed']) {
+    assert.deepEqual(await checkRaw('Safari', SLACK_TAB, PAGES[page]()),
+      { label: 'Slack Huddle', source: 'browser', url: SLACK_TAB, confirmed: true, unanswered: [] }, page);
+  }
+  assert.equal(await checkRaw('Brave Browser', SLACK_TAB, PAGES.slackChat()), null);
+  assert.equal(await checkRaw('Brave Browser', SLACK_TAB, PAGES.unanswered()), null);
+});
+
+test('the script the detector hands its runner compiles as AppleScript', { skip: process.platform !== 'darwin' && 'macOS only' }, async () => {
+  const { execFileSync } = require('node:child_process');
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  let script = null;
+  await createDetector({ run: async (s, opts) => { script = s; assert.ok(opts.timeoutMs > 0); return ''; } }).checkOnce();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'call-detect-'));
+  try {
+    // osacompile only compiles; nothing is sent to any app.
+    execFileSync('osacompile', ['-o', path.join(dir, 'check.scpt'), '-e', script], { stdio: 'pipe' });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

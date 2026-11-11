@@ -4,32 +4,10 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const vm = require('node:vm');
-const { PAGE_EXPRESSION } = require('../../capture/live-call-snippet');
-
-// A fake element: the selectors it answers to, its attributes, text and children.
-function el({ sel = [], attrs = {}, text = '', children = [] } = {}) {
-  return {
-    sel,
-    innerText: text,
-    getAttribute: (name) => (name in attrs ? attrs[name] : null),
-    querySelector(group) { return this.querySelectorAll(group)[0] || null; },
-    querySelectorAll: (group) => matching(children, group),
-  };
-}
-
-// Selector groups are matched by exact simple selector, which is all the
-// snippet uses: 'a, b' matches elements registered for 'a' or 'b'.
-function matching(elements, group) {
-  const wanted = group.split(/,\s*/).map((s) => s.trim());
-  return elements.filter((e) => e.sel.some((s) => wanted.includes(s)));
-}
-
-function fakeDocument(elements) {
-  return { querySelector: (g) => matching(elements, g)[0] || null, querySelectorAll: (g) => matching(elements, g) };
-}
+const { el, runPage } = require('./fake-page');
 
 function ask(hostname, elements = []) {
-  const raw = vm.runInNewContext(PAGE_EXPRESSION, { document: fakeDocument(elements), location: { hostname } });
+  const raw = runPage(hostname, elements);
   assert.equal(typeof raw, 'string', 'the page answers with a JSON string');
   return JSON.parse(raw);
 }

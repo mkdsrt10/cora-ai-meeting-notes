@@ -1,11 +1,13 @@
 const { execFile } = require('child_process');
+const { PAGE_EXPRESSION } = require('../capture/live-call-snippet');
 
 // Detects a Call (see GLOSSARY.md): a known meeting app running, a browser tab
 // on a meeting URL, or a Slack window titled "Huddle". One AppleScript round
 // per check lists processes, tab URLs and Slack window titles; for Meet and
 // Slack tabs it also prints a SNAPSHOT line with the page's own answer to "is
-// a call live here?" (T2 adds those lines to the script). The script runner is
-// injectable so the decision can be tested with canned output.
+// a call live here?", asked with the snippet shared with the speaker watcher
+// (capture/live-call-snippet.js). The script runner is injectable so the
+// decision can be tested with canned output.
 
 const MEETING_APP_PROCESSES = [
   { process: 'zoom.us', label: 'Zoom' },
@@ -19,9 +21,16 @@ const MEETING_APP_PROCESSES = [
 const MEET_ROOM_PATH = /^\/(?:[^/]+\/)?[a-z]{3}-[a-z]{4}-[a-z]{3}(?:\/|$)/;
 
 const LIST_DELIM = '@@@';
+
+// The page expression as an AppleScript string literal, flattened onto one
+// line (the snippet has block comments only, so that is safe).
+function appleScriptString(js) {
+  return js.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\s*\n\s*/g, ' ');
+}
+
 const SCRIPT_TIMEOUT_MS = 8000;
 
-// NOTE on two AppleScript gotchas fixed here, both confirmed by hand:
+// NOTE on three AppleScript gotchas fixed here, all confirmed by hand:
 // 1. "tell application appName" where appName is a variable passed into a
 //    shared handler fails silently (wrapped in try/catch) for at least Brave
 //    Browser, with "-1700 Can't make |tabs| ... into type specifier" — the
@@ -33,6 +42,15 @@ const SCRIPT_TIMEOUT_MS = 8000;
 //    ", " as osascript's own pretty-printer implies) — so list items get
 //    smashed together with no separator at all. joinList() below sets an
 //    explicit, URL-safe delimiter before coercing, every time.
+// 3. Chromium's "execute <tab> javascript" is app terminology: on a Mac without
+//    Google Chrome (or Edge, or Brave) installed the words don't resolve and
+//    the WHOLE script fails to compile. The raw event code from the Chromium
+//    sdef (CrSuExJa, parameter JvSc) compiles everywhere and is the same event.
+//
+// Only tabs on meet.google.com, slack.com or *.slack.com are asked the
+// live-call question (wantsSnapshot); every other tab is only listed by URL.
+// A tab that cannot be asked (JavaScript from Apple Events off, 2 s timeout,
+// script error) prints the literal null.
 const APPLESCRIPT = `
 on joinList(lst, delim)
   set oldDelims to AppleScript's text item delimiters
@@ -42,64 +60,147 @@ on joinList(lst, delim)
   return joined
 end joinList
 
-on chromeTabs()
+on wantsSnapshot(u)
+  try
+    if u does not start with "https://" then return false
+    set afterScheme to text 9 thru -1 of u
+    set slashAt to offset of "/" in afterScheme
+    if slashAt = 1 then return false
+    if slashAt > 1 then
+      set hostName to text 1 thru (slashAt - 1) of afterScheme
+    else
+      set hostName to afterScheme
+    end if
+    return hostName is "meet.google.com" or hostName is "slack.com" or hostName ends with ".slack.com"
+  on error
+    return false
+  end try
+end wantsSnapshot
+
+on chromeTabs(js)
   set urlList to {}
+  set snapList to {}
   try
     tell application "Google Chrome"
       repeat with w in windows
-        repeat with t in tabs of w
-          set end of urlList to (URL of t)
-        end repeat
+        -- A window without tabs (PWA, devtools) must not end the scan.
+        try
+          repeat with t in tabs of w
+            set u to (URL of t)
+            set end of urlList to u
+            if my wantsSnapshot(u) then
+              set pageAnswer to "null"
+              try
+                with timeout of 2 seconds
+                  set pageAnswer to («event CrSuExJa» t given «class JvSc»:js) as text
+                end timeout
+              on error
+                set pageAnswer to "null"
+              end try
+              set end of snapList to "SNAPSHOT:Google Chrome|" & u & "|" & pageAnswer
+            end if
+          end repeat
+        end try
       end repeat
     end tell
   end try
-  return urlList
+  return {urlList, snapList}
 end chromeTabs
 
-on edgeTabs()
+on edgeTabs(js)
   set urlList to {}
+  set snapList to {}
   try
     tell application "Microsoft Edge"
       repeat with w in windows
-        repeat with t in tabs of w
-          set end of urlList to (URL of t)
-        end repeat
+        -- A window without tabs (PWA, devtools) must not end the scan.
+        try
+          repeat with t in tabs of w
+            set u to (URL of t)
+            set end of urlList to u
+            if my wantsSnapshot(u) then
+              set pageAnswer to "null"
+              try
+                with timeout of 2 seconds
+                  set pageAnswer to («event CrSuExJa» t given «class JvSc»:js) as text
+                end timeout
+              on error
+                set pageAnswer to "null"
+              end try
+              set end of snapList to "SNAPSHOT:Microsoft Edge|" & u & "|" & pageAnswer
+            end if
+          end repeat
+        end try
       end repeat
     end tell
   end try
-  return urlList
+  return {urlList, snapList}
 end edgeTabs
 
-on braveTabs()
+on braveTabs(js)
   set urlList to {}
+  set snapList to {}
   try
     tell application "Brave Browser"
       repeat with w in windows
-        repeat with t in tabs of w
-          set end of urlList to (URL of t)
-        end repeat
+        -- A window without tabs (PWA, devtools) must not end the scan.
+        try
+          repeat with t in tabs of w
+            set u to (URL of t)
+            set end of urlList to u
+            if my wantsSnapshot(u) then
+              set pageAnswer to "null"
+              try
+                with timeout of 2 seconds
+                  set pageAnswer to («event CrSuExJa» t given «class JvSc»:js) as text
+                end timeout
+              on error
+                set pageAnswer to "null"
+              end try
+              set end of snapList to "SNAPSHOT:Brave Browser|" & u & "|" & pageAnswer
+            end if
+          end repeat
+        end try
       end repeat
     end tell
   end try
-  return urlList
+  return {urlList, snapList}
 end braveTabs
 
-on safariTabs()
+on safariTabs(js)
   set urlList to {}
+  set snapList to {}
   try
     tell application "Safari"
       repeat with w in windows
-        repeat with t in tabs of w
-          set end of urlList to (URL of t)
-        end repeat
+        -- A window without tabs (PWA, devtools) must not end the scan.
+        try
+          repeat with t in tabs of w
+            set u to (URL of t)
+            set end of urlList to u
+            if my wantsSnapshot(u) then
+              set pageAnswer to "null"
+              try
+                with timeout of 2 seconds
+                  set pageAnswer to (do JavaScript js in t) as text
+                end timeout
+              on error
+                set pageAnswer to "null"
+              end try
+              set end of snapList to "SNAPSHOT:Safari|" & u & "|" & pageAnswer
+            end if
+          end repeat
+        end try
       end repeat
     end tell
   end try
-  return urlList
+  return {urlList, snapList}
 end safariTabs
 
 set DELIM to "@@@"
+set LIVE_JS to "${appleScriptString(PAGE_EXPRESSION)}"
 set output to {}
+set snapshotLines to {}
 
 tell application "System Events"
   set runningProcesses to name of every process
@@ -111,25 +212,33 @@ set end of output to "PROCESSES:" & my joinList(runningProcesses, DELIM)
 -- targeting it by name makes macOS pop its "Where is X?" resolver dialog
 -- instead of just failing — this guard is what keeps that from firing.
 if "Google Chrome" is in runningProcesses then
-  set end of output to "CHROME_URLS:" & my joinList(my chromeTabs(), DELIM)
+  set r to my chromeTabs(LIVE_JS)
+  set end of output to "CHROME_URLS:" & my joinList(item 1 of r, DELIM)
+  set snapshotLines to snapshotLines & item 2 of r
 else
   set end of output to "CHROME_URLS:"
 end if
 
 if "Microsoft Edge" is in runningProcesses then
-  set end of output to "EDGE_URLS:" & my joinList(my edgeTabs(), DELIM)
+  set r to my edgeTabs(LIVE_JS)
+  set end of output to "EDGE_URLS:" & my joinList(item 1 of r, DELIM)
+  set snapshotLines to snapshotLines & item 2 of r
 else
   set end of output to "EDGE_URLS:"
 end if
 
 if "Brave Browser" is in runningProcesses then
-  set end of output to "BRAVE_URLS:" & my joinList(my braveTabs(), DELIM)
+  set r to my braveTabs(LIVE_JS)
+  set end of output to "BRAVE_URLS:" & my joinList(item 1 of r, DELIM)
+  set snapshotLines to snapshotLines & item 2 of r
 else
   set end of output to "BRAVE_URLS:"
 end if
 
 if "Safari" is in runningProcesses then
-  set end of output to "SAFARI_URLS:" & my joinList(my safariTabs(), DELIM)
+  set r to my safariTabs(LIVE_JS)
+  set end of output to "SAFARI_URLS:" & my joinList(item 1 of r, DELIM)
+  set snapshotLines to snapshotLines & item 2 of r
 else
   set end of output to "SAFARI_URLS:"
 end if
@@ -149,6 +258,7 @@ try
   set end of output to "SLACK_WINDOWS:" & my joinList(slackWindowNames, DELIM)
 end try
 
+set output to output & snapshotLines
 return my joinList(output, linefeed)
 `;
 
