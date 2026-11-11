@@ -6,7 +6,57 @@ $$('.settings-nav-item').forEach(tab => tab.addEventListener('click', () => {
   $$('.settings-nav-item').forEach(t => t.classList.toggle('active', t === tab));
   $$('.settings-panel').forEach(p => p.hidden = p.dataset.settingsContent !== tab.dataset.settingsPanel);
   if(tab.dataset.settingsPanel === 'recording') return loadMicrophonePicker('#settingsMicrophone');
+  if(tab.dataset.settingsPanel === 'beta') return loadBetaSettings();
 }));
+
+// --- Beta (share toggle, name for the Cora team, what is shared, audio retention) ---
+const BETA_NUMBER_FIELDS = { '#settingsAudioRetentionDays': 'audio_retention_days', '#settingsAudioCapMb': 'audio_cap_mb' };
+
+async function loadBetaSettings(){
+  try{
+    const keys = ['share_usage', 'beta_display_name', ...Object.values(BETA_NUMBER_FIELDS)];
+    const values = await Promise.all(keys.map(key => api(`/api/settings?key=${key}`).then(r => r.value)));
+    const byKey = Object.fromEntries(keys.map((key, i) => [key, values[i]]));
+    $('#settingsShareUsage').checked = byKey.share_usage === true;
+    $('#settingsBetaName').value = byKey.beta_display_name || '';
+    for(const [selector, key] of Object.entries(BETA_NUMBER_FIELDS)){
+      $(selector).value = byKey[key] == null ? '' : String(byKey[key]);
+      $(selector).dataset.saved = $(selector).value;
+    }
+  }catch(error){ toast(error.message, true); }
+}
+
+$('#settingsShareUsage')?.addEventListener('change', async (e) => {
+  try{ await saveSetting('share_usage', e.target.checked); toast(e.target.checked ? 'Sharing with the Cora team' : 'Sharing turned off'); }
+  catch(error){ toast(error.message, true); }
+});
+
+$('#settingsBetaName')?.addEventListener('change', async (e) => {
+  try{ await saveSetting('beta_display_name', e.target.value.trim() || null); toast('Saved'); }
+  catch(error){ toast(error.message, true); }
+});
+
+for(const [selector, key] of Object.entries(BETA_NUMBER_FIELDS)){
+  $(selector)?.addEventListener('change', async (e) => {
+    const field = e.target;
+    try{
+      await saveSetting(key, Number(field.value));
+      field.dataset.saved = field.value;
+      toast('Saved');
+    }catch(error){
+      field.value = field.dataset.saved ?? '';
+      toast(error.message, true);
+    }
+  });
+}
+
+$('#settingsShowShared')?.addEventListener('click', async () => {
+  try{
+    const res = await api('/api/events/export');
+    if(window.electronAPI?.revealPath) await window.electronAPI.revealPath(res.path);
+    else await api('/api/open-folder', { method: 'POST', body: '{}' });  // the export sits in the data folder
+  }catch(error){ toast(error.message, true); }
+});
 
 // --- Microphone picker (Settings > Recording, and the onboarding permissions step) ---
 // Options: "System default" (value '', saved as null), then every input
@@ -57,6 +107,8 @@ let settingsSelectedMeetingTypes = new Set();
 async function loadSettingsView(){
   const recordingPanel = $$('.settings-panel').find(p => p.dataset.settingsContent === 'recording');
   if(recordingPanel && !recordingPanel.hidden) loadMicrophonePicker('#settingsMicrophone');
+  const betaPanel = $$('.settings-panel').find(p => p.dataset.settingsContent === 'beta');
+  if(betaPanel && !betaPanel.hidden) loadBetaSettings();
   try{
     const status = await api('/api/onboarding/status');
     if($('#settingsName')) $('#settingsName').value = status.self_name || '';

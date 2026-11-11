@@ -15,7 +15,7 @@ from api.core import PYTHON, ROOT, available_models, local_usage_stats
 
 @route("GET", '/api/settings')
 def get_api_settings(req, path: str, query: dict) -> None:
-    return req.send_json({"value": db.get_setting(query.get("key", [""])[0])})
+    return req.send_json({"value": read_setting(query.get("key", [""])[0])})
 
 
 @route("GET", '/api/onboarding/status')
@@ -276,9 +276,27 @@ def post_api_onboarding_complete(req, path: str, body: dict) -> None:
     return req.send_json({"ok": True})
 
 
-# Keys where a stored null means something (microphone: System default), so
-# {key, value: null} clears them. For every other key null stays a read.
-NULLABLE_SETTINGS = frozenset({"microphone"})
+# Keys where a stored null means something (microphone: System default;
+# beta_display_name: no name), so {key, value: null} clears them. For every
+# other key null stays a read.
+NULLABLE_SETTINGS = frozenset({"microphone", "beta_display_name"})
+
+# Defaults for keys whose unset value is not null (beta audio retention).
+SETTING_DEFAULTS = {"audio_retention_days": 30, "audio_cap_mb": 500}
+READ_ONLY_SETTINGS = frozenset({"install_id"})
+DISPLAY_NAME_MAX = 100
+
+
+def read_setting(key: str):
+    """A setting as the app should see it: the Install id (created on first
+    read), the share toggle's effective value (build-variant default, off
+    under lockdown), and the audio retention defaults."""
+    import usage_events
+    if key == "install_id":
+        return usage_events.install_id()
+    if key == "share_usage":
+        return usage_events.share_usage()
+    return db.get_setting(key, SETTING_DEFAULTS.get(key))
 
 
 @route("POST", '/api/settings')
@@ -288,18 +306,52 @@ def post_api_settings(req, path: str, body: dict) -> None:
     key = str(body.get("key", ""))
     value = body.get("value")
     if value is None and not ("value" in body and key in NULLABLE_SETTINGS):
-        return req.send_json({"value": db.get_setting(key)})
-    if key == "microphone" and value is not None:
-        _validate_microphone(value)
+        return req.send_json({"value": read_setting(key)})
+    if key in READ_ONLY_SETTINGS:
+        raise ValueError(f"{key} is read-only")
+    validate = _VALIDATORS.get(key)
+    if validate and value is not None:
+        value = validate(value)
     db.set_setting(key, value)
     return req.send_json({"ok": True})
 
 
-def _validate_microphone(value) -> None:
+def _validate_microphone(value):
     """The Microphone setting is {unique_id, name} (null = System default)."""
     if not (isinstance(value, dict) and set(value) == {"unique_id", "name"}
             and all(isinstance(v, str) and v.strip() for v in value.values())):
         raise ValueError("microphone must be {unique_id, name} or null")
+    return value
+
+
+def _validate_display_name(value):
+    """Your name for the Cora team: trimmed text; blank means no name."""
+    if not isinstance(value, str) or len(value.strip()) > DISPLAY_NAME_MAX:
+        raise ValueError(f"beta_display_name must be text of at most {DISPLAY_NAME_MAX} characters, or null")
+    return value.strip() or None
+
+
+def _validate_share_usage(value):
+    if not isinstance(value, bool):
+        raise ValueError("share_usage must be true or false")
+    return value
+
+
+def _whole_number_at_least(key: str, minimum: int):
+    def validate(value):
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise ValueError(f"{key} must be a whole number of at least {minimum}")
+        return value
+    return validate
+
+
+_VALIDATORS = {
+    "microphone": _validate_microphone,
+    "beta_display_name": _validate_display_name,
+    "share_usage": _validate_share_usage,
+    "audio_retention_days": _whole_number_at_least("audio_retention_days", 1),
+    "audio_cap_mb": _whole_number_at_least("audio_cap_mb", 50),
+}
 
 
 @route("GET", '/api/audio-devices')
