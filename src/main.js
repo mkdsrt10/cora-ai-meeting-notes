@@ -3,7 +3,7 @@ const path = require('path');
 const { spawn, execFile } = require('child_process');
 const fs = require('fs');
 const {
-  APP_NAME, DATA_DIR, INBOX_DIR, LOGS_DIR, CAPTURE_BIN, MIC_WATCH_BIN, SPEAKER_WATCH_BIN,
+  APP_NAME, ROOT_DIR, DATA_DIR, INBOX_DIR, LOGS_DIR, CAPTURE_BIN, MIC_WATCH_BIN, SPEAKER_WATCH_BIN,
   MAC_OCR_BIN, PYTHON_SCRIPT, PIPELINE_SCRIPT, ICON_PATH, PYTHON_BIN,
 } = require('./main/paths');
 const {
@@ -15,6 +15,17 @@ const { createCaptureHelperFactory, listAudioDevices, startMicWatch } = require(
 const { createRecordingSession } = require('./recording/session');
 const { createProcessingQueue } = require('./recording/processing-queue');
 const { createBackendApi, createArchiveStep } = require('./recording/backend');
+const { buildInfoEnv } = require('./build-info');
+
+// Python children get the version stamp (CORA_APP_VERSION, CORA_GIT_COMMIT,
+// CORA_BUILD_VARIANT, CORA_BETA_RECEIVER_URL, CORA_BETA_TOKEN): a packaged
+// app has no package.json or .git at its code root to read them from.
+const SERVER_ENV = {
+  ...PYTHON_ENV,
+  ...buildInfoEnv({
+    isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appVersion: app.getVersion(), rootDir: ROOT_DIR,
+  }),
+};
 
 // Everything this process and its children (capture binaries, Python,
 // ffmpeg) write — audio, transcripts, logs — is owner-only by default.
@@ -64,7 +75,7 @@ function labelSpeaker(name, recordingId) {
 const clock = { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (id) => clearTimeout(id) };
 const backendApi = createBackendApi({ postJson, fetchJson });
 const processingQueue = createProcessingQueue({
-  archive: createArchiveStep({ pythonBin: PYTHON_BIN, script: PIPELINE_SCRIPT, env: PYTHON_ENV }),
+  archive: createArchiveStep({ pythonBin: PYTHON_BIN, script: PIPELINE_SCRIPT, env: SERVER_ENV }),
   api: backendApi,
   clock,
 });
@@ -561,7 +572,7 @@ app.whenReady().then(async () => {
 
   // Start python web server
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-  pythonProcess = spawn(PYTHON_BIN, [PYTHON_SCRIPT, '--port', String(DASHBOARD_PORT)], { env: PYTHON_ENV });
+  pythonProcess = spawn(PYTHON_BIN, [PYTHON_SCRIPT, '--port', String(DASHBOARD_PORT)], { env: SERVER_ENV });
   pythonProcess.stdout.pipe(process.stdout);
   pythonProcess.stderr.pipe(process.stderr);
 
