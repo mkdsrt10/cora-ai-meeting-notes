@@ -51,6 +51,7 @@ let pythonProcess = null;
 let stopMeetingWatcher = null;
 let stopMicWatcher = null;
 let floaterWindow = null;
+let callPromptWindow = null;
 
 // The user's own name (from onboarding), used to tell "me" apart from other
 // participants in live speaker labels. Refreshed at launch and per recording.
@@ -277,6 +278,52 @@ function createFloaterWindow() {
   return floaterWindow;
 }
 
+// The Call prompt panel (GLOSSARY.md, Call prompt): floater-style, never
+// steals focus. Thin on purpose: the show/hide/dismiss decisions are in
+// src/main/call-prompt-state.js; any throw here falls back to the banner.
+function showCallPrompt(call) {
+  const { screen } = require('electron');
+  const bounds = (screen.getDisplayNearestPoint(screen.getCursorScreenPoint()) || screen.getPrimaryDisplay()).bounds;
+  const width = 420;
+  const height = 64;
+  const x = Math.round(bounds.x + (bounds.width - width) / 2);
+  const y = bounds.y + 32;
+  if (!callPromptWindow || callPromptWindow.isDestroyed()) {
+    callPromptWindow = new BrowserWindow({
+      width, height, x, y,
+      type: 'panel',
+      frame: false,
+      transparent: true,
+      hasShadow: true,
+      resizable: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      fullscreenable: false,
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        preload: path.join(__dirname, 'preload.js'),
+      },
+    });
+    callPromptWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+    callPromptWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
+    callPromptWindow.on('closed', () => { callPromptWindow = null; });
+    callPromptWindow.loadFile(path.join(__dirname, 'ui', 'call-prompt.html'));
+  } else {
+    callPromptWindow.setBounds({ width, height, x, y });
+  }
+  const win = callPromptWindow;
+  const send = () => win.webContents.send('call-prompt-call', call.label);
+  if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send); else send();
+  win.showInactive();
+}
+
+function hideCallPrompt() {
+  if (callPromptWindow && !callPromptWindow.isDestroyed()) callPromptWindow.hide();
+}
+
 // Every OS notification Cora shows is also persisted server-side (table:
 // notifications) — Notification Center clears them quickly, and this is
 // the only durable record of what happened for diagnosing after the fact.
@@ -324,6 +371,7 @@ function publishState() {
   }
 
   if (state === 'recording' || state === 'paused') {
+    callDetection.onRecordingStarted();
     if (!floaterWindow || floaterWindow.isDestroyed()) {
       createFloaterWindow();
     }
@@ -672,7 +720,12 @@ const callDetection = createCallDetection({
   stopRecording: (reason) => recording.stop(reason),
   track: recordUsage,
   isCapturing,
+  prompt: { show: showCallPrompt, hide: hideCallPrompt },
+  // T4 (green-room follow-up) stops on 'dismiss'; T6 reports the action.
+  onPromptClosed: (action) => console.log(`[call-prompt] closed: ${action}`),
 });
+
+handleTrusted('call-prompt-action', (_event, action) => callDetection.promptAction(action));
 
 app.whenReady().then(async () => {
   refreshMicDevices();

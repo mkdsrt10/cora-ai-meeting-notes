@@ -27,4 +27,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onUpdateState: (callback) => ipcRenderer.on('update-state', (_event, state) => callback(state)),
     updateNow: () => ipcRenderer.invoke('update-now'),
     updateLater: () => ipcRenderer.invoke('update-later'),
+    // Call prompt panel: action is 'start' | 'dismiss'; the call label is shown in the text.
+    callPromptAction: (action) => ipcRenderer.invoke('call-prompt-action', action),
+    onCallPromptCall: (callback) => ipcRenderer.on('call-prompt-call', (_event, label) => callback(label)),
 });
