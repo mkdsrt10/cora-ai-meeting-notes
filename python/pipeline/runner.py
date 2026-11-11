@@ -127,22 +127,14 @@ def _process_recording_selected(folder: Path, profile: dict[str, Any]) -> dict[s
             result = _process_recording_local_inner(folder, audio_file, profile)
     except Exception as exc:
         code = _record_failure(folder, exc)
-        usage_emitters.processing_finished(folder.name, profile, run_id=run_id, started=started, error_code=code,
-                                           transcriber_model=_transcriber_model(profile))
+        # The transcriber model comes from the run's traced transcription span, if it got that far.
+        usage_emitters.processing_finished(folder.name, profile, run_id=run_id, started=started, error_code=code)
         raise
     usage = result.pop("usage", None) or {}
-    usage_emitters.processing_finished(result["recording_id"], profile, run_id=run_id, started=started,
-                                       transcriber_model=_transcriber_model(profile), **usage)
+    usage_emitters.processing_finished(result["recording_id"], profile, run_id=run_id, started=started, **usage)
     (folder / ".pipeline_progress.json").unlink(missing_ok=True)
     db.set_processing_failure(result["recording_id"], None)
     return result
-
-
-def _transcriber_model(profile: dict[str, Any]) -> str | None:
-    try:
-        return transcriber(profile).model
-    except Exception:
-        return None
 
 
 def _record_failure(folder: Path, exc: BaseException) -> str:
@@ -490,7 +482,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
         "speaker_profiles": speaker_profiles,
         # For the processing_finished Usage event; popped by the caller.
         "usage": {"resource": resource_entry,
-                  "window_fallbacks": len(metadata["transcription_engines"]["windows"])},
+                  "window_fallbacks": len(metadata["transcription_engines"]["windows"]),
+                  "transcriber_model": asr.model},
     }
 
 

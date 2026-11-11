@@ -76,7 +76,8 @@ def test_a_failed_run_records_one_processing_finished_with_the_error_code(
     class Failing(transcriber.FakeTranscriber):
         def transcribe(self, audio_path, **kwargs):
             raise errors.ProviderAuthError("gemini")
-    monkeypatch.setattr(transcriber, "_make", lambda profile: Failing([]))
+    built = []
+    monkeypatch.setattr(transcriber, "_make", lambda profile: built.append(profile) or Failing([]))
     with pytest.raises(errors.ProcessingError):
         runner.process_recording_local(folder, PROFILE)
 
@@ -84,6 +85,7 @@ def test_a_failed_run_records_one_processing_finished_with_the_error_code(
     assert (event["recording_id"], event["status"], event["error_code"]) == ("beta-failed", "error", "provider_auth")
     assert event["transcriber_provider"] == "gemini" and event["text_provider"] == "openai"
     assert event["total_s"] >= 0 and event["speech_s"] is None
+    assert len(built) == 1, "the event does not build a second Transcriber (no adapter, no credentials lookup)"
 
 
 def test_processing_finished_never_breaks_processing(tmp_path, monkeypatch, fake_text, fake_transcriber):

@@ -35,7 +35,8 @@ def processing_finished(recording_id: str, profile: dict[str, Any], *, run_id: O
 
     Providers are the Processing profile's choices (the preset names the
     report's local/cloud split groups by); models are the first traced
-    transcription / llm span's, else the profile's. tokens_in/out sum the
+    transcription / llm span's, else `transcriber_model` (the run's own
+    Transcriber, passed by the runner) / the profile's. tokens_in/out sum the
     run's llm spans; retries counts its failed spans (calls retried or
     replaced by a fallback). Timings, speech/silence, peak RSS and audio
     duration come from the resource-usage entry (absent on a failed run,
