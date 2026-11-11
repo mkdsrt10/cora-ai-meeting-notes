@@ -78,3 +78,37 @@ def test_purge_recording(config):
     ai_trace.purge_recording("rec-purge")
     assert not rows("SELECT * FROM spans WHERE recording_id = 'rec-purge'")
     assert not rows("SELECT * FROM corrections WHERE recording_id = 'rec-purge'")
+
+
+@pytest.fixture
+def stamped_env(monkeypatch):
+    """The packaged app has no package.json or .git at its root, so Electron
+    stamps the version and commit into the server's environment."""
+    monkeypatch.setenv("CORA_APP_VERSION", "9.8.7")
+    monkeypatch.setenv("CORA_GIT_COMMIT", "abc1234")
+    ai_trace.app_versions.cache_clear()
+    yield
+    ai_trace.app_versions.cache_clear()
+
+
+def test_app_versions_prefer_the_stamp_from_electron(stamped_env, monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "APP_ROOT", tmp_path)  # like a bundle: no package.json, no git
+    assert ai_trace.app_versions() == {"app_version": "9.8.7", "git_commit": "abc1234", "git_dirty": None}
+
+
+def test_run_row_created_under_the_stamp_carries_version_and_commit(config, stamped_env):
+    with ai_trace.run("unit_test_stamped") as run_id:
+        pass
+    run = rows("SELECT * FROM runs WHERE id = ?", run_id)[0]
+    assert (run["app_version"], run["git_commit"]) == ("9.8.7", "abc1234")
+
+
+def test_app_versions_fall_back_to_the_checkout_without_a_stamp(monkeypatch):
+    monkeypatch.delenv("CORA_APP_VERSION", raising=False)
+    monkeypatch.delenv("CORA_GIT_COMMIT", raising=False)
+    ai_trace.app_versions.cache_clear()
+    try:
+        info = ai_trace.app_versions()
+    finally:
+        ai_trace.app_versions.cache_clear()
+    assert info["app_version"] == json.loads((paths.APP_ROOT / "package.json").read_text())["version"]
