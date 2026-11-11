@@ -80,6 +80,13 @@ def test_config_is_read_from_the_file_on_every_request_over_the_defaults(receive
     assert call(receiver, "GET", "/v1/config") == (200, {**DEFAULT_CONFIG, "min_app_version": "0.3.1"})
 
 
+def test_the_example_config_spells_out_exactly_the_defaults(receiver):
+    example = RECEIVER.parent / "config.example.json"
+    receiver.root.joinpath("config.json").write_text(example.read_text())
+    assert call(receiver, "GET", "/v1/config") == (200, DEFAULT_CONFIG)
+    assert set(json.loads(example.read_text())) == set(DEFAULT_CONFIG)
+
+
 def test_a_broken_config_file_is_a_server_error_not_silent_defaults(receiver):
     """Defaults would quietly turn sampling back on; a 500 keeps clients on their cached copy."""
     receiver.root.joinpath("config.json").write_text("{ capture_sample_rate: 0")
