@@ -94,13 +94,25 @@ def test_an_event_outside_the_catalog_is_refused_and_nothing_is_stored(port, bod
     assert exported(port) == []
 
 
-def test_call_detected_is_in_the_catalog_with_app_signal_and_confirmed_only(port):
-    body = {"name": "call_detected", "payload": {"app": "Google Meet", "signal": "mic", "confirmed": True}}
-    assert call(port, "POST", "/api/events", body)[0] == 200
-    leaky = {"name": "call_detected", "payload": {"app": "Google Meet", "url": "https://meet.google.com/abc-defg-hij"}}
-    status, payload = call(port, "POST", "/api/events", leaky)
-    assert status == 400 and "url" in payload["error"]
-    assert [r["payload"] for r in exported(port)] == [body["payload"]]
+def test_call_events_are_in_the_catalog_with_metadata_fields_only(port):
+    bodies = [
+        {"name": "call_detected", "payload": {"app": "Google Meet", "trigger": "followup", "confirmed": True, "seconds_to_prompt": 7}},
+        {"name": "call_detected", "payload": {"app": "Slack Huddle", "trigger": "poll", "confirmed": False, "seconds_to_prompt": None}},
+        {"name": "call_prompt_action", "payload": {"action": "expired"}},
+        {"name": "detect_fallback", "payload": {"reason": "ax_untrusted"}},
+    ]
+    for body in bodies:
+        assert call(port, "POST", "/api/events", body)[0] == 200
+    leaky = [
+        {"name": "call_detected", "payload": {"app": "Google Meet", "url": "https://meet.google.com/abc-defg-hij"}},
+        {"name": "call_detected", "payload": {"app": "Google Meet", "signal": "mic"}},
+        {"name": "call_prompt_action", "payload": {"action": "start", "title": "Weekly sync"}},
+        {"name": "detect_fallback", "payload": {"reason": "js_events_off", "apps": "Google Chrome"}},
+    ]
+    for body in leaky:
+        status, payload = call(port, "POST", "/api/events", body)
+        assert status == 400
+    assert [r["payload"] for r in exported(port)] == [b["payload"] for b in bodies]
 
 
 def test_strings_up_to_the_limits_are_accepted(port):

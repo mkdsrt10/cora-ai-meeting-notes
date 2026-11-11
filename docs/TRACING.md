@@ -86,7 +86,9 @@ Keys may be missing; extra keys may not.
 | `update_available` | `from_version`, `to_version` | `src/updater.js`, once per new version seen |
 | `update_started` | `from_version`, `to_version` | Update clicked |
 | `update_finished` | `from_version`, `to_version`, `status` (`ok`\|`error`), `error_code` | after the install step |
-| `call_detected` | `app` (the Call's label, e.g. `Google Meet`, `Slack Huddle`), `signal` (`mic`\|`poll`), `confirmed` (the page or app said the Call is live) | Electron main (`src/main/call-detection.js`), once per Call detected, before the notification; no URL, title or names |
+| `call_detected` | `app` (the Call's label, e.g. `Google Meet`, `Slack Huddle`), `trigger` (`mic`\|`poll`\|`followup`: what found the Call), `confirmed` (the page or app said the Call is live), `seconds_to_prompt` (whole seconds from the mic turning on to the prompt; null when the mic was not on first) | Electron main (`src/main/call-detection.js`), once per Call detected, before the prompt; no URL, title or names |
+| `call_prompt_action` | `action` (`start`\|`dismiss`\|`expired`: Start recording clicked, Dismiss clicked, or the Call ended or a Recording started elsewhere) | Electron main, once per Call prompt, when it closes |
+| `detect_fallback` | `reason` (`ax_untrusted`: Accessibility not granted, desktop apps fall back to the process alone; `js_events_off`: a browser refuses "Allow JavaScript from Apple Events") | Electron main, at most once per reason per app run; no app or browser names |
 
 ### Where they live on the Mac
 
