@@ -19,6 +19,9 @@ curl -fsSL https://raw.githubusercontent.com/mkdsrt10/cora-ai-meeting-notes/prod
 
 This installs **Cora AI Meeting Notes** into Applications and opens it. Nothing else to install.
 
+During the beta Cora sends usage data and some full recordings to the Cora team to check accuracy:
+see [BETA_POLICY.md](BETA_POLICY.md) for what is sent and how to turn it off.
+
 ## 2. Grant permissions (2 min)
 
 Onboarding's **Permissions** step has a button for each. Click it, switch Cora on, come back, and
@@ -58,7 +61,21 @@ Skip this and recordings still work, but everyone shows up as "Participant".
 
 ## Updating
 
-Run the step 1 command again. Recordings, settings and permissions are kept.
+Cora checks for a new release when it starts and every 6 hours. When one is out, a banner at the
+top of the window says **Cora X.Y.Z is available**:
+
+- **Update** downloads the new version, checks it against its published checksum, puts it in
+  place and restarts Cora. If any step fails the banner shows why and the installed Cora is left
+  as it was.
+- **Later** hides the banner for 24 hours. If the Cora team marks your version as no longer
+  supported, there is no Later.
+- While a meeting is being recorded, or a recording is still processing, **Update** is greyed out
+  and the banner says why; it comes back when Cora is done. If a recording starts while the update
+  is installing, Cora waits until it has ended and been processed before restarting.
+
+Recordings, settings and permissions are kept. Under enterprise lockdown Cora does not check for
+updates. If the banner never appears or an update fails, run the step 1 command again; it does the
+same install by hand.
 
 ## Troubleshooting
 
