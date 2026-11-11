@@ -32,8 +32,9 @@ const LIVE_CALL_JS = `function liveCall() {
       || String((mini && mini.innerText) || '').trim() !== '';
     return { live, label: 'Slack Huddle' };
   }
-  /* Meet: joined means a Leave call control exists; the green room has none. */
-  const live = !!document.querySelector('button[aria-label^="Leave call"], [data-tooltip^="Leave call"], [jsname][aria-label*="Leave"]')
+  /* Meet: joined means a Leave call control exists; the green room has none.
+     Only "Leave call" counts: other controls say Leave too (Leave feedback). */
+  const live = !!document.querySelector('button[aria-label^="Leave call"], [data-tooltip^="Leave call"]')
     || buttons(document).some(b => /^(?:leave|end)(?: the)? call/i.test(text(b)));
   return { live, label: 'Google Meet' };
 }`;

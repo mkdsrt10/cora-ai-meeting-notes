@@ -21,9 +21,15 @@ test('a Meet page with no leave control is not live', () => {
 });
 
 test('a Meet page with a Leave call control is live', () => {
-  for (const sel of ['button[aria-label^="Leave call"]', '[data-tooltip^="Leave call"]', '[jsname][aria-label*="Leave"]']) {
+  for (const sel of ['button[aria-label^="Leave call"]', '[data-tooltip^="Leave call"]']) {
     assert.deepEqual(ask('meet.google.com', [el({ sel: [sel] })]), { live: true, label: 'Google Meet' }, sel);
   }
+});
+
+test('a Meet control merely mentioning Leave (Leave feedback) is not live', () => {
+  // Registered under every selector it would match in a real Meet DOM.
+  const feedback = el({ sel: [BUTTON, '[jsname][aria-label*="Leave"]'], attrs: { jsname: 'A5il2e', 'aria-label': 'Leave feedback' } });
+  assert.deepEqual(ask('meet.google.com', [feedback]), { live: false, label: 'Google Meet' });
 });
 
 test('a Meet button whose label or text starts with Leave call / End call is live', () => {
