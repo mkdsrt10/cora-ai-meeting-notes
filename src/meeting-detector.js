@@ -28,7 +28,14 @@ function appleScriptString(js) {
   return js.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\s*\n\s*/g, ' ');
 }
 
-const SCRIPT_TIMEOUT_MS = 8000;
+// The whole osascript run must outlast the per-tab budget, or one slow page
+// kills the check that the 2 s per-tab timeout was meant to survive. Each
+// Meet/Slack tab gets `with timeout of 2 seconds` before it answers null, so
+// 20 s = 8 unresponsive Meet/Slack tabs x 2 s + 4 s for the process list and
+// the URL listing of up to four browsers. Past that the run is killed
+// (logged as "killed SIGTERM") and the watcher keeps its state for that poll.
+// The 20 s poll cannot overlap itself: the watcher skips a tick while one runs.
+const SCRIPT_TIMEOUT_MS = 20000;
 
 // NOTE on three AppleScript gotchas fixed here, all confirmed by hand:
 // 1. "tell application appName" where appName is a variable passed into a

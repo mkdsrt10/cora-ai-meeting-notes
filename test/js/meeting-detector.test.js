@@ -152,6 +152,12 @@ test('a runner error resolves null', async () => {
   assert.equal(await detector.checkOnce(), null);
 });
 
+test('the runner gets a 20 s budget, room for several 2 s tab asks', async () => {
+  let timeoutMs = null;
+  await createDetector({ run: async (_script, opts) => { timeoutMs = opts.timeoutMs; return ''; } }).checkOnce();
+  assert.equal(timeoutMs, 20000);
+});
+
 test('the SNAPSHOT line parses browser, url and answer', () => {
   const { parseScriptOutput } = require('../../src/meeting-detector');
   const parsed = parseScriptOutput([
