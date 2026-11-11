@@ -143,7 +143,10 @@ async function openSummarizeModal(retranscribe = false) {
   try {
     await loadProcessingControls('#summarizeModelList', {manual:true});
     const host = $('#summarizeModelList');
-    host.querySelector('[data-processing="retranscribe"]').checked = retranscribe;
+    const retranscribeBox = host.querySelector('[data-processing="retranscribe"]');
+    // Retranscribing needs the audio; pruning may have removed it (notes still regenerate).
+    retranscribeBox.disabled = !!record.audio_pruned;
+    retranscribeBox.checked = retranscribe && !record.audio_pruned;
     const previousTemplate = record.call_summary?.processing?.template;
     if (previousTemplate) host.querySelector('[data-processing="template"]').value = previousTemplate;
     $('#summarizeModal').style.display = 'flex';

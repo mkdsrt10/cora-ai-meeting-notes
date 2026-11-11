@@ -37,6 +37,7 @@ function resetProcessingStatus(){
   if(reprocess){
     reprocess.disabled = !!record && activeReprocess.has(record.id);
     reprocess.textContent = reprocess.disabled ? '🔁 Initializing pipeline…' : '🔁 Retranscribe & Re-summarize';
+    if(record?.audio_pruned) reprocess.disabled = true;
   }
   const summarize = $('#notepadAiSummarizeBtn');
   if(summarize){
@@ -307,6 +308,7 @@ function loadNotepad(){
       reprocessBtn.textContent = '🔁 Retranscribe & Re-summarize';
     }
   }
+  renderAudioState(record);
   const aiSummarizeBtn = $('#notepadAiSummarizeBtn');
   if(aiSummarizeBtn && record){
     aiSummarizeBtn.style.display = !PENDING_STAGES.has(record.analysis_stage) ? '' : 'none';
@@ -351,6 +353,37 @@ function renderProcessingNotices(record){
   const reasons = [...new Set((engines.windows || []).map(w => w.reason).filter(Boolean))];
   enginesHost.innerHTML = `<span>${esc(parts.join(' · '))}${reasons.length ? ` (${esc(reasons.join('; '))})` : ''}. Affected lines are marked in the Clean Transcript.</span>`;
   enginesHost.style.display = '';
+}
+
+// Audio pruning (python/audio_pruning.py) removed this Recording's audio:
+// say why where the player would be, and keep Retranscribe (which needs the
+// audio) disabled. record.audio_pruned = {at, reason: retention|cap, limit}.
+function audioPrunedText(record){
+  const pruned = record?.audio_pruned;
+  if(!pruned) return '';
+  const why = pruned.reason === 'cap' ? `to stay under the ${Number(pruned.limit)} MB cap`
+    : `after ${Number(pruned.limit)} days`;
+  return `Audio removed ${why}. The transcript and notes are kept.`;
+}
+
+const REPROCESS_TITLE = 'Re-run transcription and notes generation from the original audio — the current transcript and notes are archived first, so this is safe to redo';
+
+function renderAudioState(record){
+  const text = audioPrunedText(record);
+  const notice = $('#notepadAudioNotice');
+  if(notice){
+    notice.textContent = text;
+    notice.style.display = text ? '' : 'none';
+  }
+  const reprocess = $('#notepadReprocessBtn');
+  if(reprocess && record){
+    if(text){
+      reprocess.disabled = true;
+      reprocess.title = 'Unavailable: this recording\'s audio was removed to save space';
+    } else {
+      reprocess.title = REPROCESS_TITLE;
+    }
+  }
 }
 
 $('#notepadFolder')?.addEventListener('change', async (e) => {
