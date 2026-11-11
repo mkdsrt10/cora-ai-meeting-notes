@@ -186,13 +186,17 @@ def prune_local(days: int = 30) -> int:
 
 def enforce_queue_limits() -> int:
     """Drop unsent rows older than 7 days, then the oldest unsent rows while
-    the unsent payload exceeds 5 MB; record one `events_dropped` if any went."""
+    the unsent payload exceeds 5 MB. If any went, the unsent queue holds one
+    `events_dropped` with the running total: an earlier unsent one is folded
+    into it (so a long spell with sharing off leaves one row, not one per
+    pass). Returns how many events were dropped by this call."""
     cutoff = _iso(_now() - dt.timedelta(days=QUEUE_MAX_AGE_DAYS))
+    kept = "sent_at IS NULL AND name != 'events_dropped'"
     with db.get_db() as conn:
-        dropped = conn.execute("DELETE FROM usage_events WHERE sent_at IS NULL AND created_at < ?",
+        dropped = conn.execute(f"DELETE FROM usage_events WHERE {kept} AND created_at < ?",
                                (cutoff,)).rowcount
         rows = conn.execute("SELECT id, LENGTH(name) + LENGTH(payload) + 64 AS size FROM usage_events"
-                            " WHERE sent_at IS NULL ORDER BY id DESC").fetchall()
+                            f" WHERE {kept} ORDER BY id DESC").fetchall()
         total, over = 0, []
         for row in rows:
             total += row["size"]
@@ -200,10 +204,16 @@ def enforce_queue_limits() -> int:
                 over.append(row["id"])
         if over:
             conn.execute(f"DELETE FROM usage_events WHERE id IN ({','.join('?' * len(over))})", over)
+        dropped += len(over)
+        earlier = 0
+        if dropped:
+            for row in conn.execute("SELECT payload FROM usage_events"
+                                    " WHERE sent_at IS NULL AND name = 'events_dropped'").fetchall():
+                earlier += int(json.loads(row["payload"]).get("count") or 0)
+            conn.execute("DELETE FROM usage_events WHERE sent_at IS NULL AND name = 'events_dropped'")
         conn.commit()
-    dropped += len(over)
     if dropped:
-        record("events_dropped", {"count": dropped})
+        record("events_dropped", {"count": dropped + earlier})
     return dropped
 
 

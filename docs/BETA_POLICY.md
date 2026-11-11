@@ -75,9 +75,11 @@ Mac**. This applies whether or not sharing is on.
 
 **Settings > Beta**, switch off **Share usage and sample recordings with the Cora team**. From
 then on nothing is sent: no usage events, no Feedback, no Recordings, and no new Recording is
-queued. Cora keeps recording usage events on your Mac while sharing is off, so if you turn sharing
-back on, the events from the time it was off are sent too, along with any Recording queued before
-you turned it off and less than 7 days old.
+queued. Cora keeps recording usage events on your Mac while sharing is off, but the same limits
+apply as when the receiver is unreachable: events older than 7 days, or beyond 5 MB, are deleted
+(only their count is kept). So if you turn sharing back on, at most the last 7 days of events
+(and no more than 5 MB) are sent, along with any Recording queued before you turned it off and
+less than 7 days old.
 
 Sharing is on by default in team builds and off in every other build. **Enterprise lockdown**
 turns all of it off whatever the toggle says, and also stops Cora checking for updates.

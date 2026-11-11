@@ -232,16 +232,31 @@ def _display_name() -> str:
     return urllib.parse.quote(db.get_setting("beta_display_name") or "", safe=_HEADER_SAFE)
 
 
+def _housekeeping() -> None:
+    """Local queue upkeep, whether or not anything may be sent: apply the
+    queue limits (unsent rows older than 7 days or beyond 5 MB dropped oldest
+    first and counted in one `events_dropped`), delete sent rows older than 30
+    days, then drop captures waiting more than 7 days. Because this runs before every flush,
+    and on every tick while sharing is off, turning sharing back on ships at
+    most the last 7 days / 5 MB of events."""
+    try:
+        usage_events.enforce_queue_limits()  # first, so stale unsent rows are counted
+        usage_events.prune_local(30)
+    except Exception as e:  # noqa: BLE001 - local bookkeeping, never fatal to a flush
+        _status["last_error"] = f"queue limits: {type(e).__name__}: {e}"
+    _drop_expired_captures()
+
+
 def flush(*, captures: bool = True, timeout: float = TIMEOUT_S, wait: float | None = None) -> None:
     """Send unsent events now, then (with `captures`) the pending Captured
     Recordings, on the calling thread. Never raises. Opens no socket unless
     sharing is enabled and the remote config allows telemetry. A failure keeps
-    the rows, lands in status()["last_error"] and applies the queue limits
-    (7 days / 5 MB, oldest dropped first, one `events_dropped`). `wait` bounds
-    how long to wait for a flush already in progress (None: as long as it takes).
-    Captures waiting more than 7 days are dropped first, whether or not
-    anything can be sent, so their `capture_dropped` events go in this batch."""
-    _drop_expired_captures()
+    the rows and lands in status()["last_error"]. `wait` bounds how long to
+    wait for a flush already in progress (None: as long as it takes).
+    The local queue upkeep (`_housekeeping`) runs first, whether or not
+    anything can be sent, so stale rows never ship and the `events_dropped` /
+    `capture_dropped` events it writes go in this batch."""
+    _housekeeping()
     if not _may_send():
         return
     if not _lock.acquire(timeout=-1 if wait is None else wait):
@@ -251,10 +266,6 @@ def flush(*, captures: bool = True, timeout: float = TIMEOUT_S, wait: float | No
             _send_events(timeout)
         except Exception as e:  # noqa: BLE001 - any failure is reported, never fatal
             _status["last_error"] = f"{type(e).__name__}: {e}"
-            try:
-                usage_events.enforce_queue_limits()
-            except Exception:  # noqa: BLE001
-                pass
             return
         _status.update(last_flush_at=_now_iso(), last_error=None)
         if captures:
@@ -312,6 +323,8 @@ def _run() -> None:
             return
         if woken or usage_events.unsent_count() or _pending_captures():
             flush()
+        else:
+            _housekeeping()
 
 
 def start() -> None:

@@ -231,6 +231,52 @@ def test_after_a_failed_flush_rows_older_than_7_days_are_dropped_with_one_events
     assert all(r["sent_at"] is None for r in rows)
 
 
+def days_ago(days):
+    import datetime as dt
+    return (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def insert_rows(rows):
+    """(created_at, name, payload json, sent_at) rows written straight into the queue."""
+    import db
+    with db.get_db() as conn:
+        conn.executemany("INSERT INTO usage_events (created_at, name, payload, sent_at) VALUES (?, ?, ?, ?)", rows)
+        conn.commit()
+
+
+def test_rows_older_than_7_days_are_dropped_before_a_flush_so_they_never_ship(team_build):
+    import beta_sender
+    insert_rows([(days_ago(8), "notes_viewed", '{"recording_id": "stale"}', None)])
+    record("notes_viewed", {"recording_id": "fresh"})
+
+    beta_sender.start()
+
+    assert wait_for(lambda: team_build.batches())
+    [batch] = team_build.batches()
+    assert [(e["name"], e["payload"]) for e in batch["events"]] == [
+        ("notes_viewed", {"recording_id": "fresh"}), ("events_dropped", {"count": 1})]
+
+
+def test_with_sharing_off_the_queue_limits_and_local_pruning_still_run_on_the_interval(team_build, monkeypatch):
+    import beta_sender
+    import db
+    db.set_setting("share_usage", False)
+    monkeypatch.setenv("CORA_TELEMETRY_FLUSH_SECONDS", "0.2")
+    insert_rows([(days_ago(31), "notes_viewed", '{"recording_id": "sent-long-ago"}', days_ago(31)),
+                 (days_ago(8), "notes_viewed", '{"recording_id": "stale-1"}', None)])
+    record("notes_viewed", {"recording_id": "fresh"})
+
+    beta_sender.start()
+    assert wait_for(lambda: [r["payload"] for r in exported()] == [
+        {"recording_id": "fresh"}, {"count": 1}])
+
+    # More rows go stale while sharing stays off: still one events_dropped, with the running total.
+    insert_rows([(days_ago(8), "notes_viewed", '{"recording_id": "stale-2"}', None)])
+    assert wait_for(lambda: [(r["name"], r["payload"]) for r in exported()] == [
+        ("notes_viewed", {"recording_id": "fresh"}), ("events_dropped", {"count": 2})])
+    assert team_build.requests == []
+
+
 # ---- when nothing may leave the Mac ----------------------------------------------
 
 def opened_sockets(monkeypatch):
