@@ -5,6 +5,10 @@ const $ = (q, root=document) => root.querySelector(q);
 const $$ = (q, root=document) => [...root.querySelectorAll(q)];
 let data = null;
 let selectedDetail = null;
+// Refreshes the Copy ID button after selectedDetail changes; title-editor.js
+// replaces it once the page is set up. A no-op until then (and in pages that
+// load only some scripts).
+let syncCopyRecordingIdButton = () => {};
 
 // Views: every page in the window registers here by id. Core pages register
 // below; plugin pages register from src/ui/web/plugins/<id>.js (see plugin-host.js).
