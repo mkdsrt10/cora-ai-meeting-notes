@@ -296,6 +296,7 @@ async function openInRecordings(id){
   await loadSelectedRecording(id);
   // Opening a finished Recording is a view of its notes.
   const record = selectedRecording();
+  showFeedbackFor(record);  // feedback.js: a fresh rating widget for a finished Recording
   if(record && !PENDING_STAGES.has(record.analysis_stage)){
     track('notes_viewed', { recording_id: record.id });
     const items = record.call_summary?.action_items;

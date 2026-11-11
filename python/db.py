@@ -180,6 +180,21 @@ def init_db():
                 dropped_at TEXT
             )
         ''')
+
+        # Feedback (beta): a thumbs up/down on a Recording, its notes, or Cora
+        # overall (recording_id NULL for the Settings general message);
+        # reasons is a JSON list. See python/api/routes/beta.py.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recording_id TEXT,
+                target TEXT NOT NULL,
+                rating TEXT NOT NULL,
+                reasons TEXT NOT NULL DEFAULT '[]',
+                comment TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+        ''')
         conn.commit()
 
 

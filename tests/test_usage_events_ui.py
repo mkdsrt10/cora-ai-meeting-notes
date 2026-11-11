@@ -118,7 +118,7 @@ scenario(async () => {
 
 
 NOTES = r'''
-load('usage.js', 'notepad.js', 'detail.js', 'detail-actions.js', 'transcript.js');
+load('usage.js', 'notepad.js', 'detail.js', 'detail-actions.js', 'transcript.js', 'feedback.js');
 run(`hasEnhancedNotes = () => true; renderEnhancedNotes = () => {}; renderMeetingTimeline = () => {}; renderParticipants = () => {};
      renderKeyPhrases = () => {}; renderProcessingNotices = () => {}; pollLiveFeedIfRecording = () => {}; stopLiveFeedPolling = () => {};
      resetProcessingStatus = () => {}; startLiveRecordingTimer = () => {}; pauseLiveRecordingTimer = () => {};
@@ -138,12 +138,14 @@ scenario(async () => {
   await settle();
   assert.deepEqual(events('notes_viewed'), [{recording_id: 'rec-1'}]);
   assert.deepEqual(events('action_items_counted'), [{recording_id: 'rec-1', count: 3}]);
+  assert.equal(node('#feedbackWidget').hidden, false);  // a finished Recording can be rated
 
   // A Recording still being captured has no notes to view yet.
   record = {id: 'rec-2', title: 'Live', analysis_stage: 'recording', notes: ''};
   await run(`openInRecordings('rec-2')`);
   await settle();
   assert.equal(events('notes_viewed').length, 1);
+  assert.equal(node('#feedbackWidget').hidden, true);
 });
 ''')
 
