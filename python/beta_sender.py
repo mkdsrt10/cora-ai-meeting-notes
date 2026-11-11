@@ -3,10 +3,11 @@ team's receiver, and holds the remote config.
 
 One background thread, started by the server after its port is bound. It
 fetches the remote config once, then flushes unsent events at start, every
-CORA_TELEMETRY_FLUSH_SECONDS (600) while unsent rows exist, on `flush_now()`
-(after Feedback), and once more when the server shuts down (`stop()`). After
-each successful event batch it uploads at most one pending Captured Recording
-(python/capture.py, when present). Standard library only (urllib).
+CORA_TELEMETRY_FLUSH_SECONDS (600) while unsent rows or pending Captured
+Recordings exist, on `flush_now()` (after Feedback), and once more when the
+server shuts down (`stop()`). After each successful event batch it uploads the
+pending Captured Recordings (python/capture.py, when present) one at a time,
+oldest first, until none are left or one fails. Standard library only (urllib).
 
 Nothing here opens a socket unless `usage_events.sharing_enabled()` (share
 toggle on, no enterprise lockdown, receiver URL and token present). Events and
@@ -166,16 +167,19 @@ def _drop_expired_captures() -> None:
         _status["last_error"] = f"capture expiry: {type(e).__name__}: {e}"
 
 
-def _upload_one_capture() -> None:
-    """Upload the oldest pending Captured Recording, if any. 201 and 409
-    (already stored) both mark it uploaded; anything else leaves it pending."""
+def _upload_one_capture() -> bool:
+    """Upload the oldest pending Captured Recording; False when none is
+    pending. 201 and 409 (already stored) both mark it uploaded. Any other 4xx
+    means the receiver will never take it (bad request, bad token, too large):
+    it is dropped with a `capture_dropped` event and this raises. 5xx and
+    network errors raise and leave it pending for the next flush."""
     capture = _capture_module()
     if capture is None:
-        return
+        return False
     while True:
         pending = capture.next_pending()
         if not pending:
-            return
+            return False
         recording_id, reason = pending["recording_id"], pending["reason"]
         try:
             archive = capture.build_archive(recording_id)
@@ -200,10 +204,22 @@ def _upload_one_capture() -> None:
             status, raw = _request("POST", "/v1/recordings", body, headers)
     finally:
         archive.unlink(missing_ok=True)
-    if status not in (201, 409):
-        raise RuntimeError(f"receiver answered {status} to /v1/recordings: "
-                           f"{raw[:200].decode('utf-8', 'replace')}")
-    capture.mark_uploaded(recording_id)
+    if status in (201, 409):
+        capture.mark_uploaded(recording_id)
+        return True
+    detail = f"receiver answered {status} to /v1/recordings: {raw[:200].decode('utf-8', 'replace')}"
+    if 400 <= status < 500 and hasattr(capture, "drop"):
+        capture.drop(recording_id)
+        usage_events.record("capture_dropped", {"recording_id": recording_id, "reason": reason})
+        raise RuntimeError(f"{detail} (capture {recording_id} dropped)")
+    raise RuntimeError(detail)
+
+
+def _upload_captures() -> None:
+    """Upload pending captures one at a time until none are left, the first
+    failure (raised), or the sender is stopping."""
+    while not _stop.is_set() and _upload_one_capture():
+        pass
 
 
 _HEADER_SAFE = "".join(c for c in string.printable if c not in "%\t\n\r\x0b\x0c")
@@ -217,8 +233,8 @@ def _display_name() -> str:
 
 
 def flush(*, captures: bool = True, timeout: float = TIMEOUT_S, wait: float | None = None) -> None:
-    """Send unsent events now, then (with `captures`) at most one Captured
-    Recording, on the calling thread. Never raises. Opens no socket unless
+    """Send unsent events now, then (with `captures`) the pending Captured
+    Recordings, on the calling thread. Never raises. Opens no socket unless
     sharing is enabled and the remote config allows telemetry. A failure keeps
     the rows, lands in status()["last_error"] and applies the queue limits
     (7 days / 5 MB, oldest dropped first, one `events_dropped`). `wait` bounds
@@ -243,7 +259,7 @@ def flush(*, captures: bool = True, timeout: float = TIMEOUT_S, wait: float | No
         _status.update(last_flush_at=_now_iso(), last_error=None)
         if captures:
             try:
-                _upload_one_capture()
+                _upload_captures()
             except Exception as e:  # noqa: BLE001
                 _status["last_error"] = f"capture upload: {type(e).__name__}: {e}"
     finally:
@@ -294,7 +310,7 @@ def _run() -> None:
         _wake.clear()
         if _stop.is_set():
             return
-        if woken or usage_events.unsent_count():
+        if woken or usage_events.unsent_count() or _pending_captures():
             flush()
 
 
