@@ -12,8 +12,16 @@ function joinNames(names) {
   return `${unique.slice(0, -1).join(', ')} and ${unique[unique.length - 1]}`;
 }
 
-function createCallDetection({ detector, notify, startRecording, stopRecording, track, isCapturing }) {
-  let notified = false;
+const { initialPromptState, promptStep } = require('./call-prompt-state');
+
+// prompt (optional): { show(call), hide() } for the Call prompt panel; show may
+// throw, which falls back to the macOS banner. onPromptClosed(action, call):
+// action is 'start' | 'dismiss' | 'expired' (Call ended or a Recording started
+// elsewhere). Main feeds the panel's buttons into promptAction(action) and
+// recording starts into onRecordingStarted().
+function createCallDetection({ detector, notify, startRecording, stopRecording, track, isCapturing, prompt = null, onPromptClosed = () => {} }) {
+  let promptState = initialPromptState();
+  let currentCall = null;
   // The capturing Recording was started from a Call notification (click or
   // action), so the poll seeing that Call end may stop it.
   let startedFromCall = false;
@@ -30,30 +38,75 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
     });
   }
 
-  function detected(call, signal) {
-    if (notified || isCapturing()) return;
-    notified = true;
-    track('call_detected', { app: call.label, signal, confirmed: Boolean(call.confirmed) });
-    const notification = notify({
+  // Feeds the reducer and performs its effects. `call` is the Call the prompt
+  // is about; the banner path is the old notification, unchanged.
+  function step(event) {
+    const r = promptStep(promptState, event);
+    promptState = r.state;
+    for (const effect of r.effects) {
+      if (effect.type === 'show') showPrompt();
+      else if (effect.type === 'banner') showBanner();
+      else if (effect.type === 'hide') { try { prompt.hide(); } catch (err) { console.warn('[call-prompt] hide failed:', err && err.message); } }
+      else if (effect.type === 'closed') onPromptClosed(effect.action, currentCall);
+    }
+  }
+
+  const startFromCall = () => {
+    startedFromCall = true;
+    startRecording(currentCall.label);
+  };
+
+  // Always built (not shown) so the notifications-table entry is written
+  // whichever surface the user sees.
+  let notification = null;
+
+  function showPrompt() {
+    notification = notify({
       title: 'Cora',
-      body: `${call.label} call detected. Start recording?`,
+      body: `${currentCall.label} call detected. Start recording?`,
       actions: [{ type: 'button', text: 'Start Recording' }],
       closeButtonText: 'Dismiss',
     }, { show: false });
-    const start = () => {
-      startedFromCall = true;
-      startRecording(call.label);
-    };
-    notification.on('click', start);
-    notification.on('action', start);
+    try {
+      if (!prompt) throw new Error('no panel');
+      prompt.show(currentCall);
+    } catch (err) {
+      if (prompt) console.warn('[call-prompt] panel failed, using banner:', err && err.message);
+      step({ type: 'show-failed' });
+    }
+  }
+
+  function showBanner() {
+    notification.on('click', startFromCall);
+    notification.on('action', startFromCall);
     notification.show();
   }
+
+  function detected(call, signal) {
+    if (promptState.phase !== 'idle' || isCapturing()) return;
+    currentCall = call;
+    track('call_detected', { app: call.label, signal, confirmed: Boolean(call.confirmed) });
+    step({ type: 'detected', capturing: false });
+  }
+
+  // The panel's buttons ('start' | 'dismiss').
+  function promptAction(action) {
+    if (promptState.phase !== 'visible') return;
+    if (action === 'start') {
+      step({ type: 'start' });
+      startFromCall();
+    } else if (action === 'dismiss') {
+      step({ type: 'dismiss' });
+    }
+  }
+
+  const onRecordingStarted = () => step({ type: 'recording-started' });
 
   // The mic turning on is the fast, OS-level signal; the detector still has
   // to find a known app, tab or huddle, so dictation or Voice Memos never
   // prompt.
   async function onMicOn() {
-    if (notified || isCapturing()) return;
+    if (promptState.phase !== 'idle' || isCapturing()) return;
     const call = await detector.checkOnce();
     if (call) detected(call, 'mic');
   }
@@ -63,7 +116,7 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
   // tab or window stops only a Recording that Cora's prompt started, so a
   // Recording started from the tray or floater outlives a Call it overlaps.
   function ended(reason) {
-    notified = false;
+    step({ type: 'call-ended' });
     const fromCall = startedFromCall;
     startedFromCall = false;
     if (!isCapturing()) return;
@@ -80,7 +133,7 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
     });
   }
 
-  return { start, onMicOn, onMicOff };
+  return { start, onMicOn, onMicOff, promptAction, onRecordingStarted };
 }
 
 module.exports = { createCallDetection };
