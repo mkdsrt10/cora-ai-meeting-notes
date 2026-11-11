@@ -3,12 +3,14 @@
 // event reporting, so the whole decision logic runs under node:test.
 //
 //   createUpdater({ currentVersion, checkUrl, fetch, clock, isBusy, install, emitEvent, log,
-//                   remoteConfig, relaunch })
+//                   remoteConfig, relaunch, store })
+//     store = { get(key), set(key, value) } keeps snoozedUntil across restarts
+//     (main backs it with userData/updater.json); errors from it are ignored
 //     check()   -> one check of the latest GitHub release (skipped under lockdown)
 //     start()   -> check now, then every 6 h
 //     stop()    -> cancel the periodic check
 //     snooze()  -> hide the banner for 24 h (no-op when forced)
-//     update()  -> run the install for the available release, unless busy
+//     update()  -> stage the available release, wait until idle, swap it in, relaunch
 //     state()   -> { available, latest, current, busyReason, forced, snoozedUntil, error, installing }
 //     on('state', fn) -> unsubscribe; fired on every state change
 
@@ -80,7 +82,7 @@ function releaseFrom(body) {
 
 function createUpdater({
   currentVersion, checkUrl, fetch, clock, isBusy = () => null, install, emitEvent = async () => {},
-  log = () => {}, remoteConfig = async () => ({}), relaunch = () => {},
+  log = () => {}, remoteConfig = async () => ({}), relaunch = () => {}, store = null,
 }) {
   const events = new EventEmitter();
   let release = null;
@@ -90,6 +92,36 @@ function createUpdater({
   let snoozedUntil = null;
   let snoozeTimer = null;
   let installing = false;
+
+  function stored(key) {
+    try {
+      return store ? store.get(key) : undefined;
+    } catch (err) {
+      log(`could not read ${key}: ${err && err.message}`);
+      return undefined;
+    }
+  }
+
+  function persist(key, value) {
+    try {
+      if (store) store.set(key, value);
+    } catch (err) {
+      log(`could not save ${key}: ${err && err.message}`);
+    }
+  }
+
+  // Tell the renderer the banner is back once the snooze runs out.
+  function scheduleSnoozeEnd() {
+    if (snoozeTimer !== null) clock.clearTimeout(snoozeTimer);
+    snoozeTimer = clock.setTimeout(() => { snoozeTimer = null; emitState(); }, snoozedUntil - clock.now());
+  }
+
+  // A Later clicked before the last restart still holds until it runs out.
+  const savedSnooze = Number(stored('snoozedUntil'));
+  if (Number.isFinite(savedSnooze) && savedSnooze > clock.now()) {
+    snoozedUntil = savedSnooze;
+    scheduleSnoozeEnd();
+  }
 
   function report(name, payload) {
     return Promise.resolve()
@@ -165,8 +197,9 @@ function createUpdater({
     return state();
   }
 
-  // Resolves once nothing is busy, polling on the clock; the new bundle is
-  // already in place, so only the relaunch waits for the meeting to end.
+  // Resolves once nothing is busy, polling on the clock. The new bundle is
+  // staged but not yet swapped in: the running Python server, helpers and
+  // renderer keep their bundle until the meeting and its processing are over.
   function whenIdle() {
     return new Promise((resolve) => {
       const poll = () => (isBusy() ? clock.setTimeout(poll, IDLE_POLL_MS) : resolve());
@@ -174,8 +207,9 @@ function createUpdater({
     });
   }
 
-  // Update clicked: refuse while busy or already running; otherwise install,
-  // report, and relaunch. A failure keeps the offer and shows the error.
+  // Update clicked: refuse while busy or already running; otherwise stage the
+  // release (download, verify, copy), wait until idle, swap it in, report and
+  // relaunch. A failure keeps the offer and shows the error.
   async function update() {
     if (!release) return { ok: false, error: 'No update is available.' };
     if (installing) return { ok: false, error: 'The update is already running.' };
@@ -192,7 +226,9 @@ function createUpdater({
     emitState();
     await report('update_started', versions);
     try {
-      await install(target);
+      const staged = await install(target);
+      await whenIdle();
+      staged.swapIn();
     } catch (err) {
       installing = false;
       error = (err && err.message) || 'The update failed.';
@@ -202,7 +238,6 @@ function createUpdater({
       return { ok: false, error };
     }
     await report('update_finished', { ...versions, status: 'ok' });
-    await whenIdle();
     relaunch();
     return { ok: true };
   }
@@ -234,8 +269,8 @@ function createUpdater({
     snooze() {
       if (!release || isForced()) return false;
       snoozedUntil = clock.now() + SNOOZE_MS;
-      if (snoozeTimer !== null) clock.clearTimeout(snoozeTimer);
-      snoozeTimer = clock.setTimeout(() => { snoozeTimer = null; emitState(); }, SNOOZE_MS);
+      persist('snoozedUntil', snoozedUntil);
+      scheduleSnoozeEnd();
       emitState();
       return true;
     },

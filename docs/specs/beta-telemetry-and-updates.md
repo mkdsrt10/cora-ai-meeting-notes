@@ -120,10 +120,11 @@ time by the build script.
 
 **Sender.** A background thread in the server flushes unsent events as one batch: at server start,
 on a graceful shutdown request from Electron, immediately after a Feedback row is written, and
-every 10 minutes while unsent rows exist. A batch is a JSON document with install id, display
-name, app version, commit and the events. On any failure the rows stay unsent; rows older than 7
-days, or beyond 5 MB of unsent payload, are deleted oldest first and a single `events_dropped`
-event with the count is written.
+every 10 minutes while unsent rows or pending captures exist. A batch is a JSON document with
+install id, display name, app version, commit and the events. On any failure the rows stay unsent.
+Before every flush, and on every tick while sharing is off, unsent rows older than 7 days, or
+beyond 5 MB of unsent payload, are deleted oldest first and a single `events_dropped` event with
+the running count is kept, so turning sharing back on sends at most 7 days / 5 MB of backlog.
 
 **Remote config.** Fetched once at server start from the receiver, cached in the data directory,
 used until the next start. Keys: `telemetry_enabled`, `capture_sample_rate` (default 0.25),

@@ -381,10 +381,25 @@ def test_a_failed_upload_keeps_the_capture_pending_and_shows_in_the_beta_status(
     assert temp_archives() == []
 
 
-def test_one_capture_is_uploaded_per_flush_oldest_first(no_events):
+def test_pending_captures_upload_one_at_a_time_oldest_first_until_none_are_left(no_events):
     import beta_sender
     import capture
     no_events.replies["/v1/recordings"] = (201, {"stored": "x/y"})
+    first, second, third = make_recording(), make_recording(), make_recording()
+    capture.request(first, "sample")
+    capture.request(second, "feedback")
+    capture.request(third, "sample")
+
+    beta_sender.start()
+
+    assert wait_for(lambda: capture.pending_count() == 0)
+    assert [u["headers"]["X-Cora-Recording"] for u in uploads(no_events)] == [first, second, third]
+
+
+def test_the_uploads_of_a_flush_stop_at_the_first_failure(no_events):
+    import beta_sender
+    import capture
+    no_events.replies["/v1/recordings"] = (500, {"error": "disk full"})
     first, second = make_recording(), make_recording()
     capture.request(first, "sample")
     capture.request(second, "feedback")
@@ -392,11 +407,42 @@ def test_one_capture_is_uploaded_per_flush_oldest_first(no_events):
     beta_sender.start()
     assert wait_for(lambda: uploads(no_events))
     time.sleep(0.3)
-    assert [u["headers"]["X-Cora-Recording"] for u in uploads(no_events)] == [first]
 
-    beta_sender.flush_now()
-    assert wait_for(lambda: len(uploads(no_events)) == 2)
-    assert [u["headers"]["X-Cora-Recording"] for u in uploads(no_events)] == [first, second]
+    assert [u["headers"]["X-Cora-Recording"] for u in uploads(no_events)] == [first]
+    assert capture.pending_count() == 2
+
+
+def test_a_failed_upload_is_retried_on_the_interval_without_a_new_event(no_events, monkeypatch):
+    import beta_sender
+    import capture
+    monkeypatch.setenv("CORA_TELEMETRY_FLUSH_SECONDS", "0.3")
+    no_events.replies["/v1/recordings"] = (503, {"error": "busy"})
+    recording_id = make_recording()
+    capture.request(recording_id, "feedback")
+
+    beta_sender.start()
+    assert wait_for(lambda: uploads(no_events))
+    no_events.replies["/v1/recordings"] = (201, {"stored": "x/y"})
+
+    assert wait_for(lambda: not capture.has_pending(recording_id), timeout=5)
+    assert no_events.batches() == []  # no event was needed to trigger the retry
+
+
+@pytest.mark.parametrize("status", [400, 401, 413])
+def test_a_capture_the_receiver_refuses_is_dropped_with_a_capture_dropped_event(no_events, port, status):  # noqa: F811
+    import beta_sender
+    import capture
+    no_events.replies["/v1/recordings"] = (status, {"error": "refused"})
+    recording_id = make_recording()
+    capture.request(recording_id, "feedback")
+
+    beta_sender.start()
+
+    assert wait_for(lambda: not capture.has_pending(recording_id))
+    assert len(uploads(no_events)) == 1
+    assert dropped_events() == [{"recording_id": recording_id, "reason": "feedback"}]
+    assert str(status) in api(port, "GET", "/api/beta/status")[1]["last_error"]
+    assert temp_archives() == []
 
 
 def test_a_capture_queued_before_lockdown_is_never_uploaded_under_it(no_events, monkeypatch):

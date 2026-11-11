@@ -94,12 +94,28 @@ def test_settings_has_a_beta_section_with_the_toggle_name_export_and_retention_f
     assert 'data-settings-panel="beta">Beta</button>' in html
     section = beta_section()
     assert 'Share usage and sample recordings with the Cora team' in section
-    assert 'docs/BETA_POLICY.md' in section
     assert 'id="settingsShareUsage"' in section and 'type="checkbox" id="settingsShareUsage"' in section
     assert '<label for="settingsBetaName">Your name for the Cora team</label>' in section
     assert 'id="settingsShowShared"' in section and 'Show what Cora shares' in section
     assert 'type="number" id="settingsAudioRetentionDays" min="1"' in section
     assert 'type="number" id="settingsAudioCapMb" min="50"' in section
+
+
+
+POLICY_URL = 'https://github.com/mkdsrt10/cora-ai-meeting-notes/blob/production/docs/BETA_POLICY.md'
+
+
+def test_the_beta_policy_is_a_link_that_opens_in_the_browser():
+    """An https link with target=_blank: the navigation guards (src/main/security.js)
+    hand it to shell.openExternal, as with the other external links in Settings."""
+    import re
+    section = beta_section()
+    links = re.findall(r'<a [^>]*>[^<]*</a>', section)
+    policy = [a for a in links if 'BETA_POLICY' in a]
+    assert policy, 'the Beta panel links to the policy'
+    for a in policy:
+        assert f'href="{POLICY_URL}"' in a and 'target="_blank"' in a and 'rel="noopener"' in a
+    assert section.count('BETA_POLICY') == sum(a.count('BETA_POLICY') for a in policy), 'no bare path left'
 
 
 @needs_node
