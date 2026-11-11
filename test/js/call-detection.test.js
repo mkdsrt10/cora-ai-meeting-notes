@@ -245,3 +245,83 @@ test('follow-up: clicking Join after mic-on prompts on the next 3s re-check, as 
   await h.clock.advance(30000);
   assert.equal(s.calls.n, n, 'stops once the Call is found');
 });
+
+test('follow-up: stops after 2 minutes from mic-on, leaving only the poll', async () => {
+  const s = sequence([EMPTY]);
+  const h = harness({ check: s.check });
+  h.cd.start();
+  await h.cd.onMicOn();
+  await h.clock.advance(120000);
+  assert.equal(s.calls.n, 1 + 40, 'mic-on check plus a re-check every 3s for 120s');
+  await h.clock.advance(60000);
+  assert.equal(s.calls.n, 41);
+  assert.equal(h.clock.pendingTimers(), 0);
+});
+
+test('follow-up: stops when the mic goes off', async () => {
+  const s = sequence([EMPTY]);
+  const h = harness({ check: s.check });
+  h.cd.start();
+  await h.cd.onMicOn();
+  await h.clock.advance(3000);
+  h.cd.onMicOff();
+  await h.clock.advance(60000);
+  assert.equal(s.calls.n, 2);
+});
+
+test('follow-up: stops when a Recording starts', async () => {
+  const s = sequence([EMPTY]);
+  const h = harness({ check: s.check });
+  h.cd.start();
+  await h.cd.onMicOn();
+  h.cd.onRecordingStarted();
+  await h.clock.advance(60000);
+  assert.equal(s.calls.n, 1);
+});
+
+test('follow-up: a Call found by the poll ends it, and Dismiss or Start leaves it ended', async () => {
+  for (const action of ['dismiss', 'start']) {
+    const s = sequence([EMPTY]);
+    const h = harness({ check: s.check });
+    h.cd.start();
+    await h.cd.onMicOn();
+    h.watcher().onDetected(MEET);
+    assert.equal(h.clock.pendingTimers(), 0);
+    h.cd.promptAction(action);
+    await h.clock.advance(60000);
+    assert.equal(s.calls.n, 1);
+  }
+});
+
+test('follow-up: never overlaps, and a failed check keeps it going', async () => {
+  let inflight = 0;
+  let maxInflight = 0;
+  let n = 0;
+  const check = async () => {
+    n += 1;
+    inflight += 1;
+    maxInflight = Math.max(maxInflight, inflight);
+    await new Promise((r) => setImmediate(r));
+    inflight -= 1;
+    if (n === 3) return FOUND;
+    return n === 2 ? { status: 'failed', call: null, unanswered: [] } : EMPTY;
+  };
+  const h = harness({ check });
+  h.cd.start();
+  await h.cd.onMicOn();
+  await h.clock.advance(9000);
+  assert.equal(maxInflight, 1);
+  assert.equal(h.shown.length, 1);
+});
+
+test('follow-up: asks with the 2.5s tick budget, and does not run while a Recording is capturing', async () => {
+  const budgets = [];
+  const h = harness({ check: async (o) => { budgets.push(o && o.budgetMs); return EMPTY; } });
+  h.cd.start();
+  await h.cd.onMicOn();
+  await h.clock.advance(3000);
+  assert.equal(budgets[1], 2500);
+  const c = harness({ capturing: true, check: async () => EMPTY });
+  await c.cd.onMicOn();
+  assert.equal(c.clock.pendingTimers(), 0);
+});
