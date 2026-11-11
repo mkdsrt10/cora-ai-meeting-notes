@@ -97,10 +97,17 @@ test('a Zoom web tab is a Call only when its page says joined (shared snapshot)'
     assert.deepEqual(await check({ urls: [url], snapshots: [{ url, live: true, label: 'Zoom' }] }),
       { label: 'Zoom', source: 'browser', url, confirmed: true, unanswered: [] }, url);
     assert.equal(await check({ urls: [url], snapshots: [{ url, live: false, label: 'Zoom' }] }), null, `${url} pre-join`);
-    assert.equal(await check({ urls: [url], snapshots: [{ url, live: null }] }), null, `${url} could not be asked`);
-    assert.equal(await check({ urls: [url] }), null, `${url} no snapshot`);
   }
   assert.equal(await check({ urls: ['https://zoom.us/pricing'] }), null);
+});
+
+test('a Zoom web tab whose page cannot be asked keeps the URL floor, like Meet (unconfirmed)', async () => {
+  for (const url of [ZOOM_WEB, ZOOM_JOIN]) {
+    const want = { label: 'Zoom', source: 'browser', url, confirmed: false };
+    assert.deepEqual(await check({ urls: [url], snapshots: [{ browser: 'Brave Browser', url, live: null }] }),
+      { ...want, unanswered: ['Brave Browser'] }, `${url} could not be asked`);
+    assert.deepEqual(await check({ urls: [url] }), { ...want, unanswered: [] }, `${url} no snapshot`);
+  }
 });
 
 test('Teams meeting links are unconfirmed Calls', async () => {

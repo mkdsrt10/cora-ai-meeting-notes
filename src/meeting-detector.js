@@ -379,7 +379,7 @@ function candidatesOf(parsed) {
     const answer = !snaps.length ? 'none' : live === null ? 'unanswered' : 'answered';
     let call = null;
     if (live === true) call = { label: rule.label, source: 'browser', url, confirmed: true };
-    else if (live === null && rule.kind === 'meet') call = { label: rule.label, source: 'browser', url, confirmed: false };
+    else if (live === null && (rule.kind === 'meet' || rule.kind === 'zoom')) call = { label: rule.label, source: 'browser', url, confirmed: false };
     out.push({ host: rule.host, answer, unanswered, call });
   }
   out.push(...desktopCandidates(parsed));
