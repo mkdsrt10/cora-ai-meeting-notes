@@ -54,6 +54,24 @@ test('from source a developer can point at a receiver and pick the variant throu
   assert.equal(env.CORA_BETA_TOKEN, 'dev');
 });
 
+test('the build script writes build-info.json that the packaged app reads back', () => {
+  const { execFileSync } = require('child_process');
+  const resourcesPath = tmpDir();
+  execFileSync(process.execPath, [path.join(__dirname, '..', '..', 'src', 'build-info.js'), resourcesPath, '0.4.0', 'abc1234', 'team'], {
+    env: { ...process.env, CORA_BETA_RECEIVER_URL: 'https://receiver.example', CORA_BETA_TOKEN: 't0k' },
+  });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(resourcesPath, 'build-info.json'), 'utf8')), {
+    version: '0.4.0', commit: 'abc1234', variant: 'team', receiver_url: 'https://receiver.example', token: 't0k',
+  });
+  assert.equal(buildInfoEnv({ isPackaged: true, resourcesPath, appVersion: '0.4.0' }).CORA_BETA_TOKEN, 't0k');
+});
+
+test('the build script refuses a variant other than team or public', () => {
+  const { spawnSync } = require('child_process');
+  const res = spawnSync(process.execPath, [path.join(__dirname, '..', '..', 'src', 'build-info.js'), tmpDir(), '0.4.0', 'abc1234', 'beta']);
+  assert.notEqual(res.status, 0);
+});
+
 test('a packaged app without build-info.json still starts as a public build with sending disabled', () => {
   assert.deepEqual(buildInfoEnv({ isPackaged: true, resourcesPath: tmpDir(), appVersion: '0.4.0' }), {
     CORA_APP_VERSION: '0.4.0',
