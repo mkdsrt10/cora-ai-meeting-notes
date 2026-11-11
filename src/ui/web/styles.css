@@ -925,3 +925,13 @@ mark.search-match.active {
 .todo-row{cursor:default}
 .todo-row h4{margin:0;font-weight:500}
 .todo-done h4{text-decoration:line-through;color:var(--muted)}
+
+/* Update banner (update-banner.js): top of the main window, above the topbar. */
+.update-banner{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:10px 34px;background:color-mix(in srgb, var(--violet) 10%, var(--surface));border-bottom:1px solid var(--border2);font-size:13px}
+.update-banner[hidden]{display:none}
+.update-banner-copy{display:flex;flex-direction:column;gap:2px;min-width:0}
+.update-banner-reason{color:var(--muted);font-size:12px}
+.update-banner-reason:empty,.update-banner-error:empty{display:none}
+.update-banner-error{color:var(--red,#c0392b);font-size:12px}
+.update-banner-actions{display:flex;gap:8px;flex-shrink:0}
+.update-banner .button[disabled]{opacity:.55;cursor:not-allowed}
