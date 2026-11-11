@@ -1,9 +1,6 @@
 // Inline meeting title editor.
 // Classic script sharing global scope with the other files in index.html (load order matters).
 
-// Set by setupTitleEditor(); callers refresh the Copy ID button after selectedDetail changes.
-let syncCopyRecordingIdButton = () => {};
-
 function setupTitleEditor() {
   const detailTitle = $('#detailTitle');
   const editBtn = $('#editTitleBtn');
