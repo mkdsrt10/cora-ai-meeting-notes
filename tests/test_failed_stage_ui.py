@@ -27,7 +27,7 @@ const context=vm.createContext({console:{...console,warn(){}},setTimeout:()=>0,c
  confirm:()=>true,triggerStopRecording(){},
  fetch:async(path,options)=>{calls.push({path,options});return {ok:true,json:async()=>({ok:true,recordings:[]})};}});
 context.globalThis=context; context.window=context;
-for(const f of ['core.js','sessions.js','transcript.js','detail.js','detail-actions.js','navigation.js']) vm.runInContext(fs.readFileSync(web+'js/'+f,'utf8'),context);
+for(const f of ['core.js','usage.js','sessions.js','transcript.js','detail.js','detail-actions.js','navigation.js']) vm.runInContext(fs.readFileSync(web+'js/'+f,'utf8'),context);
 vm.runInContext(`stageLabels={failed:'Processing failed',ready:'Ready'}; activeFolderFilter=null; sessionFiltersPopulated=true;
  renderStorage=()=>{}; loadSelectedRecording=async()=>{}; toast=()=>{}; opened=[]; openInRecordings=id=>opened.push(id);`,context);
 const run=code=>vm.runInContext(code,context);

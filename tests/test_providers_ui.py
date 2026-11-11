@@ -43,7 +43,7 @@ const context = vm.createContext({console, $:node, $$:q => q.includes('data-proc
     if(path === '/api/credentials/save') return {ok:true, credentials:status.credentials};
     return {};
   }});
-for(const file of ['processing.js','providers.js']){
+for(const file of ['usage.js','processing.js','providers.js']){
   vm.runInContext(fs.readFileSync(process.argv[2]+'/src/ui/web/js/'+file,'utf8'), context);
 }
 const click = (sel) => callbacks.get(sel+':click')({currentTarget: node(sel)});

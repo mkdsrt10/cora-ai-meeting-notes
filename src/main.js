@@ -16,6 +16,8 @@ const { createRecordingSession } = require('./recording/session');
 const { createProcessingQueue } = require('./recording/processing-queue');
 const { createBackendApi, createArchiveStep } = require('./recording/backend');
 const { buildInfoEnv } = require('./build-info');
+const os = require('os');
+const { appStartedPayload, lockdownEnabled, screenshotTakenPayload } = require('./main/usage');
 const { createUpdater } = require('./updater');
 const { createInstaller, bundlePathFromExe } = require('./main/update-install');
 
@@ -116,6 +118,27 @@ const recording = createRecordingSession({
 
 const isCapturing = () => recording.state().phase === 'recording';
 
+// Usage events from main (the session sends its own through backendApi):
+// fire and forget, a failure is only a logged warning.
+function recordUsage(name, payload) {
+  backendApi.recordEvent(name, payload)
+    .catch((err) => console.warn(`[Cora usage] ${name} not recorded:`, err && err.message));
+}
+
+async function recordAppStarted() {
+  let processingMode = null;
+  try { processingMode = JSON.parse(await fetchJson('/api/processing')).preferences.mode; } catch {}
+  let configText = null;
+  try { configText = fs.readFileSync(path.join(DATA_DIR, 'config.json'), 'utf8'); } catch {}
+  recordUsage('app_started', appStartedPayload({
+    os,
+    systemVersion: typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : null,
+    processingMode,
+    microphone: await fetchSetting('microphone'),
+    lockdown: lockdownEnabled({ env: process.env, configText }),
+  }));
+}
+
 // In-app updates (src/updater.js). Busy = the Recording session is not idle
 // (live, paused or a stopped Recording still finishing) or the Processing
 // queue has a running or pending job; Update is refused with this reason.
@@ -139,9 +162,15 @@ const updater = createUpdater({
   fetch: (...args) => globalThis.fetch(...args),
   clock,
   isBusy: updateBusyReason,
-  // min_app_version and the lockdown veto come from the local server; if it
-  // cannot answer, the updater skips the check.
-  remoteConfig: async () => JSON.parse(await fetchJson('/api/remote-config')),
+  // min_app_version and the lockdown veto come from the local server (main's
+  // own config read also counts); if the server cannot answer, the updater
+  // skips the check.
+  remoteConfig: async () => {
+    const config = JSON.parse(await fetchJson('/api/remote-config'));
+    let configText = null;
+    try { configText = fs.readFileSync(path.join(DATA_DIR, 'config.json'), 'utf8'); } catch {}
+    return { ...config, lockdown: Boolean(config.lockdown) || lockdownEnabled({ env: process.env, configText }) };
+  },
   install: (release) => createInstaller({
     bundlePath: bundlePathFromExe(app.getPath('exe')),
     log: (msg) => console.log(`[Cora updater] ${msg}`),
@@ -156,7 +185,7 @@ const updater = createUpdater({
     app.relaunch();
     app.exit(0);
   },
-  emitEvent: (name, payload) => postJson('/api/events', { name, payload }),
+  emitEvent: (name, payload) => backendApi.recordEvent(name, payload),
   log: (msg) => console.log(`[Cora updater] ${msg}`),
 });
 
@@ -462,9 +491,17 @@ function takeMeetingScreenshot(recId, targetDir) {
     // screencapture exits non-zero (with no file written) if the user
     // presses Escape instead of dragging a selection — that's a normal
     // cancel, not an error worth logging.
-    if (!err && fs.existsSync(imgPath) && fs.existsSync(MAC_OCR_BIN)) {
+    const snapped = !err && fs.existsSync(imgPath);
+    const reportSnap = (ocrText) => {
+      let files = [];
+      try { files = fs.readdirSync(dir); } catch {}
+      recordUsage('screenshot_taken', screenshotTakenPayload(recId, files, ocrText));
+    };
+    if (snapped && !fs.existsSync(MAC_OCR_BIN)) reportSnap('');
+    if (snapped && fs.existsSync(MAC_OCR_BIN)) {
       execFile(MAC_OCR_BIN, [imgPath], (ocrErr, stdout) => {
         const ocrText = (!ocrErr && stdout) ? stdout.trim() : '';
+        reportSnap(ocrText);
         if (ocrText) {
           fs.writeFileSync(txtPath, ocrText, 'utf-8');
           console.log(`[Cora Slide OCR] Captured ${imgPath} (${ocrText.split(/\s+/).length} words)`);
@@ -656,6 +693,7 @@ app.whenReady().then(async () => {
   });
   await verifyOwnServer();
   refreshSelfName();
+  recordAppStarted().catch((err) => console.warn('[Cora usage] app_started not recorded:', err && err.message));
 
   createWindow();
   createFloaterWindow();
