@@ -78,6 +78,17 @@ if [[ $TEAM -eq 1 ]]; then
   node -e 'const f=process.argv[1],c=require(f);c.default_processing_mode="cloud";require("fs").writeFileSync(f,JSON.stringify(c,null,2)+"\n")' "$CFG"
 fi
 
+say "Stamping build-info.json"
+# Version, commit and variant for the Python server (src/build-info.js reads it
+# at launch). Receiver URL and token come from CORA_BETA_RECEIVER_URL and
+# CORA_BETA_TOKEN in this shell; unset means the build never sends telemetry.
+# Written into the bundle only, never into the repo.
+VARIANT=public; [[ $TEAM -eq 1 ]] && VARIANT=team
+COMMIT="$(git rev-parse --short HEAD 2>/dev/null || true)"
+node src/build-info.js "$PWD/$APP/Contents/Resources" "$VERSION" "$COMMIT" "$VARIANT"
+[[ -n "${CORA_BETA_RECEIVER_URL:-}" && -n "${CORA_BETA_TOKEN:-}" ]] \
+  || printf '\033[33mwarning:\033[0m CORA_BETA_RECEIVER_URL/CORA_BETA_TOKEN not set; this build will not send beta telemetry\n' >&2
+
 say "Signing"
 # Sign nested Mach-O files first (bundled Python, ffmpeg and helpers), then the app.
 find "$APP/Contents/Resources" -type f \( -name "*.so" -o -name "*.dylib" -o -perm -u+x \) -print0 \

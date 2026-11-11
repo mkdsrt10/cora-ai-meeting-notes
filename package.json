@@ -9,6 +9,7 @@
     "pack": "electron-builder --dir",
     "build": "electron-builder",
     "mcp": ".venv/bin/python python/mcp_server.py",
+    "test": "npm run test:js",
     "test:js": "node --test --test-timeout=20000 test/js/"
   },
   "build": {
