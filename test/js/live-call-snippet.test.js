@@ -41,17 +41,30 @@ test('a Slack chat tab with no huddle is not live', () => {
   assert.deepEqual(ask('app.slack.com', chat), { live: false, label: 'Slack Huddle' });
 });
 
-test('an expanded Slack huddle (tiles or content container) is live', () => {
+test('an expanded Slack huddle (participant tiles) is live', () => {
   assert.deepEqual(ask('app.slack.com', [el({ sel: ['[data-qa^="huddle_peer_tile_userId_"]'] })]), { live: true, label: 'Slack Huddle' });
-  assert.equal(ask('acme.slack.com', [el({ sel: ['[data-qa="huddle_window_content_container"]'] })]).live, true);
+  const container = el({ sel: ['[data-qa="huddle_window_content_container"]'], children: [el({ sel: ['[data-qa^="huddle_peer_tile_userId_"]'] })] });
+  assert.equal(ask('acme.slack.com', [container]).live, true);
+});
+
+test('the huddle content container alone is not live', () => {
+  assert.deepEqual(ask('app.slack.com', [el({ sel: ['[data-qa="huddle_window_content_container"]'] })]), { live: false, label: 'Slack Huddle' });
 });
 
 test('a Slack huddle dialog with a Leave or End huddle button is live', () => {
   const dialog = (button) => el({ sel: [HUDDLE_ROOT], attrs: { 'aria-label': 'Huddle in #design' }, children: [button] });
   assert.equal(ask('app.slack.com', [dialog(el({ sel: [BUTTON], attrs: { 'aria-label': 'Leave huddle' } }))]).live, true);
   assert.equal(ask('app.slack.com', [dialog(el({ sel: [BUTTON], text: 'End the huddle' }))]).live, true);
-  const unrelated = el({ sel: [HUDDLE_ROOT], attrs: { 'aria-label': 'Preferences' }, children: [el({ sel: [BUTTON], text: 'Leave huddle' })] });
-  assert.equal(ask('app.slack.com', [unrelated]).live, false);
+  const huddleBar = el({ sel: ['[data-qa*="huddle"]'], attrs: { 'data-qa': 'huddle_bottom_bar_content' }, children: [el({ sel: [BUTTON], attrs: { 'aria-label': 'End huddle' } })] });
+  assert.equal(ask('app.slack.com', [huddleBar]).live, true);
+  const notHuddle = el({ sel: [HUDDLE_ROOT], attrs: { 'aria-label': 'Huddle in #design' }, children: [el({ sel: [BUTTON], text: 'Leave channel' })] });
+  assert.equal(ask('app.slack.com', [notHuddle]).live, false);
+});
+
+test('a Leave or End huddle button anywhere on a Slack page is live', () => {
+  assert.equal(ask('app.slack.com', [el({ sel: [BUTTON], attrs: { 'aria-label': 'Leave huddle' } })]).live, true);
+  const elsewhere = el({ sel: [HUDDLE_ROOT], attrs: { 'aria-label': 'Preferences' }, children: [el({ sel: ['[role="button"]'], text: 'End the huddle' })] });
+  assert.equal(ask('app.slack.com', [elsewhere]).live, true);
 });
 
 test('a Slack huddle collapsed to the mini-bar is live', () => {

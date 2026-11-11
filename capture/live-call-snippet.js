@@ -18,15 +18,17 @@ const LIVE_CALL_JS = `function liveCall() {
   const text = el => String((el && (el.getAttribute('aria-label') || el.innerText)) || '').trim();
   const buttons = root => Array.from(root.querySelectorAll('button, [role="button"]'));
   if (host === 'slack.com' || host.endsWith('.slack.com')) {
-    /* Expanded huddle: participant tiles or the content container. Older
-       layouts: a huddle dialog holding a Leave/End huddle button. Collapsed
-       to the bottom mini-bar: a non-empty huddle_details_title. */
+    /* Expanded huddle: participant tiles. Older layouts: a huddle dialog
+       holding a Leave/End huddle button, or such a button anywhere. Collapsed
+       to the bottom mini-bar: a non-empty huddle_details_title. The content
+       container alone does not count as live; the speaker watcher uses it
+       only to scope where names are read. */
     const isLeave = b => /^(?:leave|end)(?: the)? huddle/i.test(text(b));
     const isHuddleRoot = r => /huddle/i.test(r.getAttribute('aria-label') || r.getAttribute('data-qa') || r.getAttribute('data-testid') || '');
     const mini = document.querySelector('[data-qa="huddle_details_title"]');
     const live = !!document.querySelector('[data-qa^="huddle_peer_tile_userId_"]')
-      || !!document.querySelector('[data-qa="huddle_window_content_container"]')
       || Array.from(document.querySelectorAll('[role="dialog"], [data-qa*="huddle"], [data-testid*="huddle"]')).some(r => isHuddleRoot(r) && buttons(r).some(isLeave))
+      || buttons(document).some(isLeave)
       || String((mini && mini.innerText) || '').trim() !== '';
     return { live, label: 'Slack Huddle' };
   }

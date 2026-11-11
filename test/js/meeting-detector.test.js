@@ -309,6 +309,7 @@ const PAGES = {
   slackExpanded: () => runPage('app.slack.com', [el({ sel: ['[data-qa^="huddle_peer_tile_userId_"]'] })]),
   slackCollapsed: () => runPage('app.slack.com', [el({ sel: ['[data-qa="huddle_details_title"]'], text: 'Huddle with Ana' })]),
   slackChat: () => runPage('app.slack.com', [el({ sel: ['button'], text: 'Send' })]),
+  slackContainerOnly: () => runPage('app.slack.com', [el({ sel: ['[data-qa="huddle_window_content_container"]'] })]),
   unanswered: () => 'null',
 };
 
@@ -325,12 +326,13 @@ test('snapshot answers from real Meet pages: joined, green room, could not ask',
     { label: 'Google Meet', source: 'browser', url: MEET_ROOM, confirmed: false, unanswered: ['Microsoft Edge'] });
 });
 
-test('snapshot answers from real Slack pages: expanded, collapsed, chat, could not ask', async () => {
+test('snapshot answers from real Slack pages: expanded, collapsed, chat, empty container, could not ask', async () => {
   for (const page of ['slackExpanded', 'slackCollapsed']) {
     assert.deepEqual(await checkRaw('Safari', SLACK_TAB, PAGES[page]()),
       { label: 'Slack Huddle', source: 'browser', url: SLACK_TAB, confirmed: true, unanswered: [] }, page);
   }
   assert.equal(await checkRaw('Brave Browser', SLACK_TAB, PAGES.slackChat()), null);
+  assert.equal(await checkRaw('Brave Browser', SLACK_TAB, PAGES.slackContainerOnly()), null);
   assert.equal(await checkRaw('Brave Browser', SLACK_TAB, PAGES.unanswered()), null);
 });
 
