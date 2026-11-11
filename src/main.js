@@ -16,6 +16,8 @@ const { createRecordingSession } = require('./recording/session');
 const { createProcessingQueue } = require('./recording/processing-queue');
 const { createBackendApi, createArchiveStep } = require('./recording/backend');
 const { buildInfoEnv } = require('./build-info');
+const os = require('os');
+const { appStartedPayload, lockdownEnabled, screenshotTakenPayload } = require('./main/usage');
 
 // Python children get the version stamp (CORA_APP_VERSION, CORA_GIT_COMMIT,
 // CORA_BUILD_VARIANT, CORA_BETA_RECEIVER_URL, CORA_BETA_TOKEN): a packaged
@@ -113,6 +115,27 @@ const recording = createRecordingSession({
 });
 
 const isCapturing = () => recording.state().phase === 'recording';
+
+// Usage events from main (the session sends its own through backendApi):
+// fire and forget, a failure is only a logged warning.
+function recordUsage(name, payload) {
+  backendApi.recordEvent(name, payload)
+    .catch((err) => console.warn(`[Cora usage] ${name} not recorded:`, err && err.message));
+}
+
+async function recordAppStarted() {
+  let processingMode = null;
+  try { processingMode = JSON.parse(await fetchJson('/api/processing')).preferences.mode; } catch {}
+  let configText = null;
+  try { configText = fs.readFileSync(path.join(DATA_DIR, 'config.json'), 'utf8'); } catch {}
+  recordUsage('app_started', appStartedPayload({
+    os,
+    systemVersion: typeof process.getSystemVersion === 'function' ? process.getSystemVersion() : null,
+    processingMode,
+    microphone: await fetchSetting('microphone'),
+    lockdown: lockdownEnabled({ env: process.env, configText }),
+  }));
+}
 
 installNavigationGuards();
 
@@ -398,9 +421,17 @@ function takeMeetingScreenshot(recId, targetDir) {
     // screencapture exits non-zero (with no file written) if the user
     // presses Escape instead of dragging a selection — that's a normal
     // cancel, not an error worth logging.
-    if (!err && fs.existsSync(imgPath) && fs.existsSync(MAC_OCR_BIN)) {
+    const snapped = !err && fs.existsSync(imgPath);
+    const reportSnap = (ocrText) => {
+      let files = [];
+      try { files = fs.readdirSync(dir); } catch {}
+      recordUsage('screenshot_taken', screenshotTakenPayload(recId, files, ocrText));
+    };
+    if (snapped && !fs.existsSync(MAC_OCR_BIN)) reportSnap('');
+    if (snapped && fs.existsSync(MAC_OCR_BIN)) {
       execFile(MAC_OCR_BIN, [imgPath], (ocrErr, stdout) => {
         const ocrText = (!ocrErr && stdout) ? stdout.trim() : '';
+        reportSnap(ocrText);
         if (ocrText) {
           fs.writeFileSync(txtPath, ocrText, 'utf-8');
           console.log(`[Cora Slide OCR] Captured ${imgPath} (${ocrText.split(/\s+/).length} words)`);
@@ -592,6 +623,7 @@ app.whenReady().then(async () => {
   });
   await verifyOwnServer();
   refreshSelfName();
+  recordAppStarted().catch((err) => console.warn('[Cora usage] app_started not recorded:', err && err.message));
 
   createWindow();
   createFloaterWindow();
