@@ -85,12 +85,15 @@ test('the installed bundle path is derived from the running executable', () => {
   assert.throws(() => bundlePathFromExe('/usr/local/bin/electron'), /not running from an app bundle/);
 });
 
-test('a verified download replaces the installed app and unmounts', async (t) => {
+test('a verified download is staged beside the app; swapIn replaces the installed app', async (t) => {
   const assets = await stubAssets();
   t.after(() => assets.close());
   const s = setup(t);
   const install = createInstaller({ bundlePath: s.target, tmpRoot: s.tmpRoot, fetch: globalThis.fetch, run: s.run });
-  await install(assets.release);
+  const staged = await install(assets.release);
+  assert.equal(s.installed(), 'old', 'the running bundle stays in place until swapIn');
+  assert.deepEqual(s.leftovers(), [`${APP}.updating`], 'the new bundle is staged beside the app');
+  staged.swapIn();
   assert.equal(s.installed(), 'new');
   assert.deepEqual(s.leftovers(), [], 'no staging or backup copy left next to the app');
   const names = s.commands.map((c) => `${c[0]} ${c[1]}`);
@@ -136,4 +139,16 @@ test('a failed mount, a dmg without the app, or a failed copy leave the installe
     assert.deepEqual(s.leftovers(), [], `${code}: nothing left beside the app`);
     if (!opts.attachFails) assert.ok(s.commands.some((c) => c[0] === 'hdiutil' && c[1] === 'detach'), `${code}: unmounted`);
   }
+});
+
+test('a failed swap puts the old app back and removes the staged copy', async (t) => {
+  const assets = await stubAssets();
+  t.after(() => assets.close());
+  const s = setup(t);
+  const install = createInstaller({ bundlePath: s.target, tmpRoot: s.tmpRoot, fetch: globalThis.fetch, run: s.run });
+  const staged = await install(assets.release);
+  fs.rmSync(`${s.target}.updating`, { recursive: true, force: true }); // staged copy vanished meanwhile
+  assert.throws(() => staged.swapIn(), (err) => err.code === 'copy_failed');
+  assert.equal(s.installed(), 'old');
+  assert.deepEqual(s.leftovers(), []);
 });

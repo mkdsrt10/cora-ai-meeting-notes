@@ -78,6 +78,8 @@ async function rig(t, { currentVersion = '0.3.3', tag = 'v0.4.0', config = {} } 
     busy: null,
     config: { lockdown: false, min_app_version: null, ...config },
     installResult: null,
+    swapResult: null,
+    swaps: 0,
     relaunches: 0,
   };
   r.updater = createUpdater({
@@ -90,8 +92,15 @@ async function rig(t, { currentVersion = '0.3.3', tag = 'v0.4.0', config = {} } 
     install: async (rel) => {
       installs.push(rel);
       if (r.installResult instanceof Error) throw r.installResult;
+      return {
+        swapIn: () => {
+          if (r.swapResult instanceof Error) throw r.swapResult;
+          r.swaps += 1;
+          events.push({ name: 'swapped_in' });
+        },
+      };
     },
-    relaunch: () => { r.relaunches += 1; },
+    relaunch: () => { r.relaunches += 1; events.push({ name: 'relaunched' }); },
     emitEvent: async (name, payload) => { events.push({ name, payload }); },
     log: () => {},
   });
@@ -215,7 +224,7 @@ test('while busy, Update is refused with the reason and nothing is installed', a
   assert.equal(r.updater.state().busyReason, null);
 });
 
-test('Update installs the offered release, reports start and finish, then relaunches', async (t) => {
+test('Update stages the offered release, swaps it in, reports start and finish, then relaunches', async (t) => {
   const r = await rig(t, { currentVersion: '0.3.9', tag: 'v0.3.10' });
   await r.updater.check();
   const seen = [];
@@ -229,9 +238,26 @@ test('Update installs the offered release, reports start and finish, then relaun
   assert.ok(seen.some((s) => s.installing), 'banner shows the update running');
   assert.deepEqual(r.events.slice(1), [
     { name: 'update_started', payload: { from_version: '0.3.9', to_version: '0.3.10' } },
+    { name: 'swapped_in' },
     { name: 'update_finished', payload: { from_version: '0.3.9', to_version: '0.3.10', status: 'ok' } },
+    { name: 'relaunched' },
   ]);
   assert.equal(r.relaunches, 1);
+});
+
+test('a failed swap shows the error, reports update_finished error and does not relaunch', async (t) => {
+  const r = await rig(t, { currentVersion: '0.3.9', tag: 'v0.3.10' });
+  await r.updater.check();
+  r.swapResult = Object.assign(new Error('The update could not be put into place.'), { code: 'copy_failed' });
+  const result = await r.updater.update();
+  assert.equal(result.ok, false);
+  assert.equal(r.updater.state().error, 'The update could not be put into place.');
+  assert.equal(r.updater.state().installing, false);
+  assert.deepEqual(r.events.at(-1), {
+    name: 'update_finished',
+    payload: { from_version: '0.3.9', to_version: '0.3.10', status: 'error', error_code: 'copy_failed' },
+  });
+  assert.equal(r.relaunches, 0);
 });
 
 test('a failed install shows the error, reports update_finished error and does not relaunch', async (t) => {
@@ -265,18 +291,22 @@ test('a second click while installing does not start a second install', async (t
   assert.equal(r.installs.length, 1);
 });
 
-test('a recording started during the download holds the relaunch until it is over', async (t) => {
+test('a recording started during the download holds the swap and the relaunch until it is over', async (t) => {
   const r = await rig(t);
   await r.updater.check();
   r.updater.on('state', (s) => { if (s.installing) r.busy = 'Recording in progress.'; });
   const done = r.updater.update();
-  await waitFor(() => r.events.some((e) => e.name === 'update_finished'));
+  await waitFor(() => r.installs.length === 1);
+  await quiet();
   await r.clock.advance(60 * 1000);
+  assert.equal(r.swaps, 0, 'the running bundle is not replaced during the meeting');
+  assert.ok(!r.events.some((e) => e.name === 'update_finished'));
   assert.equal(r.relaunches, 0);
   r.busy = null;
   await r.clock.advance(60 * 1000);
   await done;
-  assert.equal(r.relaunches, 1);
+  assert.equal(r.swaps, 1);
+  assert.deepEqual(r.events.slice(-3).map((e) => e.name), ['swapped_in', 'update_finished', 'relaunched']);
 });
 
 test('lockdown switched on after the offer refuses Update and installs nothing', async (t) => {

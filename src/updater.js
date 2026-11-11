@@ -8,7 +8,7 @@
 //     start()   -> check now, then every 6 h
 //     stop()    -> cancel the periodic check
 //     snooze()  -> hide the banner for 24 h (no-op when forced)
-//     update()  -> run the install for the available release, unless busy
+//     update()  -> stage the available release, wait until idle, swap it in, relaunch
 //     state()   -> { available, latest, current, busyReason, forced, snoozedUntil, error, installing }
 //     on('state', fn) -> unsubscribe; fired on every state change
 
@@ -165,8 +165,9 @@ function createUpdater({
     return state();
   }
 
-  // Resolves once nothing is busy, polling on the clock; the new bundle is
-  // already in place, so only the relaunch waits for the meeting to end.
+  // Resolves once nothing is busy, polling on the clock. The new bundle is
+  // staged but not yet swapped in: the running Python server, helpers and
+  // renderer keep their bundle until the meeting and its processing are over.
   function whenIdle() {
     return new Promise((resolve) => {
       const poll = () => (isBusy() ? clock.setTimeout(poll, IDLE_POLL_MS) : resolve());
@@ -174,8 +175,9 @@ function createUpdater({
     });
   }
 
-  // Update clicked: refuse while busy or already running; otherwise install,
-  // report, and relaunch. A failure keeps the offer and shows the error.
+  // Update clicked: refuse while busy or already running; otherwise stage the
+  // release (download, verify, copy), wait until idle, swap it in, report and
+  // relaunch. A failure keeps the offer and shows the error.
   async function update() {
     if (!release) return { ok: false, error: 'No update is available.' };
     if (installing) return { ok: false, error: 'The update is already running.' };
@@ -192,7 +194,9 @@ function createUpdater({
     emitState();
     await report('update_started', versions);
     try {
-      await install(target);
+      const staged = await install(target);
+      await whenIdle();
+      staged.swapIn();
     } catch (err) {
       installing = false;
       error = (err && err.message) || 'The update failed.';
@@ -202,7 +206,6 @@ function createUpdater({
       return { ok: false, error };
     }
     await report('update_finished', { ...versions, status: 'ok' });
-    await whenIdle();
     relaunch();
     return { ok: true };
   }
