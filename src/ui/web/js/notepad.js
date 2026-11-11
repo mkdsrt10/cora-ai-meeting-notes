@@ -11,6 +11,7 @@ async function loadSelectedRecording(id){
   const detail = id ? await api(`/api/recording?id=${encodeURIComponent(id)}`) : null;
   if(selectedRecordingId !== id) return;
   selectedDetail = detail;
+  syncCopyRecordingIdButton();
   selectedRecordingId = detail?.id || id;
   resetProcessingStatus();
   if(selectedDetail) {
