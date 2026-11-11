@@ -117,6 +117,8 @@ def team_build(monkeypatch, stub):
     monkeypatch.setenv("CORA_GIT_COMMIT", "abc1234")
     import ai_trace
     ai_trace.app_versions.cache_clear()  # versions are read once per process
+    import usage_emitters  # today's people_snapshot counts as taken, so batches hold only the test's events
+    monkeypatch.setattr(usage_emitters, "people_snapshot_if_due", lambda: False)
     yield stub
     beta_sender.stop(final_flush=False)
     ai_trace.app_versions.cache_clear()

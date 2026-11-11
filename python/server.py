@@ -49,15 +49,15 @@ def main() -> None:
     init_api_token()
     STATIC.mkdir(parents=True, exist_ok=True)
     credentials._sanitize_db()
-    import usage_emitters
-    usage_emitters.people_snapshot_if_due()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Cora: http://{args.host}:{args.port}", flush=True)
     # Electron stops the server with SIGTERM (pythonProcess.kill()); turn it
     # into the same clean exit as Ctrl-C so the beta sender's final flush runs.
     signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
     import beta_sender
-    beta_sender.start()  # the port is bound; config fetch and first flush run on its thread
+    # The port is bound; the daily people_snapshot (a walk of the Recordings
+    # folder), the config fetch and the first flush all run on its thread.
+    beta_sender.start()
     import audio_pruning
     audio_pruning.start()  # first pass now on its thread, then after each job and every 6 h
     try:

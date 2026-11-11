@@ -137,3 +137,31 @@ def test_people_snapshot_waits_24_hours_between_snapshots(tmp_path, monkeypatch)
     monkeypatch.setattr(usage_events, "_now", lambda: now + dt.timedelta(hours=24, minutes=1))
     assert usage_emitters.people_snapshot_if_due() is True
     assert len(_events(tmp_path, "people_snapshot")) == 2
+
+
+def test_the_snapshot_is_taken_off_the_main_thread_after_the_port_is_bound(tmp_path, monkeypatch):
+    import threading
+
+    import server
+    order = []
+
+    class FakeServer:
+        def __init__(self, *args):
+            order.append("bound")
+
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+        def server_close(self):
+            pass
+    real = usage_emitters.people_snapshot_if_due
+
+    def spy():
+        order.append(("snapshot", threading.current_thread() is threading.main_thread()))
+        return real()
+    monkeypatch.setattr(usage_emitters, "people_snapshot_if_due", spy)
+    monkeypatch.setattr(server, "ThreadingHTTPServer", FakeServer)
+    monkeypatch.setattr("sys.argv", ["server.py", "--port", "0"])
+    server.main()
+    assert order == ["bound", ("snapshot", False)]
+    assert len(_events(tmp_path, "people_snapshot")) == 1

@@ -311,7 +311,19 @@ def flush_interval() -> float:
     return seconds if seconds > 0 else DEFAULT_FLUSH_SECONDS
 
 
+def _people_snapshot() -> None:
+    """The daily people_snapshot, taken here so its walk of the Recordings
+    folder never delays the server's port; before the first flush, so it
+    rides in the first batch."""
+    try:
+        import usage_emitters
+        usage_emitters.people_snapshot_if_due()
+    except Exception as e:  # noqa: BLE001 - telemetry never stops the sender
+        _status["last_error"] = f"people snapshot: {type(e).__name__}: {e}"
+
+
 def _run() -> None:
+    _people_snapshot()
     if usage_events.sharing_enabled():
         _fetch_config()
     flush()
