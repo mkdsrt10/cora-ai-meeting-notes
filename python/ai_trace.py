@@ -334,6 +334,28 @@ def run(pipeline: str, recording_id: Optional[str] = None, **meta: Any) -> Itera
                 _json(dict(meta, process_peak_rss_mb=process_peak_rss_mb())), run_id))
 
 
+def run_summary(run_id: Optional[str]) -> Optional[dict[str, Any]]:
+    """A closed run's row and its spans' kind/provider/model/status/tokens,
+    in start order (what the processing_finished Usage event is built from).
+    None when tracing was off or the row cannot be read."""
+    if not run_id:
+        return None
+    try:
+        with _connect() as conn:
+            conn.row_factory = sqlite3.Row
+            run = conn.execute("SELECT duration_s, status, meta FROM runs WHERE id = ?", (run_id,)).fetchone()
+            spans = conn.execute("SELECT kind, provider, model, status, input_tokens, output_tokens FROM spans"
+                                 " WHERE run_id = ? ORDER BY started_at", (run_id,)).fetchall()
+    except Exception as exc:
+        print(f"[ai_trace] run summary failed: {exc}", file=sys.stderr)
+        return None
+    if run is None:
+        return None
+    meta = json.loads(run["meta"]) if run["meta"] else {}
+    return {"duration_s": run["duration_s"], "status": run["status"],
+            "peak_rss_mb": (meta or {}).get("process_peak_rss_mb"), "spans": [dict(s) for s in spans]}
+
+
 def _pipeline_settings() -> dict[str, Any]:
     """The knobs that change model behaviour, snapshotted per run."""
     try:

@@ -30,7 +30,7 @@ const context = vm.createContext({console, selectedRecordingId:'A', selectedDeta
  document:{body:{contains:()=>true}},esc:String,confirm:()=>true,toast:()=>{},triggerStopRecording:()=>{},
  setTimeout:callback=>{timeouts.push(callback);return timeouts.length;},clearTimeout:()=>{},
  setInterval:()=>1,clearInterval:()=>{},api:()=>Promise.resolve({active:false})});
-for(const file of ['notepad.js','detail.js','detail-actions.js']){
+for(const file of ['usage.js','notepad.js','detail.js','detail-actions.js']){
  vm.runInContext(fs.readFileSync(process.argv[2]+'/src/ui/web/js/'+file,'utf8'),context);
 }
 function execute(code){return vm.runInContext(code,context);}

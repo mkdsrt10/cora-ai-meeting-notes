@@ -70,6 +70,9 @@ function fakeApi() {
     appendNote: rec('appendNote'),
     setTitle: rec('setTitle'),
     addLiveEntry: rec('addLiveEntry'),
+    recordEvent: rec('recordEvent'),
+    // Payloads of every Usage event of that name, in emission order.
+    events: (name) => calls.filter((c) => c[0] === 'recordEvent' && c[1] === name).map((c) => c[2]),
     processResults: [],
     async processRecording(id) {
       calls.push(['processRecording', id]);
@@ -77,9 +80,10 @@ function fakeApi() {
       if (next instanceof Error) throw next;
       return next || { ok: true };
     },
+    recordings: {}, // id -> GET /api/recording body a test scripts
     async getRecording(id) {
       calls.push(['getRecording', id]);
-      return { id, analysis_stage: 'notes' };
+      return api.recordings[id] || { id, analysis_stage: 'notes' };
     },
   };
   return api;

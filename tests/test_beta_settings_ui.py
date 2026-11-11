@@ -63,7 +63,7 @@ const context = vm.createContext({console, setTimeout, Promise, JSON, Number,
   loadProcessingControls: async () => {}, loadProviderSettings: async () => {}, fmtBytes: String,
   window: {electronAPI},
 });
-for(const file of ['settings.js', 'onboarding.js']){
+for(const file of ['usage.js', 'settings.js', 'onboarding.js']){
   vm.runInContext(fs.readFileSync(ROOT+'/src/ui/web/js/'+file, 'utf8'), context);
 }
 const showBeta = () => fire('nav:beta');

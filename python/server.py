@@ -49,6 +49,8 @@ def main() -> None:
     init_api_token()
     STATIC.mkdir(parents=True, exist_ok=True)
     credentials._sanitize_db()
+    import usage_emitters
+    usage_emitters.people_snapshot_if_due()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Cora: http://{args.host}:{args.port}", flush=True)
     # Electron stops the server with SIGTERM (pythonProcess.kill()); turn it
