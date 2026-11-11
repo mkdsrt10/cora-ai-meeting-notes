@@ -47,3 +47,12 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 **Participant**: a name captured from the meeting app during one Recording (the roster). A Participant may be linked to a Person, renamed, hidden, or turned into a new Person from the Participants tab. _Avoid_: attendee (that is the calendar list).
 
 **Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript.
+
+**Install**: one copy of Cora on one Mac, identified by a random id generated once. Its owner may add a display name for the Cora team; the id never carries an email or machine name.
+
+**Usage event**: one metadata-only record of one thing that happened in an Install (a Recording stopped, processing finished, a setting changed, a rating given). Carries counts, durations, versions, models and error codes, never titles, names, transcripts or note text. Sent to the Cora team during the beta.
+
+**Feedback**: an explicit rating a user gives one Recording, aimed at the Recording (capture and transcript), the Notes, or Overall: thumbs up or down, fixed reasons, and an optional comment. The comment is the only free text that leaves the Mac. A general message not tied to a Recording is also Feedback.
+
+**Captured Recording**: a Recording copied in full (audio tracks, transcript, speaker timeline, Participants, notes, run metadata) to the Cora team for accuracy review, either because it was rated or because it fell in the beta sample. Never a Recording made under enterprise lockdown.
+
