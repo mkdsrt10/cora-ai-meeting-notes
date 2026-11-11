@@ -537,12 +537,13 @@ function createDetector({ run = osascript, probe = null, probeBin = null, probeT
   /**
    * Polls and calls back on transitions: onDetected(call) when a Call first
    * appears, onEnded() after two consecutive real misses (failed checks do not
-   * count), onUnanswered(browsers) at most once per watcher. A tick has a
+   * count), onUnanswered(browsers) at most once per watcher, onFallback({reason,
+   * apps}) on every tick that fell back (the caller dedupes). A tick has a
    * tickBudgetMs budget; a tick still running when the next is due is skipped.
    * The mic-on signal is the fast path; this poll is the backstop for when the
    * mic watcher cannot start. Returns stop().
    */
-  function startWatcher({ onDetected = () => {}, onEnded = () => {}, onUnanswered = () => {}, intervalMs = 20000, tickBudgetMs = TICK_BUDGET_MS } = {}) {
+  function startWatcher({ onDetected = () => {}, onEnded = () => {}, onUnanswered = () => {}, onFallback = () => {}, intervalMs = 20000, tickBudgetMs = TICK_BUDGET_MS } = {}) {
     let inCall = false;
     let stopped = false;
     let running = false;
@@ -562,6 +563,7 @@ function createDetector({ run = osascript, probe = null, probeBin = null, probeT
       try {
         const result = await check({ budgetMs: tickBudgetMs });
         if (stopped || result.status === 'failed') return;
+        if (result.fallback) onFallback(result.fallback);
         // A mic-gated fallback Call is for the mic-on fast path only: the poll
         // reads it as "nothing here".
         const call = result.call && !result.call.micGated ? result.call : null;

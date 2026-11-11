@@ -11,7 +11,7 @@ const { fakeClock } = require('./fakes');
 
 const MEET = { label: 'Google Meet', source: 'browser', url: 'https://meet.google.com/abc-defg-hij', confirmed: true, unanswered: [] };
 
-function harness({ checkOnce = async () => null, check = null, capturing = false, clock = fakeClock(), onPrompted } = {}) {
+function harness({ checkOnce = async () => null, check = null, capturing = false, clock = fakeClock(), onPrompted, prompt } = {}) {
   const log = [];
   const shown = [];
   const started = [];
@@ -46,6 +46,7 @@ function harness({ checkOnce = async () => null, check = null, capturing = false
     stopRecording: (reason) => stopped.push(reason),
     clock,
     onPrompted,
+    prompt,
   });
   return { cd, clock, log, shown, started, stopped, state, watcher: () => watcher, lastNotification: () => last };
 }
@@ -56,7 +57,7 @@ test('a Call found by the poll sends call_detected, then offers to record it onc
   h.watcher().onDetected(MEET);
   h.watcher().onDetected(MEET);
   assert.deepEqual(h.log, [
-    { name: 'call_detected', payload: { app: 'Google Meet', signal: 'poll', confirmed: true } },
+    { name: 'call_detected', payload: { app: 'Google Meet', trigger: 'poll', confirmed: true, seconds_to_prompt: null } },
     'shown:Google Meet call detected. Start recording?',
   ]);
   assert.deepEqual(h.shown[0].actions, [{ type: 'button', text: 'Start Recording' }]);
@@ -78,7 +79,7 @@ test('the mic turning on asks the detector once and reports signal mic', async (
   h.cd.start();
   await h.cd.onMicOn();
   assert.equal(asked, 1);
-  assert.deepEqual(h.log[0], { name: 'call_detected', payload: { app: 'Slack Huddle', signal: 'mic', confirmed: false } });
+  assert.deepEqual(h.log[0], { name: 'call_detected', payload: { app: 'Slack Huddle', trigger: 'mic', confirmed: false, seconds_to_prompt: 0 } });
   assert.equal(h.shown.length, 1);
 });
 
@@ -164,23 +165,23 @@ test('the Call ending with nothing capturing stops nothing', () => {
   assert.deepEqual(h.stopped, []);
 });
 
-const HINT_TAIL = 'Turn on View > Developer > Allow JavaScript from Apple Events (Safari: Develop menu) so huddles and Meet are detected.';
-
-test('a browser that cannot be asked gets one hint per start(), through notify', async (t) => {
-  // The real detector, fed a Meet tab that never answers on every poll: the
-  // watcher's once-per-watcher onUnanswered is what keeps this to one hint.
+test('a browser that cannot be asked sends detect_fallback js_events_off once per run, and no banner', async (t) => {
+  // The real detector, fed a Meet tab that never answers on every poll.
   t.mock.timers.enable({ apis: ['setInterval'] });
   t.mock.method(console, 'log', () => {});
   const raw = 'PROCESSES:Finder\nURLS:https://meet.google.com/abc-defg-hij\nSNAPSHOT:Google Chrome|https://meet.google.com/abc-defg-hij|null';
   const shown = [];
+  const events = [];
+  const fallbacks = [];
   const notify = (opts) => { shown.push(opts); const n = new EventEmitter(); n.show = () => {}; return n; };
   const cd = createCallDetection({
     detector: createDetector({ run: async () => raw }),
     notify,
-    track: () => {},
+    track: (name, payload) => events.push({ name, payload }),
     isCapturing: () => false,
     startRecording: () => {},
     stopRecording: () => {},
+    onFallback: (f) => fallbacks.push(f),
   });
   const stop = cd.start();
   for (let i = 0; i < 3; i += 1) {
@@ -188,31 +189,50 @@ test('a browser that cannot be asked gets one hint per start(), through notify',
     t.mock.timers.tick(20000);
   }
   stop();
-  const hints = shown.filter((n) => !n.actions);
-  assert.deepEqual(hints, [{ title: 'Cora', body: `Cora can't see inside Google Chrome. ${HINT_TAIL}` }]);
+  assert.deepEqual(shown.filter((n) => !n.actions), []);
+  assert.deepEqual(events.filter((e) => e.name === 'detect_fallback'), [{ name: 'detect_fallback', payload: { reason: 'js_events_off' } }]);
+  assert.deepEqual(fallbacks, [{ reason: 'js_events_off', apps: ['Google Chrome'] }]);
 });
 
-test('a restarted watcher may hint again', () => {
+test('a restarted watcher does not repeat detect_fallback in the same run', () => {
   const h = harness();
   h.cd.start()();
   h.cd.start();
   h.watcher().onUnanswered(['Safari']);
-  assert.equal(h.shown.length, 1);
   h.cd.start();
   h.watcher().onUnanswered(['Safari']);
-  assert.equal(h.shown.length, 2);
+  assert.equal(h.log.filter((e) => e.name === 'detect_fallback').length, 1);
+  assert.equal(h.shown.length, 0);
 });
 
-test('the hint names several browsers the way a sentence would', () => {
-  const two = harness();
-  two.cd.start();
-  two.watcher().onUnanswered(['Google Chrome', 'Safari']);
-  assert.equal(two.shown[0].body, `Cora can't see inside Google Chrome and Safari. ${HINT_TAIL}`);
+test('Accessibility untrusted, seen by the mic-on check or the poll, sends detect_fallback ax_untrusted once', async () => {
+  const fallback = { reason: 'ax_untrusted', apps: ['Zoom'] };
+  const fallbacks = [];
+  const h = harness({ check: async () => ({ status: 'empty', call: null, unanswered: [], fallback }) });
+  h.cd = createCallDetection({
+    detector: { check: async () => ({ status: 'empty', call: null, unanswered: [], fallback }), startWatcher: (handlers) => { h.w = handlers; return () => {}; } },
+    notify: () => { throw new Error('no banner'); }, track: (name, payload) => h.log.push({ name, payload }),
+    isCapturing: () => false, startRecording: () => {}, stopRecording: () => {}, clock: h.clock,
+    onFallback: (f) => fallbacks.push(f),
+  });
+  h.cd.start();
+  await h.cd.onMicOn();
+  h.w.onFallback(fallback);
+  assert.deepEqual(h.log.filter((e) => e.name === 'detect_fallback'), [{ name: 'detect_fallback', payload: { reason: 'ax_untrusted' } }]);
+  assert.deepEqual(fallbacks, [fallback]);
+});
 
-  const three = harness();
-  three.cd.start();
-  three.watcher().onUnanswered(['Google Chrome', 'Brave Browser', 'Safari', 'Safari']);
-  assert.equal(three.shown[0].body, `Cora can't see inside Google Chrome, Brave Browser and Safari. ${HINT_TAIL}`);
+test('closing the prompt sends call_prompt_action with start, dismiss or expired', () => {
+  const closed = (act) => {
+    const h = harness({ capturing: false, prompt: { show() {}, hide() {} } });
+    h.cd.start();
+    h.watcher().onDetected(MEET);
+    act(h);
+    return h.log.filter((e) => e.name === 'call_prompt_action');
+  };
+  assert.deepEqual(closed((h) => h.cd.promptAction('start')), [{ name: 'call_prompt_action', payload: { action: 'start' } }]);
+  assert.deepEqual(closed((h) => h.cd.promptAction('dismiss')), [{ name: 'call_prompt_action', payload: { action: 'dismiss' } }]);
+  assert.deepEqual(closed((h) => h.watcher().onEnded()), [{ name: 'call_prompt_action', payload: { action: 'expired' } }]);
 });
 
 // Green-room follow-up: the mic is on, no live Call yet (Green room); re-check
@@ -239,7 +259,7 @@ test('follow-up: clicking Join after mic-on prompts on the next 3s re-check, as 
   assert.equal(h.shown.length, 0);
   await h.clock.advance(3000);
   assert.equal(h.shown.length, 1);
-  assert.deepEqual(h.log[0], { name: 'call_detected', payload: { app: 'Google Meet', signal: 'followup', confirmed: true } });
+  assert.deepEqual(h.log[0], { name: 'call_detected', payload: { app: 'Google Meet', trigger: 'followup', confirmed: true, seconds_to_prompt: 6 } });
   assert.deepEqual(prompted, [{ call: MEET, signal: 'followup', secondsFromMicOn: 6 }]);
   const n = s.calls.n;
   await h.clock.advance(30000);

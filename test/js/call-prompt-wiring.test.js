@@ -52,7 +52,7 @@ test('Start on the panel starts a Recording labelled with the Call and closes wi
   p.cd.promptAction('start');
   assert.deepEqual(p.started, ['Google Meet']);
   assert.deepEqual(p.closed, [['start', 'Google Meet']]);
-  assert.equal(p.events.at(-1), 'panel-hide');
+  assert.equal(p.events.filter((e) => e !== 'track:call_prompt_action').at(-1), 'panel-hide');
 });
 
 test('Dismiss holds until that Call ends, then the next Call is offered', () => {
@@ -73,7 +73,7 @@ test('the Call ending (watcher or mic off) hides the panel and closes with expir
   viaWatcher.w.onDetected(MEET);
   viaWatcher.w.onEnded();
   assert.deepEqual(viaWatcher.closed, [['expired', 'Google Meet']]);
-  assert.equal(viaWatcher.events.at(-1), 'panel-hide');
+  assert.equal(viaWatcher.events.filter((e) => e !== 'track:call_prompt_action').at(-1), 'panel-hide');
 
   const viaMic = panelHarness();
   viaMic.w.onDetected(MEET);
@@ -87,7 +87,7 @@ test('a Recording starting elsewhere hides the panel', () => {
   p.state.capturing = true;
   p.cd.onRecordingStarted();
   assert.deepEqual(p.closed, [['expired', 'Google Meet']]);
-  assert.equal(p.events.at(-1), 'panel-hide');
+  assert.equal(p.events.filter((e) => e !== 'track:call_prompt_action').at(-1), 'panel-hide');
 });
 
 test('a panel Start then the Call ending stops that Recording', () => {

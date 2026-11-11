@@ -5,13 +5,6 @@
 // or action starts a Recording labelled with the Call. Main supplies the
 // adapters; this module holds no Electron or HTTP of its own.
 
-// ['A'] -> 'A'; ['A', 'B'] -> 'A and B'; ['A', 'B', 'C'] -> 'A, B and C'.
-function joinNames(names) {
-  const unique = [...new Set(names)];
-  if (unique.length <= 1) return unique.join('');
-  return `${unique.slice(0, -1).join(', ')} and ${unique[unique.length - 1]}`;
-}
-
 const { initialPromptState, promptStep } = require('./call-prompt-state');
 const { createFollowup } = require('./call-followup');
 
@@ -23,10 +16,10 @@ const { createFollowup } = require('./call-followup');
 // no mic-on is known): the hook for Usage events. clock = { now, setTimeout,
 // clearTimeout } drives the green-room follow-up (injectable for tests). Main feeds the panel's buttons into promptAction(action) and
 // recording starts into onRecordingStarted().
-function createCallDetection({ detector, notify, startRecording, stopRecording, track, isCapturing, prompt = null, onPromptClosed = () => {}, onPrompted = () => {}, clock = { now: Date.now, setTimeout, clearTimeout } }) {
+function createCallDetection({ detector, notify, startRecording, stopRecording, track, isCapturing, prompt = null, onPromptClosed = () => {}, onPrompted = () => {}, onFallback = () => {}, clock = { now: Date.now, setTimeout, clearTimeout } }) {
   let micOnAt = null;
   const followup = createFollowup({
-    check: (opts) => detector.check(opts),
+    check: async (opts) => checked(await detector.check(opts)),
     onFound: (call) => detected(call, 'followup'),
     timers: clock,
   });
@@ -36,16 +29,24 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
   // action), so the poll seeing that Call end may stop it.
   let startedFromCall = false;
 
-  // A Meet or Slack tab the page could not be asked about: say which browser
-  // setting lets Cora see inside. The watcher fires onUnanswered at most once
-  // per start(), so it alone decides how often this shows.
-  function hint(browsers) {
-    if (!browsers || !browsers.length) return;
-    notify({
-      title: 'Cora',
-      body: `Cora can't see inside ${joinNames(browsers)}. Turn on View > Developer > Allow JavaScript from Apple Events`
-        + ' (Safari: Develop menu) so huddles and Meet are detected.',
-    });
+  // Detection ran with less than it needs: desktop apps counted from the
+  // process alone (ax_untrusted) or a browser would not answer (js_events_off).
+  // Reported once per reason per run; never a banner (main shows the hint in
+  // the permissions area).
+  const reported = new Set();
+  function fallback(reason, apps) {
+    if (!reason || reported.has(reason)) return;
+    reported.add(reason);
+    track('detect_fallback', { reason });
+    onFallback({ reason, apps: [...new Set(apps || [])] });
+  }
+
+  // A check's answer may carry either fallback.
+  function checked(result) {
+    if (!result) return result;
+    if (result.fallback) fallback(result.fallback.reason, result.fallback.apps);
+    if (result.unanswered && result.unanswered.length) fallback('js_events_off', result.unanswered);
+    return result;
   }
 
   // Feeds the reducer and performs its effects. `call` is the Call the prompt
@@ -60,6 +61,7 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
       else if (effect.type === 'closed') {
         // Dismiss or Start ends the follow-up; so does a Recording starting.
         followup.stop();
+        track('call_prompt_action', { action: effect.action });
         onPromptClosed(effect.action, currentCall);
       }
     }
@@ -100,9 +102,9 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
     followup.stop(); // a live Call found by any signal ends the follow-up
     if (promptState.phase !== 'idle' || isCapturing()) return;
     currentCall = call;
-    track('call_detected', { app: call.label, signal, confirmed: Boolean(call.confirmed) });
-    step({ type: 'detected', capturing: false });
     const secondsFromMicOn = micOnAt === null ? null : Math.round((clock.now() - micOnAt) / 1000);
+    track('call_detected', { app: call.label, trigger: signal, confirmed: Boolean(call.confirmed), seconds_to_prompt: secondsFromMicOn });
+    step({ type: 'detected', capturing: false });
     onPrompted({ call, signal, secondsFromMicOn });
   }
 
@@ -125,7 +127,7 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
   async function onMicOn() {
     if (promptState.phase !== 'idle' || isCapturing()) return;
     micOnAt = clock.now();
-    const { call } = await detector.check();
+    const { call } = checked(await detector.check());
     if (call) detected(call, 'mic');
     else if (promptState.phase === 'idle' && !isCapturing()) followup.start(micOnAt);
   }
@@ -148,7 +150,8 @@ function createCallDetection({ detector, notify, startRecording, stopRecording, 
     return detector.startWatcher({
       onDetected: (call) => detected(call, 'poll'),
       onEnded: () => ended('meeting-ended'),
-      onUnanswered: hint,
+      onUnanswered: (browsers) => fallback('js_events_off', browsers),
+      onFallback: (f) => fallback(f.reason, f.apps),
     });
   }
 
