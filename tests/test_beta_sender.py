@@ -498,7 +498,9 @@ def test_the_server_flushes_at_start_and_again_when_terminated(stub, tmp_path):
     finally:
         proc.terminate()  # what Electron's pythonProcess.kill() sends
         proc.wait(timeout=30)
-    assert [[e["name"] for e in b["events"]] for b in stub.batches()] == [["notes_viewed"], ["person_added"]]
+    # The server's start-up people_snapshot (usage_emitters) rides in the first batch.
+    assert [[e["name"] for e in b["events"]] for b in stub.batches()] == [
+        ["notes_viewed", "people_snapshot"], ["person_added"]]
 
 
 def test_a_locked_down_server_makes_no_request_from_start_to_shutdown(stub, tmp_path):
