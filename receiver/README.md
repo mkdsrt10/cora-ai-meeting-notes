@@ -46,6 +46,8 @@ transcripts and notes: keep `<root>` on a FileVault-encrypted disk, `chmod 700` 
 recordings once reviewed. The receiver itself prunes nothing; the report script
 (`tools/usage_report.py <root>`) only reads `events/` and `meta.json` files.
 
+On the Cora team's own Mac, `scripts/setup-receiver.sh` does everything below in one go (and `--env` prints the two build variables afterwards).
+
 ## Run it under launchd
 
 Use a dedicated checkout (not a working tree whose branch you switch) and a root outside
