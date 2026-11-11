@@ -332,6 +332,39 @@
           <button class="notepad-tab" data-notepad-tab="processing">Processing</button>
         </div>
         <div class="notepad-panel" data-notepad-panel="notes">
+          <div class="feedback-widget" id="feedbackWidget" hidden>
+            <div id="feedbackForm">
+              <div class="feedback-row">
+                <span class="feedback-label">Rate</span>
+                <div class="segmented" role="group" aria-label="What you are rating">
+                  <button type="button" class="segmented-btn" data-feedback-target="recording">Recording</button>
+                  <button type="button" class="segmented-btn" data-feedback-target="notes">Notes</button>
+                  <button type="button" class="segmented-btn" data-feedback-target="overall">Overall</button>
+                </div>
+                <button type="button" class="feedback-thumb" data-feedback-rating="up" title="Good" aria-label="Thumbs up">👍</button>
+                <button type="button" class="feedback-thumb" data-feedback-rating="down" title="Needs work" aria-label="Thumbs down">👎</button>
+              </div>
+              <div id="feedbackDetails" class="feedback-details" hidden>
+                <div class="feedback-chips">
+                  <button type="button" class="feedback-chip" data-feedback-reason="missed_items">Missed items</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="wrong_items">Wrong items</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="wrong_speakers">Wrong speakers</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="too_long">Too long</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="other">Other</button>
+                </div>
+                <textarea id="feedbackComment" maxlength="500" rows="2" placeholder="Optional comment for the Cora team"></textarea>
+                <div class="feedback-foot">
+                  <small class="muted">Please don't include customer names</small>
+                  <span class="muted feedback-count" id="feedbackCount">0/500</span>
+                  <button type="button" class="button small" id="feedbackSubmit" disabled>Send</button>
+                </div>
+              </div>
+            </div>
+            <div id="feedbackRated" class="feedback-row" hidden>
+              <span class="feedback-label">Rated</span>
+              <button type="button" class="button secondary small" id="feedbackRateAgain">Rate again</button>
+            </div>
+          </div>
           <div id="notepadProcessingStatus" class="notepad-processing-status" style="display:none"></div>
           <div class="notepad-notes-toggle" id="notepadNotesToggle" style="display:none">
             <button type="button" class="notes-toggle-btn active" data-notes-view="enhanced">Enhanced Notes</button>
@@ -548,6 +581,18 @@
             </div>
             <div class="settings-field"><label for="settingsBetaName">Your name for the Cora team</label><input type="text" id="settingsBetaName" maxlength="100" placeholder="Optional, e.g. Priya"></div>
             <button class="button secondary" id="settingsShowShared" type="button" style="align-self:flex-start">Show what Cora shares</button>
+            <h4 style="margin-top:24px">Send feedback</h4>
+            <p class="muted" style="margin:4px 0 8px;">Anything not tied to one Recording: a bug, an idea, what works.</p>
+            <div class="feedback-row">
+              <button type="button" class="feedback-thumb" data-general-rating="up" title="Something good" aria-label="Thumbs up">👍</button>
+              <button type="button" class="feedback-thumb" data-general-rating="down" title="Something to fix" aria-label="Thumbs down">👎</button>
+            </div>
+            <textarea id="settingsFeedbackMessage" maxlength="500" rows="3" placeholder="Your message to the Cora team"></textarea>
+            <div class="feedback-foot">
+              <small class="muted">Please don't include customer names</small>
+              <span class="muted feedback-count" id="settingsFeedbackCount">0/500</span>
+              <button type="button" class="button small" id="settingsFeedbackSend" disabled>Send</button>
+            </div>
             <h4 style="margin-top:24px">Audio on this Mac</h4>
             <p class="muted" style="margin:4px 0 8px;">Older audio is removed first; transcripts and notes are kept.</p>
             <div class="settings-field"><label for="settingsAudioRetentionDays">Keep audio for (days)</label><input type="number" id="settingsAudioRetentionDays" min="1" step="1"></div>
@@ -716,6 +761,7 @@
 <script src="/js/transcript.js"></script>
 <script src="/js/detail.js"></script>
 <script src="/js/detail-actions.js"></script>
+<script src="/js/feedback.js"></script>
 <script src="/js/navigation.js"></script>
 <script src="/js/credentials.js"></script>
 <script src="/js/onboarding.js"></script>
