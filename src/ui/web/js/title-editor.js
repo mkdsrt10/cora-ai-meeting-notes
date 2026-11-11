@@ -1,17 +1,43 @@
 // Inline meeting title editor.
 // Classic script sharing global scope with the other files in index.html (load order matters).
 
+// Set by setupTitleEditor(); callers refresh the Copy ID button after selectedDetail changes.
+let syncCopyRecordingIdButton = () => {};
+
 function setupTitleEditor() {
   const detailTitle = $('#detailTitle');
   const editBtn = $('#editTitleBtn');
   const input = $('#editTitleInput');
   if (!detailTitle || !input) return;
 
+  // Copy the recording's ID (its folder name) for scripts, support and integrations.
+  // While recording or processing the detail carries a placeholder id
+  // (meeting_<timestamp>) that archiving replaces with the folder name, so the
+  // button stays disabled until the recording is no longer pending.
+  const copyIdBtn = $('#copyRecordingIdBtn');
+  syncCopyRecordingIdButton = () => {
+    if (!copyIdBtn) return;
+    const pending = !selectedDetail?.id || PENDING_STAGES.has(selectedDetail.analysis_stage);
+    copyIdBtn.disabled = pending;
+    copyIdBtn.title = pending ? 'Recording ID is available once processing finishes' : 'Copy recording ID';
+  };
+  syncCopyRecordingIdButton();
+  copyIdBtn?.addEventListener('click', async () => {
+    if (!selectedDetail?.id || PENDING_STAGES.has(selectedDetail.analysis_stage)) return;
+    try {
+      await copyText(selectedDetail.id);
+      toast('Recording ID copied.');
+    } catch (err) {
+      toast('Could not copy the recording ID.', true);
+    }
+  });
+
   function startEditing() {
     if (!selectedDetail) return;
     input.value = selectedDetail.title || '';
     detailTitle.style.display = 'none';
     if (editBtn) editBtn.style.display = 'none';
+    if (copyIdBtn) copyIdBtn.style.display = 'none';
     input.style.display = '';
     input.focus();
     input.select();
@@ -23,6 +49,7 @@ function setupTitleEditor() {
     input.style.display = 'none';
     detailTitle.style.display = '';
     if (editBtn) editBtn.style.display = '';
+    if (copyIdBtn) copyIdBtn.style.display = '';
 
     if (save && selectedDetail && newTitle && newTitle !== selectedDetail.title) {
       const prevTitle = selectedDetail.title;
