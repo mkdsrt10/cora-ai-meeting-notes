@@ -81,7 +81,20 @@ def record(name: str, payload: dict) -> int:
         cur = conn.execute("INSERT INTO usage_events (created_at, name, payload) VALUES (?, ?, ?)",
                            (_iso(_now()), name, json.dumps(payload, separators=(",", ":"))))
         conn.commit()
-        return cur.lastrowid
+        event_id = cur.lastrowid
+    if name == "processing_finished":
+        _sample_capture(payload)
+    return event_id
+
+
+def _sample_capture(payload: dict) -> None:
+    """A finished Recording may fall in the Captured Recording sample
+    (python/capture.py). Never lets sampling fail the event."""
+    try:
+        import capture
+        capture.sample(payload)
+    except Exception as e:  # noqa: BLE001
+        print(f"[usage_events] capture sampling failed: {type(e).__name__}: {e}", flush=True)
 
 
 def _rows(where: str = "", params: tuple = ()) -> list[dict]:
