@@ -73,7 +73,7 @@ Keys may be missing; extra keys may not.
 | `notes_edited` | `recording_id`, `edit_ratio` (0..1) | notes view |
 | `transcript_corrected` | `recording_id`, `corrections` | transcript editor |
 | `action_items_counted` | `recording_id`, `count` | notes view |
-| `notes_exported` | `recording_id`, `kind` (`copy`\|`export`) | notes view, transcript |
+| `notes_exported` | `recording_id`, `kind` (`copy`\|`export`); for `export` also `content` (`notes`\|`notes_transcript`), `notepad` (the file has a My notes section), `outcome` (`saved`\|`cancelled`\|`failed`) | notes view and transcript (`copy`); the Export button (`export`), once per export attempt; never a title, path or text |
 | `manual_notes_written` | `recording_id`, `chars`, `phase` (`during`\|`after`) | Recording session, notes view |
 | `screenshot_taken` | `recording_id`, `count`, `ocr` | Electron main |
 | `person_added` | `source` (`people_page`\|`participants_tab`) | People page, Participants tab |

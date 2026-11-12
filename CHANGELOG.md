@@ -6,6 +6,7 @@
 - A missing permission (Accessibility, or "Allow JavaScript from Apple Events" in a browser) is now a hint in the permissions area, shown once per Install, instead of a notification once per app start.
 - Usage events: `call_detected` now carries `trigger` (`mic`, `poll` or `followup`, replacing `signal`) and `seconds_to_prompt`; new `call_prompt_action` (`start`, `dismiss`, `expired`) and `detect_fallback` (`ax_untrusted`, `js_events_off`). Metadata only; listed in `docs/TRACING.md`.
 - Participants: a name on the call is linked to someone in People only when it is the same name (or a lone first name that only one Person has). A shared surname no longer links "Shashank Yadav" to "Neeraj Yadav", and a colleague who shares your surname is no longer dropped from the roster as you.
+- Export: an Export button in the recording title bar saves the meeting as a Markdown file, either the Notes or the Notes plus the transcript, with your Notepad text as a "My notes" section. Under enterprise lockdown only the Notes can be exported. Each export attempt sends one Usage event, `notes_exported` (kind `export`, content, whether the Notepad was included, saved/cancelled/failed); never a title, path or text.
 - Recording detail: a Copy ID button in the title bar copies the Recording's ID (handy when reporting a problem).
 - The app's daily log is buffered and pruned again when the day rolls over.
 

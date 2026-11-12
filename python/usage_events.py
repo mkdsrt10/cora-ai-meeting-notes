@@ -33,7 +33,7 @@ CATALOG: dict[str, frozenset[str]] = {name: frozenset(keys.split()) for name, ke
     "notes_edited": "recording_id edit_ratio",
     "transcript_corrected": "recording_id corrections",
     "action_items_counted": "recording_id count",
-    "notes_exported": "recording_id kind",
+    "notes_exported": "recording_id kind content notepad outcome",
     "manual_notes_written": "recording_id chars phase",
     "screenshot_taken": "recording_id count ocr",
     "person_added": "source",

@@ -745,6 +745,37 @@ mark.search-match.active {
   opacity: 1;
   background: var(--surface-2);
 }
+.export-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.export-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 190px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+.export-menu[hidden] { display: none; }
+.export-menu button {
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.export-menu button:hover, .export-menu button:focus-visible { background: var(--surface-alt); }
 .title-edit-input {
   font-family: inherit;
   font-size: 14px;

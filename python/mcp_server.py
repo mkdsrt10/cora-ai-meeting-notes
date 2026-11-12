@@ -28,6 +28,7 @@ RECORDINGS = paths.RECORDINGS_DIR
 
 import db
 import credentials
+import recording_export
 import recording_stage
 
 
@@ -53,22 +54,7 @@ mcp = MCPServer(
 )
 
 
-def _resolve_speaker_name(speaker_id: str, speaker_labels: dict[str, Any], identity: dict[str, Any]) -> str:
-    """Resolve a raw speaker_1/speaker_2 ID into a human-friendly name."""
-    self_id = identity.get("speaker_id")
-    if self_id and speaker_id == self_id:
-        self_name = identity.get("identity") or db.get_setting("pending_self_name") or "You"
-        return f"{self_name} (Self)"
-
-    entry = speaker_labels.get("speakers", {}).get(speaker_id, {})
-    if entry.get("name"):
-        parts = [entry["name"]]
-        if entry.get("role"):
-            parts.append(entry["role"])
-        if entry.get("organization"):
-            parts.append(f"({entry['organization']})")
-        return " — ".join(parts)
-    return speaker_id
+_resolve_speaker_name = recording_export.speaker_name
 
 
 @mcp.tool()

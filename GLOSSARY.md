@@ -34,6 +34,12 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Stage**: where a Recording stands: recording, processing, paused, needs diarization, needs speaker confirmation, ready. A Plugin may refine "ready" into its own Stages (Coaching: ready to coach, coached). _Avoid_: status (that is only the capture/processing part).
 
+**Notes**: the document Cora writes for a Recording after processing: overview, Action items, decisions, open questions. Regenerated when the Recording is reprocessed. _Avoid_: summary (that is one short variant of it), enhanced notes.
+
+**Notepad**: what you type yourself for a Recording, during the call or after it. Never generated or overwritten by Cora. _Avoid_: my notes, manual notes.
+
+**Export**: a file you save from one Recording, holding its Notes, its Notepad when it has text, and its transcript only when you ask for it. Under enterprise lockdown only the Notes and Notepad can be exported. _Avoid_: share (that sends to someone), download.
+
 **Action item**: a follow-up written into a Recording's notes. Todo/Planner keeps each as a To-do.
 
 **To-do**: an Action item as Todo/Planner tracks it: done or not. It keeps its identity (and done mark) when its Recording is reprocessed and the same Action item comes back; one that no longer appears is superseded, not listed. _Avoid_: task.

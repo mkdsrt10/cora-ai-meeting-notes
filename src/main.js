@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, Notification, session, systemPreferences, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, session, systemPreferences, shell, dialog } = require('electron');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const fs = require('fs');
@@ -20,6 +20,7 @@ const { createBackendApi, createArchiveStep } = require('./recording/backend');
 const { buildInfoEnv } = require('./build-info');
 const os = require('os');
 const { createMainLog } = require('./main-log');
+const { createExportFile } = require('./main/export-file');
 
 // Mirror main-process console output to a local daily log (never uploaded).
 const mainLog = createMainLog({ logsDir: LOGS_DIR });
@@ -481,6 +482,17 @@ function startRecording(meetingTool = null) {
 handleTrusted('get-recording-state', () => rendererState());
 
 handleTrusted('get-mic-device', () => recording.state().micDevice);
+
+// Export: the save dialog sits on the window that asked for it.
+const saveMarkdown = createExportFile({
+  showSaveDialog: (options) => {
+    const win = BrowserWindow.getFocusedWindow();
+    return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+  },
+  writeFile: (file, text) => fs.promises.writeFile(file, text, 'utf8'),
+  get downloadsDir() { return app.getPath('downloads'); },
+});
+handleTrusted('save-markdown', (_event, request) => saveMarkdown(request));
 
 handleTrusted('get-update-state', () => updater.state());
 

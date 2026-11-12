@@ -71,6 +71,27 @@ def get_api_recording(req, path: str, query: dict) -> None:
     return req.send_json(detailed_item)
 
 
+@route("GET", '/api/recording/export')
+def get_api_recording_export(req, path: str, query: dict) -> None:
+    """Export: the Recording as one Markdown document, {filename, markdown,
+    notepad}. The renderer hands it to Electron main, which shows the save
+    dialog. transcript=1 adds the transcript; refused under enterprise
+    lockdown, where only the Notes may leave Cora as a file."""
+    import policy
+    import recording_export
+    rec_id = query.get("id", [""])[0]
+    include_transcript = query.get("transcript", ["0"])[0] == "1"
+    if include_transcript and policy.lockdown_enabled():
+        return req.send_json({"error": "Exporting the transcript is disabled by enterprise lockdown."}, 403)
+    try:
+        safe_folder(rec_id)
+        return req.send_json(recording_export.build(rec_id, include_transcript=include_transcript))
+    except FileNotFoundError:
+        return req.send_json({"error": "Recording not found."}, 404)
+    except ValueError as err:
+        return req.send_json({"error": str(err)}, 409 if db.get_recording(rec_id) else 404)
+
+
 @route("GET", '/api/recording/version')
 def get_api_recording_version(req, path: str, query: dict) -> None:
     rec_id = query.get("id", [""])[0]

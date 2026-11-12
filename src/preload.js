@@ -21,6 +21,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onMicMuteState: (callback) => ipcRenderer.on('mic-mute-state', (_event, isMuted) => callback(isMuted)),
     // Name of the Microphone the recording is actually using (null until known / when idle).
     getMicDevice: () => ipcRenderer.invoke('get-mic-device'),
+    // Export: save dialog for a Recording's Markdown -> { outcome: saved|cancelled|failed, name?, error? }.
+    saveMarkdown: (request) => ipcRenderer.invoke('save-markdown', request),
     onMicDevice: (callback) => ipcRenderer.on('mic-device', (_event, name) => callback(name)),
     // In-app update banner (src/updater.js state; Update / Later).
     getUpdateState: () => ipcRenderer.invoke('get-update-state'),

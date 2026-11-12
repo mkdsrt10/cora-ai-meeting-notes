@@ -273,6 +273,13 @@
           <span id="detailTitle" class="breadcrumb-current" title="Click to rename meeting">...</span>
           <button class="title-edit-btn" id="editTitleBtn" title="Rename meeting">✏️</button>
           <button class="title-edit-btn" id="copyRecordingIdBtn" title="Copy recording ID">ID</button>
+          <span class="export-menu-wrap" id="exportMenuWrap">
+            <button class="title-edit-btn" id="exportRecordingBtn" title="Export as Markdown" aria-haspopup="menu" aria-expanded="false">Export</button>
+            <div class="export-menu" id="exportMenu" role="menu" hidden>
+              <button role="menuitem" data-export="notes">Notes (.md)</button>
+              <button role="menuitem" data-export="notes_transcript" id="exportWithTranscript">Notes + transcript (.md)</button>
+            </div>
+          </span>
           <input type="text" class="title-edit-input" id="editTitleInput" style="display:none" placeholder="Meeting title">
         </div>
       </div>
