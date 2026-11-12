@@ -1,10 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.4.3 — 2026-11-12
 
 - Call prompts now wait until you are in the call: a Meet green room, an idle Zoom or Slack desktop app never prompts from the 20-second poll, and clicking Join prompts within a few seconds. The prompt is a small always-on-top panel (Start recording, Dismiss) that stays until you act or the call ends; the macOS banner is only the fallback.
 - A missing permission (Accessibility, or "Allow JavaScript from Apple Events" in a browser) is now a hint in the permissions area, shown once per Install, instead of a notification once per app start.
 - Usage events: `call_detected` now carries `trigger` (`mic`, `poll` or `followup`, replacing `signal`) and `seconds_to_prompt`; new `call_prompt_action` (`start`, `dismiss`, `expired`) and `detect_fallback` (`ax_untrusted`, `js_events_off`). Metadata only; listed in `docs/TRACING.md`.
+- Recording detail: a Copy ID button in the title bar copies the Recording's ID (handy when reporting a problem).
+- The app's daily log is buffered and pruned again when the day rolls over.
+
+0.4.2 was never published; its changes ship in 0.4.3.
 
 ## 0.4.2 — 2026-11-11
 
