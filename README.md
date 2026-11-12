@@ -40,6 +40,10 @@ If you build something on it, I'd genuinely like to know — see [Contributing](
   framework, so on-screen text ends up searchable alongside the transcript.
 - **Structures notes** (summary, decisions, action items) using a small local LLM
   (Qwen3 4B by default, via MLX) — again, no cloud call for this by default.
+- **Remembers context**: each transcription is primed with the call's participants, the meeting
+  title, your own notes, text from snapped slides, terms from past meetings with the same people,
+  and a learned vocabulary, so names and jargon come out right.
+- **Exports** any meeting to Markdown (notes, optionally with the transcript) to share anywhere.
 
 Behind the app layer in this repo, there's an ongoing effort on the model and data side —
 fine-tuning the ASR model, curating training data from corrected transcripts, and evaluation
