@@ -3,6 +3,8 @@
 Team builds use **Gemini** for transcription and notes, so any Apple Silicon Mac works and nothing
 large downloads to your laptop.
 
+![What Cora does: picks up Meet, Zoom and Slack calls, names who said what, handles Hinglish, reads slides you snap, remembers your people and projects, gives action items, and exports to Markdown](images/cora-overview.png)
+
 ## Before you start
 
 - A Mac with Apple Silicon (M1 or later) on macOS 14 Sonoma or newer.
