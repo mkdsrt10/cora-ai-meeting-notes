@@ -50,29 +50,38 @@ def live_transcript_payload(recording_id: str) -> list[dict[str, Any]]:
 
 
 def fuzzy_match_person(raw_name: str, people: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Auto-link an AX-detected participant name to an existing Person:
-    exact match first, then shared-token (handles "Jane" auto-linking to
-    "Jane Doe" — AX often only gets a short display name, not the full
-    one on file), then a high-confidence difflib ratio as a last resort.
-    None rather than a low-confidence guess."""
-    raw_lower = raw_name.strip().lower()
-    if not raw_lower:
+    """Auto-link an AX-detected participant name to an existing Person, or
+    None rather than a guess. A shared word is never enough: "Mayank Dubey"
+    must not link to "Dilan Dubey", nor "Shashank Yadav" to "Neeraj Yadav".
+
+    1. The same name (case and spacing ignored).
+    2. A lone first name ("Jane", AX often shows only the short display
+       name) links to the one Person whose first name it is; two such
+       People, or a lone surname, link to nobody.
+    3. A small spelling difference in the same name ("Rauhan Ahmad" /
+       "Rauhan Ahmed"): whole-name ratio >= 0.9 and first-name ratio
+       >= 0.8, and only when a single Person qualifies."""
+    raw_tokens = raw_name.lower().split()
+    if not raw_tokens:
         return None
-    raw_tokens = set(raw_lower.split())
-    best: dict[str, Any] | None = None
-    best_score = 0.0
+    raw_full = " ".join(raw_tokens)
+    first_name_hits: list[dict[str, Any]] = []
+    spelling_hits: list[dict[str, Any]] = []
     for person in people:
-        name = (person.get("name") or "").strip()
-        if not name:
+        tokens = (person.get("name") or "").lower().split()
+        if not tokens:
             continue
-        name_lower = name.lower()
-        if raw_lower == name_lower:
+        full = " ".join(tokens)
+        if full == raw_full:
             return person
-        score = 0.9 if raw_tokens & set(name_lower.split()) else difflib.SequenceMatcher(None, raw_lower, name_lower).ratio()
-        if score > best_score:
-            best_score = score
-            best = person
-    return best if best_score >= 0.75 else None
+        if len(raw_tokens) == 1:
+            if tokens[0] == raw_tokens[0]:
+                first_name_hits.append(person)
+        elif (difflib.SequenceMatcher(None, raw_full, full).ratio() >= 0.9
+              and difflib.SequenceMatcher(None, raw_tokens[0], tokens[0]).ratio() >= 0.8):
+            spelling_hits.append(person)
+    hits = first_name_hits or spelling_hits
+    return hits[0] if len(hits) == 1 else None
 
 
 

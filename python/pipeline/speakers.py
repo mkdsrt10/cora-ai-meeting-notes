@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import db
-from participants import _BAD_PARTICIPANT_WORDS, clean_and_validate_participant  # noqa: F401
+from participants import _BAD_PARTICIPANT_WORDS, clean_and_validate_participant, same_person_name  # noqa: F401
 from .audio import track_mean_volume
 from .common import _parse_ts, _write_progress
 
@@ -84,17 +84,7 @@ def resolve_other_participant_name(participants: list[str]) -> Optional[str]:
     None, never a guess) for 0 or 2+ others, since audio-level comparison
     alone can't say *which* of several other people is talking."""
     self_name = db.get_setting("pending_self_name") or (db.get_person(db.get_self_person_id() or "") or {}).get("name")
-    self_name = (self_name or "").strip().lower()
-    self_tokens = set(self_name.split()) if self_name else set()
-
-    def is_self(p: str) -> bool:
-        p_low = p.strip().lower()
-        if p_low == self_name:
-            return True
-        p_tokens = set(p_low.split())
-        return bool(self_tokens and self_tokens.intersection(p_tokens))
-
-    others = [p for p in participants if not is_self(p)]
+    others = [p for p in participants if not same_person_name(p, self_name)]
     return others[0] if len(others) == 1 else None
 
 

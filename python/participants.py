@@ -63,3 +63,16 @@ def clean_and_validate_participant(raw_name: str) -> Optional[str]:
     if not any(char.isalpha() for char in s):
         return None
     return s.strip()
+
+
+def same_person_name(a: Optional[str], b: Optional[str]) -> bool:
+    """Whether two display names name the same person: equal (case and
+    spacing ignored), or one is a lone first name and the other starts with
+    it ("Mayank" / "Mayank Dubey"). A shared surname is not enough
+    ("Mayank Dubey" / "Dilan Dubey")."""
+    ta, tb = (a or "").lower().split(), (b or "").lower().split()
+    if not ta or not tb:
+        return False
+    if ta == tb:
+        return True
+    return (len(ta) == 1 or len(tb) == 1) and ta[0] == tb[0]

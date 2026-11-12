@@ -23,6 +23,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Optional
 
+from participants import same_person_name
+
 UNRESOLVED = "Participant"
 MIN_CONFIDENCE = 0.6
 LLM_WINDOW_CHARS = 3500  # small enough that one reply fits the token cap
@@ -54,8 +56,7 @@ _HANDOFF_PATTERNS = (
 
 
 def other_participants(roster: list[str], self_name: Optional[str]) -> list[str]:
-    self_tokens = set((self_name or "").lower().split())
-    return [p for p in roster if p and not (self_tokens & set(p.lower().split()))]
+    return [p for p in roster if p and not same_person_name(p, self_name)]
 
 
 def _match_name(token: str, others: list[str]) -> Optional[str]:
