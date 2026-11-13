@@ -150,10 +150,19 @@ async function load(){
   }
 }
 
+// Set by New note (new-note.js): the next jump to the live Recording also
+// puts the cursor in its Notepad.
+let focusNotepadOnLiveOpen = false;
+
 async function jumpToLiveRecording(){
   await load();
-  const live = (data?.recordings || []).find(r => r.analysis_stage === 'recording');
-  if (live) openInRecordings(live.id);
+  const recordings = data?.recordings || [];
+  const live = recordings.find(r => r.analysis_stage === 'recording') || recordings.find(r => r.analysis_stage === 'paused');
+  const focusNotepad = focusNotepadOnLiveOpen;
+  focusNotepadOnLiveOpen = false;
+  if (!live) return;
+  await openInRecordings(live.id);
+  if (focusNotepad) $('#notepadNotes')?.focus();
 }
 
 

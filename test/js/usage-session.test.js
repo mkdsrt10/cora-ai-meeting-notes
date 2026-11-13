@@ -17,11 +17,22 @@ function setup(extra = {}) {
 
 test('recording_started names the meeting app, surface and System default microphone', async () => {
   const { session, api } = setup();
-  const { id } = session.start({ meeting: 'Zoom' });
+  const { id } = session.start({ meeting: 'Zoom', startedFrom: 'call_prompt' });
   await flush();
   assert.deepEqual(api.events('recording_started'), [
-    { recording_id: id, meeting_app: 'zoom', surface: 'native', microphone_kind: 'default' },
+    { recording_id: id, meeting_app: 'zoom', surface: 'native', microphone_kind: 'default', started_from: 'call_prompt' },
   ]);
+});
+
+test('recording_started says where the Recording was started from; anything unknown is other', async () => {
+  const { session, api } = setup();
+  for (const startedFrom of ['new_note', 'tray', 'continue', 'bogus', undefined]) {
+    session.start({ startedFrom });
+    await session.stop('user');
+  }
+  await flush();
+  assert.deepEqual(api.events('recording_started').map((e) => e.started_from),
+    ['new_note', 'tray', 'continue', 'other', 'other']);
 });
 
 test('recording_stopped sums the whole pause/resume chain: app from the watcher, chunks, pauses, mic reconnects', async () => {
@@ -42,7 +53,7 @@ test('recording_stopped sums the whole pause/resume chain: app from the watcher,
   await flush();
 
   assert.deepEqual(api.events('recording_started'), [
-    { recording_id: id, meeting_app: 'unknown', surface: null, microphone_kind: 'named' },
+    { recording_id: id, meeting_app: 'unknown', surface: null, microphone_kind: 'named', started_from: 'other' },
   ]);
   assert.deepEqual(api.events('recording_stopped'), [{
     recording_id: id, meeting_app: 'meet', surface: 'browser', duration_s: 90,
