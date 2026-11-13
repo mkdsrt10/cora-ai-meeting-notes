@@ -137,6 +137,30 @@ def share_usage() -> bool:
     return build_variant() == "team" if saved is None else bool(saved)
 
 
+DISPLAY_NAME_MAX = 100
+
+
+def seed_display_name() -> None:
+    """Beta (team) builds: the Install's display name defaults, once, to the
+    user's own name (the name typed during onboarding, or the self Person's),
+    so testers show up named on the Usage dashboard without opening Settings.
+    Runs when onboarding saves the name and at server start (teammates who
+    onboarded before 0.4.4). It only fills an empty Settings name and then
+    never runs again, so what is sent is always what Settings > Beta shows:
+    a name typed there is kept, and clearing it stays cleared. Before
+    onboarding there is no name yet, so it waits. Never under lockdown."""
+    import policy
+    if build_variant() != "team" or policy.lockdown_enabled() or db.get_setting("beta_display_name_seeded"):
+        return
+    if not db.get_setting("beta_display_name"):
+        from api.core import current_self_name
+        own = (current_self_name() or "").strip()[:DISPLAY_NAME_MAX].strip()
+        if not own:
+            return
+        db.set_setting("beta_display_name", own)
+    db.set_setting("beta_display_name_seeded", True)
+
+
 def sharing_enabled() -> bool:
     """Whether the sender may deliver anything: the toggle is on, lockdown is
     off, and this build carries a receiver URL and token."""

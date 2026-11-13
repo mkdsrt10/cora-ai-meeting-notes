@@ -9,6 +9,7 @@ import credentials
 import datetime as dt
 import db
 import meeting_types
+import usage_events
 import shutil
 from api.core import PYTHON, ROOT, available_models, local_usage_stats
 
@@ -267,6 +268,7 @@ def post_api_onboarding_name(req, path: str, body: dict) -> None:
     if not name:
         raise ValueError("Name is empty")
     db.set_setting("pending_self_name", name)
+    usage_events.seed_display_name()
     return req.send_json({"ok": True})
 
 
@@ -284,7 +286,7 @@ NULLABLE_SETTINGS = frozenset({"microphone", "beta_display_name"})
 # Defaults for keys whose unset value is not null (beta audio retention).
 SETTING_DEFAULTS = {"audio_retention_days": 30, "audio_cap_mb": 500}
 READ_ONLY_SETTINGS = frozenset({"install_id"})
-DISPLAY_NAME_MAX = 100
+DISPLAY_NAME_MAX = usage_events.DISPLAY_NAME_MAX
 
 
 def read_setting(key: str):

@@ -123,6 +123,23 @@ config's `telemetry_enabled`.
 - Captured Recordings waiting more than 7 days are dropped (one `capture_dropped` each) at the
   start of every flush, even when nothing can be sent.
 
+### The batch envelope and the display name
+
+Every `POST /v1/events` batch (`usage_events.pending_batch()`) wraps its events with the Install's
+identity: `install_id`, `display_name`, `app_version`, `git_commit`, `build_variant`. Captured
+Recording uploads carry the same name in the `X-Cora-Display-Name` header (percent-encoded). The
+name is read when the batch is sent, so events queued earlier go out under the current name.
+
+`display_name` is the `beta_display_name` setting (**Settings > Beta**), at most 100 characters,
+`null` when empty. **It is personal data** (usually a real, often full, name) and is the only
+field that names a person in usage telemetry. In `team` builds `usage_events.seed_display_name()`
+fills it once from the user's own name (`api.core.current_self_name()`: the onboarding name, or
+the self Person) when it is empty: from `POST /api/onboarding/name`, and at server start for
+Installs that onboarded before 0.4.4. A `beta_display_name_seeded` flag makes it one-shot, so a
+name the user clears stays cleared. Never in `public` builds, never under lockdown. On the
+receiver it is stamped onto every event line in `<root>/events/YYYY-MM-DD.jsonl` and into each
+Captured Recording's `meta.json`, kept for the beta (`docs/BETA_POLICY.md`).
+
 ### The receiver and the report
 
 The Cora team's side is `receiver/receiver.py`: endpoints, disk layout, launchd, Tailscale Funnel,

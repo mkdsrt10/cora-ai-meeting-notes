@@ -17,8 +17,15 @@ only as "set" or "cleared". The full list of events and fields is in `docs/TRACI
 ("Usage events (beta)"); Cora refuses to store an event or field that is not on that list.
 
 Each batch is labelled with this Install's random id (made once on this Mac, never your email or
-machine name), the app version and commit, the build variant, and the optional name you type in
+machine name), the app version and commit, the build variant, and the name in
 **Settings > Beta > Your name for the Cora team**.
+
+In the team (beta) build that name starts out as your own name: the one you type during
+onboarding (or, if you onboarded before 0.4.4, the name Cora already knows as you), copied into
+that field once. It is personal data, so you control it there: change it, or clear it and Cora
+sends no name from then on and never fills it in again. Batches sent before you changed or
+cleared it keep the old name on the Cora team's machine (see "Where it goes and who sees it").
+Public builds never fill it in.
 
 **Feedback.** When you rate a Recording (thumbs up or down, on the Recording, its Notes or
 Overall) or send a message from **Settings > Beta > Send feedback**, the rating, the reasons you
@@ -59,7 +66,10 @@ stored there in a folder only the Cora team can open. No analytics service or ot
 receives it. Only the Cora team sees it.
 
 The Cora team deletes each Captured Recording once it has been reviewed. Usage events and
-Feedback stay on that machine for the beta.
+Feedback, including the name each batch was labelled with, are kept on that machine for the
+length of the beta; there is no shorter retention period. The usage page shows each Install by
+its latest name (or a short id once the name is cleared). To have what was sent from your Mac
+deleted, including past names, ask Mayank.
 
 ## Audio on your Mac
 
