@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, Notification, session, systemPreferences, shell, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, Notification, session, systemPreferences, shell, dialog, powerMonitor } = require('electron');
 const path = require('path');
 const { spawn, execFile } = require('child_process');
 const fs = require('fs');
@@ -21,6 +21,7 @@ const { buildInfoEnv } = require('./build-info');
 const os = require('os');
 const { createMainLog } = require('./main-log');
 const { createExportFile } = require('./main/export-file');
+const { createMenuBar } = require('./main/menu-bar');
 
 // Mirror main-process console output to a local daily log (never uploaded).
 const mainLog = createMainLog({ logsDir: LOGS_DIR });
@@ -208,6 +209,7 @@ const updater = createUpdater({
   // the Python server (app.exit skips before-quit) and start the new app.
   relaunch: () => {
     isQuitting = true;
+    menuBar.requestQuit();
     if (stopMeetingWatcher) stopMeetingWatcher();
     if (stopMicWatcher) stopMicWatcher();
     if (pythonProcess) pythonProcess.kill();
@@ -346,6 +348,31 @@ function notify(opts, { level = 'info', recordingId = null, show = true } = {}) 
   return instance;
 }
 
+// Menu bar mode (src/main/menu-bar.js): ⌘Q, Dock > Quit and closing the
+// window hide Cora to the menu bar; the Dock icon follows the main window.
+// A settings read that fails throws (fetchSetting would return null, which
+// reads as "first run" and could turn open-at-login back on).
+const menuBar = createMenuBar({
+  dock: app.dock ? { show: () => app.dock.show(), hide: () => app.dock.hide() } : null,
+  loginItems: app.isPackaged ? {
+    get: () => app.getLoginItemSettings(),
+    set: (opts) => app.setLoginItemSettings(opts),
+  } : null,
+  settings: {
+    get: async (key) => JSON.parse(await fetchJson(`/api/settings?key=${encodeURIComponent(key)}`)).value,
+    set: (key, value) => postJson('/api/settings', { key, value }),
+  },
+  notify: (opts) => notify({ ...opts, icon: ICON_PATH }),
+  log: (msg) => console.log(`[Cora menu bar] ${msg}`),
+});
+
+// Show the main window (and the Dock icon), creating it if it is gone.
+function openMainWindow() {
+  return menuBar.showWindow().then((shown) => {
+    if (!shown) { createWindow(); menuBar.showWindow(); }
+  }).catch((err) => console.error('[Cora menu bar] open:', err && err.message));
+}
+
 // What the renderer and floater call the state: the session phase, with
 // stopped Recordings still finishing or queued shown as 'processing'.
 function rendererState(s = recording.state()) {
@@ -442,12 +469,7 @@ processingQueue.on('job', (job) => {
       body: 'Notes ready.',
       icon: ICON_PATH,
     }, { recordingId: (job.recording && job.recording.id) || job.id, show: false });
-    notification.on('click', () => {
-      if (mainWindow) {
-        mainWindow.show();
-        mainWindow.focus();
-      }
-    });
+    notification.on('click', () => openMainWindow());
     notification.show();
   } else if (job.state === 'failed') {
     // Only the code goes to the log; job.error is the user-facing message.
@@ -541,12 +563,11 @@ handleTrusted('snap-screenshot', () => {
   return false;
 });
 
-handleTrusted('open-main-window', () => {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.show();
-    mainWindow.focus();
-  }
-});
+handleTrusted('open-main-window', () => openMainWindow());
+
+// Settings > Preferences > Open Cora at login.
+handleTrusted('get-open-at-login', () => menuBar.openAtLogin());
+handleTrusted('set-open-at-login', (_event, enabled) => menuBar.setOpenAtLogin(enabled === true));
 
 handleTrusted('append-note', (_event, text) => recording.appendNote(text));
 
@@ -613,7 +634,7 @@ function takeMeetingScreenshot(recId, targetDir) {
   });
 }
 
-function createWindow() {
+function createWindow({ show = true } = {}) {
   mainWindow = new BrowserWindow({
     width: 1080,
     height: 850,
@@ -625,8 +646,9 @@ function createWindow() {
       sandbox: true,
       preload: path.join(__dirname, 'preload.js')
     },
-    show: true
+    show
   });
+  menuBar.attachWindow(mainWindow);
 
   if (session && session.defaultSession) {
     session.defaultSession.clearCache().catch(() => {});
@@ -643,12 +665,14 @@ function createWindow() {
   // Load the web app
   mainWindow.loadURL(DASHBOARD_URL);
   
+  // Closing hides to the menu bar (the Dock icon goes with it).
   mainWindow.on('close', (event) => {
     if (!isQuitting) {
       event.preventDefault();
       mainWindow.hide();
     }
   });
+  mainWindow.on('closed', () => { mainWindow = null; });
 }
 
 function updateTrayMenu() {
@@ -700,18 +724,15 @@ function updateTrayMenu() {
   template.push(
     { type: 'separator' },
     {
-      label: 'Open Dashboard',
-      click: () => {
-        if (mainWindow) {
-          mainWindow.show();
-          mainWindow.focus();
-        }
-      }
+      label: 'Open Cora',
+      click: () => openMainWindow()
     },
     { type: 'separator' },
     {
       label: 'Quit Cora',
+      // The only menu item that ends Cora: ⌘Q and Dock > Quit hide it.
       click: () => {
+        menuBar.requestQuit();
         app.quit();
       }
     }
@@ -754,10 +775,15 @@ handleTrusted('call-prompt-action', (_event, action) => callDetection.promptActi
 
 app.whenReady().then(async () => {
   refreshMicDevices();
+  // Launched by the login item: start in the menu bar, no window or Dock icon.
+  const startHidden = menuBar.startsHidden();
   if (app.dock) {
     app.dock.setIcon(ICON_PATH);
-    app.dock.show();
+    if (startHidden) app.dock.hide(); else app.dock.show();
   }
+  // macOS shutdown, restart or logout must quit, not hide (a cancelled
+  // before-quit would make Cora block the logout).
+  powerMonitor.on('shutdown', () => menuBar.onSystemShutdown());
 
   // Start python web server
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
@@ -783,8 +809,9 @@ app.whenReady().then(async () => {
   refreshSelfName();
   recordAppStarted().catch((err) => console.warn('[Cora usage] app_started not recorded:', err && err.message));
 
-  createWindow();
+  createWindow({ show: !startHidden });
   createFloaterWindow();
+  menuBar.ensureLoginItemDefault();
 
   const { nativeImage } = require('electron');
   const icon = nativeImage.createFromPath(ICON_PATH).resize({ width: 16, height: 16 });
@@ -813,18 +840,23 @@ app.whenReady().then(async () => {
 
   stopMeetingWatcher = callDetection.start();
 
-  app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+  // Dock click, Spotlight or Finder launch while Cora is in the menu bar.
+  app.on('activate', () => openMainWindow());
 });
 
 // Quitting stops the live Recording and waits for every stopped Recording
 // still finishing (each capture helper exits or is killed after its
 // timeout), so no dual-capture/speaker-watch outlives Cora. The Python
 // server stays up until then so the status updates land.
+// Only a full quit (tray Quit Cora, macOS shutdown/logout) gets here: ⌘Q and
+// Dock > Quit are cancelled and hide Cora to the menu bar instead.
 let shutdownDone = false;
 let shutdownStarted = false;
 app.on('before-quit', (event) => {
+  if (!menuBar.shouldQuit()) {
+    event.preventDefault();
+    return;
+  }
   isQuitting = true;
   if (shutdownDone) {
     if (pythonProcess) pythonProcess.kill();

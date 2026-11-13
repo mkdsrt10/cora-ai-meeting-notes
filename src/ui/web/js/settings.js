@@ -120,6 +120,8 @@ async function loadSettingsView(){
     if($('#settingsRetainAudio')) $('#settingsRetainAudio').checked = retain.value !== false;
   }catch{}
 
+  await loadOpenAtLogin();
+
   try{
     const res = await api('/api/onboarding/meeting-types');
     settingsSelectedMeetingTypes = new Set(res.selected || []);
@@ -226,6 +228,32 @@ $('#settingsProfileSave')?.addEventListener('click', async () => {
 $('#settingsRetainAudio')?.addEventListener('change', async (e) => {
   try{ await saveSetting('retain_audio', e.target.checked); toast('Saved'); }
   catch(error){ toast(error.message, true); }
+});
+
+// --- Open Cora at login (Preferences) ---
+// The macOS login item, read from and written through main (src/main/menu-bar.js),
+// which also stores the choice (open_at_login). Hidden outside the app.
+async function loadOpenAtLogin(){
+  const row = $('#settingsOpenAtLoginRow');
+  const toggle = $('#settingsOpenAtLogin');
+  if(!row || !toggle) return;
+  const bridge = window.electronAPI;
+  row.hidden = !bridge?.getOpenAtLogin;
+  if(row.hidden) return;
+  try{ toggle.checked = (await bridge.getOpenAtLogin()) === true; }
+  catch(error){ toast(error.message, true); }
+}
+
+$('#settingsOpenAtLogin')?.addEventListener('change', async (e) => {
+  const wanted = e.target.checked;
+  try{
+    const now = await window.electronAPI.setOpenAtLogin(wanted);
+    e.target.checked = now === true;
+    toast(now === wanted ? (wanted ? 'Cora will open at login' : 'Cora will not open at login') : 'macOS did not accept the change', now !== wanted);
+  }catch(error){
+    e.target.checked = !wanted;
+    toast(error.message, true);
+  }
 });
 
 $('#settingsMeetingTypesSave')?.addEventListener('click', async () => {
