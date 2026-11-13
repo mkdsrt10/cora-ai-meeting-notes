@@ -62,6 +62,8 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript.
 
+**Menu bar**: where Cora lives when its window is not open: the menu bar icon, from which you start or stop a Recording, open Cora or quit it. Closing the window, ⌘Q and Dock > Quit leave Cora in the menu bar, still watching for Calls, with no Dock icon; only the icon's "Quit Cora" (or a macOS shutdown or logout) ends it. Cora opens at login straight into the menu bar unless you turn that off in Settings. _Avoid_: tray (that is the Electron API), background mode.
+
 **Install**: one copy of Cora on one Mac, identified by a random id generated once. It may carry a display name for the Cora team: in the beta build it starts as the owner's own name, copied once, and the owner can change or clear it. The id never carries an email or machine name. _Avoid_: user, device.
 
 **Usage event**: one metadata-only record of one thing that happened in an Install (a Recording stopped, processing finished, a setting changed, a rating given). Carries counts, durations, versions, models and error codes, never titles, names, transcripts or note text. Sent to the Cora team during the beta.

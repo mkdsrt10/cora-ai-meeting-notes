@@ -333,10 +333,12 @@ def _validate_display_name(value):
     return value.strip() or None
 
 
-def _validate_share_usage(value):
-    if not isinstance(value, bool):
-        raise ValueError("share_usage must be true or false")
-    return value
+def _true_or_false(key: str):
+    def validate(value):
+        if not isinstance(value, bool):
+            raise ValueError(f"{key} must be true or false")
+        return value
+    return validate
 
 
 def _whole_number_at_least(key: str, minimum: int):
@@ -350,7 +352,11 @@ def _whole_number_at_least(key: str, minimum: int):
 _VALIDATORS = {
     "microphone": _validate_microphone,
     "beta_display_name": _validate_display_name,
-    "share_usage": _validate_share_usage,
+    "share_usage": _true_or_false("share_usage"),
+    # Menu bar mode (src/main/menu-bar.js): the user's open-at-login choice
+    # (unset = first run) and the one-time "still running" notice.
+    "open_at_login": _true_or_false("open_at_login"),
+    "menu_bar_notice_shown": _true_or_false("menu_bar_notice_shown"),
     "audio_retention_days": _whole_number_at_least("audio_retention_days", 1),
     "audio_cap_mb": _whole_number_at_least("audio_cap_mb", 50),
 }
