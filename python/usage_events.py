@@ -50,6 +50,7 @@ CATALOG: dict[str, frozenset[str]] = {name: frozenset(keys.split()) for name, ke
     "call_prompt_action": "action",
     "detect_fallback": "reason",
     "onboarding_completed": "processing_mode",
+    "tour_closed": "slide slides outcome",
     "ui_activity": "day active_min doing browsing",
     "ui_action_count": "day action kind count",
 }.items()}

@@ -90,6 +90,7 @@ Keys may be missing; extra keys may not.
 | `call_prompt_action` | `action` (`start`\|`dismiss`\|`expired`: Start recording clicked, Dismiss clicked, or the Call ended or a Recording started elsewhere) | Electron main, once per Call prompt, when it closes |
 | `detect_fallback` | `reason` (`ax_untrusted`: Accessibility not granted, desktop apps fall back to the process alone; `js_events_off`: a browser refuses "Allow JavaScript from Apple Events") | Electron main, at most once per reason per app run; no app or browser names |
 | `onboarding_completed` | `processing_mode` | onboarding Finish, once, after setup is saved |
+| `tour_closed` | `slide` (1-based, where it was closed), `slides` (how many), `outcome` (`done`, `skip`) | renderer (`js/tour.js`) |
 | `ui_activity` | `day` (local `YYYY-MM-DD`), `active_min`, `doing` (Effort), `browsing` | `python/activity.py`, once per Install per local day, after the day ends (below) |
 | `ui_action_count` | `day`, `action` (an id from `activity.ACTIONS`), `kind` (`doing`\|`browsing`), `count` | `python/activity.py`, with that day's `ui_activity`: one per action used that day |
 

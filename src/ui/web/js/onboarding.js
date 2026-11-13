@@ -235,5 +235,6 @@ $('#onboardingFinish')?.addEventListener('click', async () => {
     await api('/api/onboarding/complete', { method: 'POST', body: '{}' });
     track('onboarding_completed', { processing_mode: processingMode });
     closeOnboarding();
+    maybeShowTour();  // tour.js
   }catch(error){ toast(error.message, true); }
 });

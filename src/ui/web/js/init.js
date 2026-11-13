@@ -14,4 +14,5 @@
   loadFolders();
   loadLocalStats();
   checkModelsOnStartup();
+  maybeShowTour();  // tour.js: once, for anyone who onboarded before it existed
 })();

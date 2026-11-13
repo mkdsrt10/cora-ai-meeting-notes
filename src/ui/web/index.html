@@ -202,6 +202,25 @@
   </div>
 </div>
 
+<div class="tour-overlay" id="tourOverlay" role="dialog" aria-modal="true" aria-labelledby="tourTitle" hidden>
+  <div class="tour-card">
+    <div class="tour-image-wrap"><img id="tourImage" alt=""></div>
+    <div class="tour-copy">
+      <div class="tour-step" id="tourStep"></div>
+      <h2 id="tourTitle"></h2>
+      <p id="tourBody"></p>
+    </div>
+    <div class="tour-actions">
+      <button class="button" id="tourSkip" type="button">Skip</button>
+      <div class="tour-dots" id="tourDots" aria-hidden="true"></div>
+      <div class="tour-nav">
+        <button class="button" id="tourBack" type="button" hidden>Back</button>
+        <button class="button primary" id="tourNext" type="button">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="app-shell">
   <aside class="sidebar">
     <a class="brand" href="#" data-view="recordings" aria-label="Cora home"><span class="brand-mark"><span data-icon="mic" data-size="18"></span></span><span><strong>Cora</strong></span><span class="local-badge">LOCAL</span></a>
@@ -480,6 +499,10 @@
             <div class="settings-row" id="settingsOpenAtLoginRow">
               <div><strong>Open Cora at login</strong><small>Cora starts in the menu bar when you log in, so it can offer to record calls. Closing the window or ⌘Q keeps it there; quit from the menu bar icon.</small></div>
               <label class="switch"><input type="checkbox" id="settingsOpenAtLogin"><span class="slider"></span></label>
+            </div>
+            <div class="settings-row">
+              <div><strong>Cora tour</strong><small>A quick look at the main features: New note, call prompts, your notes and the beta settings.</small></div>
+              <button class="button" id="settingsTakeTour" type="button">Take the tour</button>
             </div>
           </div>
 
@@ -782,6 +805,7 @@
 <script src="/js/feedback.js"></script>
 <script src="/js/navigation.js"></script>
 <script src="/js/new-note.js"></script>
+<script src="/js/tour.js"></script>
 <script src="/js/credentials.js"></script>
 <script src="/js/onboarding.js"></script>
 <script src="/js/title-editor.js"></script>
