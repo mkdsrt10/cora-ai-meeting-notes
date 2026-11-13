@@ -62,7 +62,7 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript.
 
-**Install**: one copy of Cora on one Mac, identified by a random id generated once. Its owner may add a display name for the Cora team; the id never carries an email or machine name.
+**Install**: one copy of Cora on one Mac, identified by a random id generated once. It may carry a display name for the Cora team: in the beta build it starts as the owner's own name, copied once, and the owner can change or clear it. The id never carries an email or machine name. _Avoid_: user, device.
 
 **Usage event**: one metadata-only record of one thing that happened in an Install (a Recording stopped, processing finished, a setting changed, a rating given). Carries counts, durations, versions, models and error codes, never titles, names, transcripts or note text. Sent to the Cora team during the beta.
 

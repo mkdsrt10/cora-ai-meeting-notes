@@ -54,6 +54,8 @@ def main() -> None:
     # Electron stops the server with SIGTERM (pythonProcess.kill()); turn it
     # into the same clean exit as Ctrl-C so the beta sender's final flush runs.
     signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
+    import usage_events
+    usage_events.seed_display_name()  # beta builds, once: name teammates who onboarded before 0.4.4
     import beta_sender
     # The port is bound; the daily people_snapshot (a walk of the Recordings
     # folder), the config fetch and the first flush all run on its thread.
