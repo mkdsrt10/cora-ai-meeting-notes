@@ -56,6 +56,8 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Call prompt**: what Cora shows when it detects a Call: an always-on-top panel offering Start recording and Dismiss, which stays until you act or the Call ends. Dismiss holds until that Call ends. The macOS banner is only the fallback when the panel cannot show. _Avoid_: notification (that is the banner).
 
+**Manual start**: a Recording the user starts themselves (New note in the Cora window, or Start recording in the tray), rather than from a Call prompt. Captures the same Microphone and system audio as any other Recording, and works with no Call at all (an in-person conversation). Only one Recording session runs at a time. _Avoid_: blank note, quick note (that is the floater's note during a live Recording).
+
 **Participant**: a name captured from the meeting app during one Recording (the roster). A Participant may be linked to a Person, renamed, hidden, or turned into a new Person from the Participants tab. _Avoid_: attendee (that is the calendar list).
 
 **Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript.

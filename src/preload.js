@@ -10,7 +10,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     stopRecording: () => ipcRenderer.invoke('stop-recording'),
     pauseRecording: () => ipcRenderer.invoke('pause-recording'),
     resumeRecording: () => ipcRenderer.invoke('resume-recording'),
-    startRecording: (continuesRecordingId) => ipcRenderer.invoke('start-recording', continuesRecordingId),
+    // continuesRecordingId: null for a new Recording; startedFrom: 'new_note' from the New note button.
+    startRecording: (continuesRecordingId, startedFrom) => ipcRenderer.invoke('start-recording', continuesRecordingId, startedFrom),
     snapScreenshot: () => ipcRenderer.invoke('snap-screenshot'),
     onAudioLevel: (callback) => ipcRenderer.on('audio-level', (_event, levels) => callback(levels)),
     onRecordingInfo: (callback) => ipcRenderer.on('recording-info', (_event, info) => callback(info)),

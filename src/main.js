@@ -469,10 +469,11 @@ function onCaptureStarted(s) {
   }, { recordingId: s.recordingId });
 }
 
-// Start from the tray or the meeting-detected prompt; the reason a start
-// was refused is shown rather than silently doing nothing.
+// Start from the tray or the meeting-detected prompt (the only caller that
+// names a meeting tool); the reason a start was refused is shown rather than
+// silently doing nothing.
 function startRecording(meetingTool = null) {
-  const result = recording.start({ meeting: meetingTool });
+  const result = recording.start({ meeting: meetingTool, startedFrom: meetingTool ? 'call_prompt' : 'tray' });
   if (!result.ok && recording.state().phase !== 'recording') {
     notify({ title: 'Cora', body: result.error }, { level: 'warning' });
   }
@@ -527,8 +528,11 @@ handleTrusted('pause-recording', () => recording.pause());
 
 handleTrusted('resume-recording', () => recording.resume());
 
-handleTrusted('start-recording', (_event, continuesRecordingId = null) => {
-  const result = recording.start({ continues: continuesRecordingId || null });
+// From the Cora window: "Add to this meeting" (continues a Recording) or
+// New note (a Manual start). The session reports any other startedFrom as other.
+handleTrusted('start-recording', (_event, continuesRecordingId = null, startedFrom = null) => {
+  const continues = typeof continuesRecordingId === 'string' && continuesRecordingId ? continuesRecordingId : null;
+  const result = recording.start({ continues, startedFrom: continues ? 'continue' : startedFrom });
   return result.ok ? { ok: true } : result;
 });
 

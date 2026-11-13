@@ -8,7 +8,9 @@
 //     finishing: ids of stopped Recordings still being finalized in the background
 //     micDevice: name of the Microphone the helper reports it opened; null
 //       until it does, and when idle
-//   session.start({ meeting, continues }) -> { ok, id } | { ok: false, error }
+//   session.start({ meeting, continues, startedFrom }) -> { ok, id } | { ok: false, error }
+//     startedFrom: new_note | tray | call_prompt | continue (STARTED_FROM);
+//     anything else is reported as other
 //     never refused because an earlier Recording is still finishing; the
 //     Microphone setting is resolved once per start (see resolveMicrophone)
 //     and reused by every pause/resume chunk of it
@@ -113,6 +115,9 @@ function deferredHelper(startHelper, optsPromise) {
   };
   return h;
 }
+
+// Where a Recording was started from, as recording_started reports it.
+const STARTED_FROM = new Set(['new_note', 'tray', 'call_prompt', 'continue']);
 
 function createRecordingSession({ startHelper, api, clock, queue, people = {}, microphone = null, newRecordingId = recordingIdAt }) {
   const events = new EventEmitter();
@@ -264,7 +269,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     return id;
   }
 
-  function start({ meeting: tool = null, continues = null } = {}) {
+  function start({ meeting: tool = null, continues = null, startedFrom = null } = {}) {
     if (phase === 'recording' || phase === 'paused') return { ok: false, error: 'Already recording.' };
     generation += 1;
     chunks = [];
@@ -282,11 +287,12 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     }
     const id = startChunk(continues);
     usage = { id, startedAt: clock.now(), meeting: tool, apps: new Set(), titles: new Set(),
-      pauses: 0, micReconnects: 0, micKind: 'default' };
+      pauses: 0, micReconnects: 0, micKind: 'default',
+      startedFrom: STARTED_FROM.has(startedFrom) ? startedFrom : 'other' };
     const u = usage;
     Promise.resolve(micPending).then((m) => {
       u.micKind = m && (m.deviceId || m.chosenName) ? 'named' : 'default';
-      track('recording_started', { recording_id: id, ...classifyMeeting({ meeting: tool }), microphone_kind: u.micKind });
+      track('recording_started', { recording_id: id, ...classifyMeeting({ meeting: tool }), microphone_kind: u.micKind, started_from: u.startedFrom });
     });
     emit();
     return { ok: true, id };

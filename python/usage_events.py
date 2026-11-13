@@ -23,7 +23,7 @@ QUEUE_MAX_BYTES = 5_000_000
 
 CATALOG: dict[str, frozenset[str]] = {name: frozenset(keys.split()) for name, keys in {
     "app_started": "macos chip ram_gb processing_mode microphone_kind lockdown",
-    "recording_started": "recording_id meeting_app surface microphone_kind",
+    "recording_started": "recording_id meeting_app surface microphone_kind started_from",
     "recording_stopped": "recording_id meeting_app surface duration_s chunks pauses mic_reconnects ended_by",
     "participants_captured": "recording_id count method warnings linked_people",
     "processing_finished": "recording_id status error_code transcriber_provider transcriber_model text_provider"
