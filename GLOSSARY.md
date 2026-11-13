@@ -66,5 +66,9 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Feedback**: an explicit rating a user gives one Recording, aimed at the Recording (capture and transcript), the Notes, or Overall: thumbs up or down, fixed reasons, and an optional comment. The comment is the only free text that leaves the Mac. A general message not tied to a Recording is also Feedback.
 
+**Effort**: how much a person actually did in Cora on one day: the count of *doing* actions (starting, stopping or pausing a Recording, a Notepad save, a transcript correction, renaming a meeting or speaker, linking or adding a Person, a rating, an export or copy of the notes, ticking a To-do, filing into a folder, reprocess or retry, changing a setting). The action counts, not the input: a click, a shortcut and the tray count the same. Opening, switching, searching and filtering are *browsing*, counted apart and not Effort. _Avoid_: engagement, clicks.
+
+**Active time**: the minutes of one day in which the Cora main window had focus and received input (key, pointer, wheel) in the previous 60 seconds. _Avoid_: session length, time in app.
+
 **Captured Recording**: a Recording copied in full (audio tracks, transcript, speaker timeline, Participants, notes, run metadata) to the Cora team for accuracy review, either because it was rated or because it fell in the beta sample. Never a Recording made under enterprise lockdown.
 

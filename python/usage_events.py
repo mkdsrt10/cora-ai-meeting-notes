@@ -49,6 +49,9 @@ CATALOG: dict[str, frozenset[str]] = {name: frozenset(keys.split()) for name, ke
     "call_detected": "app trigger confirmed seconds_to_prompt",
     "call_prompt_action": "action",
     "detect_fallback": "reason",
+    "onboarding_completed": "processing_mode",
+    "ui_activity": "day active_min doing browsing",
+    "ui_action_count": "day action kind count",
 }.items()}
 
 
@@ -81,13 +84,32 @@ def record(name: str, payload: dict) -> int:
     """Validate and store one Usage event; returns its id. ValueError if invalid."""
     payload = validate(name, payload)
     with db.get_db() as conn:
-        cur = conn.execute("INSERT INTO usage_events (created_at, name, payload) VALUES (?, ?, ?)",
-                           (_iso(_now()), name, json.dumps(payload, separators=(",", ":"))))
+        event_id = insert(conn, name, payload)
         conn.commit()
-        event_id = cur.lastrowid
     if name == "processing_finished":
         _sample_capture(payload)
+    _count_activity(name, payload)
     return event_id
+
+
+def insert(conn, name: str, payload: dict) -> int:
+    """Validate and insert one row on `conn` without committing, so a caller
+    (python/activity.py) can write events and its own rows in one transaction."""
+    payload = validate(name, payload)
+    cur = conn.execute("INSERT INTO usage_events (created_at, name, payload) VALUES (?, ?, ?)",
+                       (_iso(_now()), name, json.dumps(payload, separators=(",", ":"))))
+    return cur.lastrowid
+
+
+def _count_activity(name: str, payload: dict) -> None:
+    """An event that marks a doing action (recording start, Notepad save,
+    rating, ...) also counts toward the day's Effort (python/activity.py).
+    Never lets counting fail the event."""
+    try:
+        import activity
+        activity.count_event(name, payload)
+    except Exception as e:  # noqa: BLE001
+        print(f"[usage_events] activity count failed: {type(e).__name__}: {e}", flush=True)
 
 
 def _sample_capture(payload: dict) -> None:

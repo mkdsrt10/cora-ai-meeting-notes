@@ -169,6 +169,17 @@ def init_db():
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_usage_events_unsent ON usage_events(sent_at, id)')
 
+        # Effort / Active time: counts of days not yet emitted, per action id;
+        # the day's active minutes under '@active_min'. See python/activity.py.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS ui_activity_counts (
+                day TEXT NOT NULL,
+                action TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (day, action)
+            )
+        ''')
+
         # Captured Recordings (beta): one row per Recording asked for, by a
         # rating or the sample; uploaded_at / dropped_at end it. See python/capture.py.
         conn.execute('''

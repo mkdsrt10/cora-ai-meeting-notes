@@ -134,6 +134,7 @@ $('#notepadParticipants')?.addEventListener('input', (e) => {
   clearTimeout(input._saveTimer);
   input._saveTimer = setTimeout(async () => {
     try{
+      trackAction('rename_speaker');
       await api('/api/recording/participant', { method: 'POST', body: JSON.stringify({ id: record.id, raw_name: rawName, action: 'rename', display_name: input.value }) });
     }catch(error){ toast(error.message, true); }
   }, 800);
@@ -152,7 +153,8 @@ $('#notepadParticipants')?.addEventListener('change', async (e) => {
     select.disabled = true;
     try{
       const created = await api('/api/people/create', { method: 'POST', body: JSON.stringify({ name }) });
-      track('person_added', { source: 'participants_tab' });
+      track('person_added', { source: 'participants_tab' });  // also counts add_person
+      trackAction('link_person');
       await api('/api/recording/participant', { method: 'POST', body: JSON.stringify({ id: record.id, raw_name: rawName, action: 'map', person_id: created.person.id }) });
       const entry = (selectedDetail?.participants || []).find(p => p.raw_name === rawName);
       if(entry) entry.person_id = created.person.id;
@@ -162,6 +164,7 @@ $('#notepadParticipants')?.addEventListener('change', async (e) => {
     return;
   }
   try{
+    trackAction('link_person');
     await api('/api/recording/participant', { method: 'POST', body: JSON.stringify({ id: record.id, raw_name: rawName, action: 'map', person_id: select.value || null }) });
     toast('Linked.');
   }catch(error){ toast(error.message, true); }

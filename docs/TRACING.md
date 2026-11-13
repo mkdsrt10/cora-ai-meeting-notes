@@ -89,6 +89,45 @@ Keys may be missing; extra keys may not.
 | `call_detected` | `app` (the Call's label, e.g. `Google Meet`, `Slack Huddle`), `trigger` (`mic`\|`poll`\|`followup`: what found the Call), `confirmed` (the page or app said the Call is live), `seconds_to_prompt` (whole seconds from the mic turning on to the prompt; null when the mic was not on first) | Electron main (`src/main/call-detection.js`), once per Call detected, before the prompt; no URL, title or names |
 | `call_prompt_action` | `action` (`start`\|`dismiss`\|`expired`: Start recording clicked, Dismiss clicked, or the Call ended or a Recording started elsewhere) | Electron main, once per Call prompt, when it closes |
 | `detect_fallback` | `reason` (`ax_untrusted`: Accessibility not granted, desktop apps fall back to the process alone; `js_events_off`: a browser refuses "Allow JavaScript from Apple Events") | Electron main, at most once per reason per app run; no app or browser names |
+| `onboarding_completed` | `processing_mode` | onboarding Finish, once, after setup is saved |
+| `ui_activity` | `day` (local `YYYY-MM-DD`), `active_min`, `doing` (Effort), `browsing` | `python/activity.py`, once per Install per local day, after the day ends (below) |
+| `ui_action_count` | `day`, `action` (an id from `activity.ACTIONS`), `kind` (`doing`\|`browsing`), `count` | `python/activity.py`, with that day's `ui_activity`: one per action used that day |
+
+### Effort and Active time (`python/activity.py`)
+
+The counters have one owner, `python/activity.py`, kept in table `ui_activity_counts` (`day`,
+`action`, `count`; the day's active minutes under `@active_min`) with atomic upserts, so a crash
+or restart loses nothing.
+
+- **Active time**: the renderer (`src/ui/web/js/usage.js`, main window only) notes the last key,
+  pointer or wheel input; once a minute, if the window has focus and there was input in the last
+  60 s, it sends `POST /api/activity {"active_min": 1}`.
+- **Actions**: a fixed list of ids (`activity.ACTIONS`), each `doing` or `browsing`. Counted where
+  the action happens, so a click, a shortcut and the tray count the same:
+  - renderer: `trackAction(id)` (`POST /api/activity {"action": id}`), a control tagged
+    `data-track="<id>"` (e.g. a To-do checkbox), and `trackActionSettled('search', text)` (one
+    search per settled query, not per keystroke; the text never leaves the page);
+  - Electron main: the Recording session counts `stop_recording` (stops the person asked for or
+    cancelled, not quit, crash or the call detector's auto-stop), `pause_recording`,
+    `resume_recording` through `countAction` (same endpoint);
+  - existing Usage events that already mark a doing action count it from `usage_events.record()`,
+    with no second event: `recording_started` → `start_recording` (any source),
+    `manual_notes_written` → `save_notepad`, `transcript_corrected` → `correct_transcript`,
+    `feedback` → `rate`, `notes_exported` → `export_notes` or `copy_notes`, `person_added` →
+    `add_person`, `setting_changed` → `change_setting`. `notes_edited` rides along with a Notepad
+    save and is not counted again.
+- Doing: `start_recording`, `stop_recording`, `pause_recording`, `resume_recording`,
+  `save_notepad`, `correct_transcript`, `rename_meeting`, `rename_speaker`, `link_person`,
+  `add_person`, `rate`, `export_notes`, `copy_notes`, `tick_todo`, `file_to_folder`, `reprocess`,
+  `retry`, `change_setting`. Browsing: `open_recording`, `switch_view`, `search`, `filter`,
+  `toggle_enhanced_raw`, `open_person`, `open_settings`.
+- **Emitting a day**: the sender's housekeeping (every tick, at start, and in the final flush on
+  quit) turns every stored day before today into one `ui_activity` and its `ui_action_count`
+  rows, and deletes that day's counters, in one transaction: a day is never emitted twice.
+  Today's partial counts stay local until the day is over, so a day that ends while Cora is quit
+  is emitted at the next launch. Same rules as every Usage event: recorded locally, sent only when
+  sharing is enabled, never under lockdown, and in **Show what Cora shares**.
+- Only action ids and counts leave the Mac: never text, names, Recording ids or selectors.
 
 ### Where they live on the Mac
 

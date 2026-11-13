@@ -49,3 +49,65 @@ function trackSettingChanged(key, value){
   const payload = settingChangedPayload(key, value);
   if(payload) track('setting_changed', payload);
 }
+
+// ---- Effort and Active time (python/activity.py owns the counters) ----
+// An action counts the same whatever the input: a click, a shortcut, Enter
+// on a focused row. So actions are counted where the action happens (the
+// function that does it), or by tagging its control data-track="<id>": a
+// click on a [data-track] element (keyboard activation also fires click) is
+// one action. Only the action id leaves the page, never text, names or ids.
+// Doing actions an existing Usage event already marks (Notepad save,
+// transcript correction, Feedback, export/copy, Person added, setting
+// changed, recording start) are counted from that event by the backend, so
+// they are not counted again here.
+
+// POST /api/activity {action}, fire and forget like track().
+function trackAction(action){
+  Promise.resolve()
+    .then(() => api('/api/activity', { method: 'POST', body: JSON.stringify({ action }) }))
+    .catch(error => console.warn(`[Cora usage] ${action} not counted:`, error?.message));
+}
+
+// Search and other typed queries: one action once the text settles (a
+// second of no typing) on a new non-empty value, not one per keystroke.
+const SETTLE_MS = 1000;
+const settledActions = new Map(); // action -> { timer, last }
+function trackActionSettled(action, value){
+  const state = settledActions.get(action) || { timer: null, last: '' };
+  settledActions.set(action, state);
+  clearTimeout(state.timer);
+  const text = String(value ?? '').trim();
+  if(!text){ state.last = ''; return; }
+  state.timer = setTimeout(() => {
+    if(text === state.last) return;
+    state.last = text;
+    trackAction(action);
+  }, SETTLE_MS);
+}
+
+function trackTaggedClick(event){
+  const tagged = event?.target?.closest?.('[data-track]');
+  if(tagged?.dataset?.track) trackAction(tagged.dataset.track);
+}
+
+// Active time: once a minute, the minute counts when the main window has
+// focus and the person gave it input (key, pointer, wheel) in the last 60 s.
+const ACTIVE_WINDOW_MS = 60000;
+let lastInputAt = 0;
+function noteUserInput(){ lastInputAt = Date.now(); }
+function activeMinuteTick(now = Date.now(), focused = document.hasFocus()){
+  if(!focused || !lastInputAt || now - lastInputAt > ACTIVE_WINDOW_MS) return false;
+  Promise.resolve()
+    .then(() => api('/api/activity', { method: 'POST', body: JSON.stringify({ active_min: 1 }) }))
+    .catch(error => console.warn('[Cora usage] active minute not counted:', error?.message));
+  return true;
+}
+
+function installActivityTracking(target){
+  target.addEventListener('click', trackTaggedClick, true);
+  for(const type of ['keydown', 'pointerdown', 'pointermove', 'wheel']){
+    target.addEventListener(type, noteUserInput, { capture: true, passive: true });
+  }
+  setInterval(() => activeMinuteTick(), ACTIVE_WINDOW_MS);
+}
+if(typeof addEventListener === 'function' && typeof document !== 'undefined' && typeof document.hasFocus === 'function') installActivityTracking(globalThis);

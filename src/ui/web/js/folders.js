@@ -23,6 +23,7 @@ function renderFolderList(){
   if(folderSelect) folderSelect.innerHTML = '<option value="">All folders</option>' + foldersCache.map(f => `<option value="${esc(f.id)}" ${f.id === activeFolderFilter ? 'selected' : ''}>${esc(f.name)}</option>`).join('');
   $$('[data-folder-filter]').forEach(btn => btn.addEventListener('click', (e) => {
     if(e.target.closest('[data-remove-folder]')) return;
+    trackAction('filter');
     activeFolderFilter = btn.dataset.folderFilter;
     $$('[data-folder-filter]').forEach(b => b.classList.toggle('active', b === btn));
     if(folderSelect) folderSelect.value = activeFolderFilter;

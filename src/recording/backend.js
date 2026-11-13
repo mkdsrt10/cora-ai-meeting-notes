@@ -50,6 +50,8 @@ function createBackendApi({ postJson, fetchJson }) {
     addLiveEntry: (entry) => postJson('/api/recording/live-entry', entry),
     // One Usage event (python/usage_events.py CATALOG); rejects on a 400.
     recordEvent: (name, payload) => postJson('/api/events', { name, payload }),
+    // One counted action toward the day's Effort (python/activity.py ACTIONS).
+    countAction: (action) => postJson('/api/activity', { action }),
     processRecording: async (id) => {
       let raw;
       try {

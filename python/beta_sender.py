@@ -233,12 +233,15 @@ def _display_name() -> str:
 
 
 def _housekeeping() -> None:
-    """Local queue upkeep, whether or not anything may be sent: apply the
+    """Local queue upkeep, whether or not anything may be sent: emit the
+    activity counts of days that ended (on every tick, and so on quit), apply the
     queue limits (unsent rows older than 7 days or beyond 5 MB dropped oldest
     first and counted in one `events_dropped`), delete sent rows older than 30
     days, then drop captures waiting more than 7 days. Because this runs before every flush,
     and on every tick while sharing is off, turning sharing back on ships at
     most the last 7 days / 5 MB of events."""
+    import activity
+    activity.emit_closed_days_safely()  # a day that ended becomes ui_activity / ui_action_count
     try:
         usage_events.enforce_queue_limits()  # first, so stale unsent rows are counted
         usage_events.prune_local(30)

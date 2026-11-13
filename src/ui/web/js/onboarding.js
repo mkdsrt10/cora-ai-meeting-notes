@@ -230,8 +230,10 @@ $('#onboardingFinish')?.addEventListener('click', async () => {
       if(onboardingSelectedLiquidModel) await saveSetting('liquid_model', onboardingSelectedLiquidModel);
     }
     await saveSetting('retain_audio', $('#onboardingRetainAudio').checked);
+    const processingMode = $('#onboardingProcessing [data-processing="mode"]')?.value || null;
     await saveProcessingControls("#onboardingProcessing");
     await api('/api/onboarding/complete', { method: 'POST', body: '{}' });
+    track('onboarding_completed', { processing_mode: processingMode });
     closeOnboarding();
   }catch(error){ toast(error.message, true); }
 });
