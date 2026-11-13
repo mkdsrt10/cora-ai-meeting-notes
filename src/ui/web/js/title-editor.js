@@ -107,6 +107,7 @@ function setupTitleEditor() {
 
     if (save && selectedDetail && newTitle && newTitle !== selectedDetail.title) {
       const prevTitle = selectedDetail.title;
+      trackAction('rename_meeting');
       detailTitle.textContent = newTitle;
       selectedDetail.title = newTitle;
       try {

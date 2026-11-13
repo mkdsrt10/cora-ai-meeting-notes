@@ -71,6 +71,9 @@ function fakeApi() {
     setTitle: rec('setTitle'),
     addLiveEntry: rec('addLiveEntry'),
     recordEvent: rec('recordEvent'),
+    countAction: rec('countAction'),
+    // Every action counted toward Effort, in order.
+    actions: () => calls.filter((c) => c[0] === 'countAction').map((c) => c[1]),
     // Payloads of every Usage event of that name, in emission order.
     events: (name) => calls.filter((c) => c[0] === 'recordEvent' && c[1] === name).map((c) => c[2]),
     processResults: [],

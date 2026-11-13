@@ -150,3 +150,45 @@ test('no roster and no speaker events is method none; a failed lookup still hand
   assert.deepEqual(enqueued, [second]);
   assert.equal(api.events('participants_captured').length, 1);
 });
+
+// Effort (python/activity.py): stop, pause and resume the person asked for
+// count through api.countAction; a start counts from its recording_started.
+test('stop, pause and resume count toward Effort; a start counts only through recording_started', async () => {
+  const { session, api } = setup();
+  session.start({ meeting: 'Zoom' });
+  await flush();
+  session.pause();
+  await session.resume();
+  await session.stop('user');
+  await flush();
+  assert.deepEqual(api.actions(), ['pause_recording', 'resume_recording', 'stop_recording']);
+  assert.equal(api.events('recording_started').length, 1);
+});
+
+test('a stop the person did not ask for (quit, helper crash, call detector) is not an action', async () => {
+  for (const reason of ['quit', 'helper-exit', 'mic-off']) {
+    const { session, api } = setup();
+    session.start({});
+    await flush();
+    await session.stop(reason);
+    await flush();
+    assert.deepEqual(api.actions(), [], reason);
+  }
+});
+
+test('a cancelled recording counts as a stop, and a failing count never touches capture', async () => {
+  const cancelled = setup();
+  cancelled.session.start({});
+  await flush();
+  await cancelled.session.stop('cancel');
+  await flush();
+  assert.deepEqual(cancelled.api.actions(), ['stop_recording']);
+
+  const { session, api } = setup();
+  session.start({});
+  await flush();
+  api.countAction = async () => { throw new Error('400 unknown activity action'); };
+  await session.stop('cancel');
+  await flush();
+  assert.equal(session.state().phase, 'idle');
+});

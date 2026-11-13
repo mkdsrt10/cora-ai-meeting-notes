@@ -392,6 +392,7 @@ $('#notepadFolder')?.addEventListener('change', async (e) => {
   if(!record) return;
   try{
     const newFolderId = e.target.value || null;
+    trackAction('file_to_folder');
     await api('/api/recording/folder', { method: 'POST', body: JSON.stringify({ id: record.id, folder_id: newFolderId }) });
     selectedDetail.folder_id = newFolderId;
     const listItem = data?.recordings?.find(r => r.id === record.id);

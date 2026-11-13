@@ -13,7 +13,10 @@ stopped, processing finished, notes viewed or edited, a setting changed, an upda
 They carry counts, durations, versions, model names, error codes and on/off values. They never
 carry meeting titles, people's names, transcripts or note text. A changed setting that looks
 like a key, token or password is not reported at all; any other free-text setting is reported
-only as "set" or "cleared". The full list of events and fields is in `docs/TRACING.md`
+only as "set" or "cleared". Once a day, Cora also sends how many minutes you were actively
+using its window and how many times you did each kind of thing (for example "renamed a meeting
+3 times", "opened a recording 12 times"): action names and counts only, never what you typed,
+searched for or opened. The full list of events and fields is in `docs/TRACING.md`
 ("Usage events (beta)"); Cora refuses to store an event or field that is not on that list.
 
 Each batch is labelled with this Install's random id (made once on this Mac, never your email or

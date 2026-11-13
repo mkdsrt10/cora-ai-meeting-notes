@@ -154,6 +154,18 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
       .then(() => api.recordEvent(name, payload))
       .catch((err) => console.warn(`[Cora usage] ${name} not recorded:`, err && err.message));
   }
+  // One doing action toward the day's Effort (POST /api/activity through
+  // api.countAction): stop, pause and resume. A start is counted from its
+  // recording_started event, so it is not counted here. Fire and forget.
+  function countAction(action) {
+    if (typeof api.countAction !== 'function') return;
+    Promise.resolve()
+      .then(() => api.countAction(action))
+      .catch((err) => console.warn(`[Cora usage] ${action} not counted:`, err && err.message));
+  }
+  // Stops the person asked for; quitting, a helper crash and the call
+  // detector's auto-stop are not actions.
+  const COUNTED_STOPS = new Set(['user', 'cancel']);
   // What the usage events of the live Recording need, from start to stop.
   let usage = null;
 
@@ -358,6 +370,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
 
   function stop(reason, warning = null) {
     if (phase !== 'recording' && phase !== 'paused') return handedOver;
+    if (COUNTED_STOPS.has(reason)) countAction('stop_recording');
     const h = helper;
     if (h) h.expectedExit = true;
     const job = { h, pending: flushing, done: chunks.slice(), root: rootId, u: usage };
@@ -413,6 +426,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     // The first chunk becomes the root the rest of the chain continues.
     if (!rootId) rootId = recordingId;
     if (usage) usage.pauses += 1;
+    countAction('pause_recording');
     api.setStatus(recordingId, 'paused').catch(log('status'));
     emit();
     return { ok: true, id: recordingId, status: 'paused' };
@@ -430,6 +444,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     if (phase !== 'paused' || gen !== generation) return { ok: false, error: 'Not paused.' };
     flushing = null;
     startChunk(rootId);
+    countAction('resume_recording');
     emit();
     return { ok: true, status: 'recording' };
   }

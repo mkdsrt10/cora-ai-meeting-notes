@@ -167,6 +167,7 @@ $('#summarizeModal')?.addEventListener('click', (e) => {
 $('#confirmSummarizeBtn')?.addEventListener('click', async () => {
   const record = selectedRecording();
   if (!record) return;
+  trackAction('reprocess');
   closeSummarizeModal();
 
   let options;
@@ -285,6 +286,7 @@ $('#notepadVersionSelect')?.addEventListener('change', async (e) => {
 
 $$('.notes-toggle-btn').forEach(btn => btn.addEventListener('click', () => {
   $$('.notes-toggle-btn').forEach(b => b.classList.toggle('active', b === btn));
+  trackAction('toggle_enhanced_raw');
   const isEnhanced = btn.dataset.notesView === 'enhanced';
   $('#notepadEnhancedNotes').style.display = isEnhanced ? '' : 'none';
   $('#notepadNotes').style.display = isEnhanced ? 'none' : '';

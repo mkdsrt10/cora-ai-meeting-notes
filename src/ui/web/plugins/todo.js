@@ -5,7 +5,7 @@ registerView('todo', {onShow: renderTodoView});
 
 function todoRow(item){
   return `<div class="session-row todo-row${item.done ? ' todo-done' : ''}" style="grid-template-columns:auto 1fr auto">
-    <input type="checkbox" data-todo-recording="${esc(item.recording_id)}" data-todo-index="${item.index}"${item.done ? ' checked' : ''} aria-label="Done">
+    <input type="checkbox" data-track="tick_todo" data-todo-recording="${esc(item.recording_id)}" data-todo-index="${item.index}"${item.done ? ' checked' : ''} aria-label="Done">
     <div><h4>${esc(item.text)}</h4></div>
     <button type="button" class="button secondary small" data-open-id="${esc(item.recording_id)}">${esc(item.recording_title)} · ${fmtDate(item.recorded_at)}</button>
   </div>`;
