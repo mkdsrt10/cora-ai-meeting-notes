@@ -5,25 +5,31 @@ const $ = (q, root=document) => root.querySelector(q);
 const $$ = (q, root=document) => [...root.querySelectorAll(q)];
 let data = null;
 let selectedDetail = null;
+// Refreshes the Copy ID button after selectedDetail changes; title-editor.js
+// replaces it once the page is set up. A no-op until then (and in pages that
+// load only some scripts).
+let syncCopyRecordingIdButton = () => {};
 
-const titles = {
-  recordings: 'Home',
-  'recording-detail': 'Detail',
-  people: 'People',
-  memory: 'Memory',
-  settings: 'Settings',
-  'person-detail': 'Person'
-};
-const subtitles = {
-  recordings: 'Click a recording to view its analysis.',
-  people: 'Everyone Cora has recognized across your recordings — auto-matched from voice, editable anytime.',
-  memory: 'Names, terms, and context Cora has picked up from your own meetings, used to bias transcription toward the words you actually say.'
-};
-const stageLabels = {
-  recording: 'Recording…', processing: 'Processing…',
-  needs_diarization: 'Needs diarization', needs_speaker_confirmation: 'Identify me',
-  ready_for_coaching: 'Ready to coach', coached: 'Coached'
-};
+// Views: every page in the window registers here by id. Core pages register
+// below; plugin pages register from src/ui/web/plugins/<id>.js (see plugin-host.js).
+const views = {};
+function registerView(id, {title, subtitle, onShow} = {}){
+  const view = views[id] || {title: id, subtitle: '', onShow: null};
+  views[id] = {
+    title: title ?? view.title,
+    subtitle: subtitle ?? view.subtitle,
+    onShow: onShow ?? view.onShow,
+  };
+}
+registerView('recordings', {title: 'Home', subtitle: 'Click a recording to view its analysis.'});
+registerView('recording-detail', {title: 'Detail'});
+registerView('people', {title: 'People', subtitle: 'Everyone Cora has recognized across your recordings — auto-matched from voice, editable anytime.', onShow: () => renderPeople()});
+registerView('person-detail', {title: 'Person'});
+registerView('memory', {title: 'Memory', subtitle: 'Names, terms, and context Cora has picked up from your own meetings, used to bias transcription toward the words you actually say.', onShow: () => loadMemory()});
+registerView('settings', {title: 'Settings', onShow: () => loadSettingsView()});
+
+// Stage id -> label, from GET /api/plugins (core stages plus enabled plugins').
+let stageLabels = {};
 const PENDING_STAGES = new Set(['recording', 'processing', 'paused']);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtDate = value => value ? new Date(value).toLocaleString([], {dateStyle:'medium', timeStyle:'short'}) : 'Unknown date';
@@ -38,6 +44,13 @@ async function api(path, options={}) {
 }
 function toast(message, error=false){ const node=$('#toast'); node.textContent=message; node.classList.toggle('error', error); node.classList.add('show'); setTimeout(()=>node.classList.remove('show'), 3500); }
 function stagePill(stage){ return `<span class="stage-pill ${esc(stage)}">${esc(stageLabels[stage] || stage)}</span>`; }
+// "Processing failed": the plain-language reason and a Retry that reruns
+// processing (see retryProcessing in detail-actions.js). Empty otherwise.
+function failureNotice(record){
+  if(record?.analysis_stage !== 'failed') return '';
+  const message = record.failure?.message || 'Processing did not finish.';
+  return `<p class="failure-message">${esc(message)}</p><button type="button" class="button secondary small" data-retry-processing="${esc(record.id)}">Retry</button>`;
+}
 async function copyText(value){
   if(navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
   const node=document.createElement('textarea'); node.value=value; document.body.appendChild(node); node.select(); document.execCommand('copy'); node.remove();
@@ -47,18 +60,21 @@ let currentView = 'recordings';
 let selectedRecordingId = null;
 
 function showView(name){
+  if(!views[name] || !$(`#view-${name}`)){
+    console.warn(`Unknown view "${name}", showing Home instead.`);
+    name = 'recordings';
+  }
+  const view = views[name];
   currentView = name;
   $$('.view').forEach(v => v.classList.toggle('active', v.id === `view-${name}`));
   $$('.nav-item').forEach(v => v.classList.toggle('active', v.dataset.view === name));
-  $('#viewTitle').textContent = titles[name];
-  $('#viewSubtitle').textContent = subtitles[name] || '';
+  $('#viewTitle').textContent = view.title;
+  $('#viewSubtitle').textContent = view.subtitle || '';
   if(name !== 'recording-detail') {
     stopLiveFeedPolling();
     selectedRecordingId = null;
   }
-  if(name === 'people') renderPeople();
-  if(name === 'memory') loadMemory();
-  if(name === 'settings') loadSettingsView();
+  if(view.onShow) Promise.resolve(view.onShow($(`#view-${name}`))).catch(error => toast(error.message, true));
 }
 
 async function renderPeople(){
@@ -72,7 +88,7 @@ async function renderPeople(){
       <span>${p.recordings_count || 0} recording${p.recordings_count === 1 ? '' : 's'}</span>
       <span>›</span>
     </div>
-  `).join('') : '<p class="muted">No one identified yet — names appear here the first time you confirm a speaker on a recording.</p>';
+  `).join('') : '<p class="muted">No people yet. Add someone above, or confirm a speaker on a recording.</p>';
 }
 
 async function openPerson(id){
@@ -134,8 +150,38 @@ async function load(){
   }
 }
 
+// Set by New note (new-note.js): the next jump to the live Recording also
+// puts the cursor in its Notepad.
+let focusNotepadOnLiveOpen = false;
+
 async function jumpToLiveRecording(){
   await load();
-  const live = (data?.recordings || []).find(r => r.analysis_stage === 'recording');
-  if (live) openInRecordings(live.id);
+  const recordings = data?.recordings || [];
+  const live = recordings.find(r => r.analysis_stage === 'recording') || recordings.find(r => r.analysis_stage === 'paused');
+  const focusNotepad = focusNotepadOnLiveOpen;
+  focusNotepadOnLiveOpen = false;
+  if (!live) return;
+  await openInRecordings(live.id);
+  if (focusNotepad) $('#notepadNotes')?.focus();
 }
+
+
+$('#createPersonForm')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const name = $('#createPersonName').value.trim();
+  const feedback = $('#createPersonFeedback');
+  if(!name){ feedback.textContent = 'Enter a name.'; return; }
+  const button = $('#createPersonBtn');
+  button.disabled = true;
+  feedback.textContent = 'Saving…';
+  try{
+    const result = await api('/api/people/create', {method:'POST', body:JSON.stringify({
+      name, role:$('#createPersonRole').value.trim(), organization:$('#createPersonOrganization').value.trim()
+    })});
+    track('person_added', { source: 'people_page' });
+    $('#createPersonForm').reset();
+    feedback.textContent = `Added ${result.person.name}.`;
+    await renderPeople();
+  }catch(error){ feedback.textContent = error.message; }
+  finally{ button.disabled = false; }
+});

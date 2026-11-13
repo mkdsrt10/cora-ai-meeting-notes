@@ -6,8 +6,11 @@ Module map (dependencies flow downward):
     common      timestamps, progress reporting
     audio       ffmpeg: probing, silence detection, clipping, mic/system mixing
     vocabulary  Whisper initial-prompt vocabulary, learned terms
-    llm         traced local LLM generation, transcript chunking
-    transcribe  MLX Whisper in pause-bounded chunks
+    text_model  the Text model: every text-generation call (local MLX or hosted)
+    transcriber the Transcriber: every speech-to-text call (MLX Whisper, Gemini, OpenAI-compatible)
+    llm         usage stats, transcript chunking for the text passes
+    transcribe  MLX Whisper in pause-bounded chunks (the Transcriber's local engine)
+    windowed    hosted engines' window ladder: retry, split, validate (asr_validate)
     speakers    Accessibility timeline, mic/system tracks, roster, LLM naming
     notes       enhanced notes and summary variants
     runner      process_recording_local(): the end-to-end orchestration

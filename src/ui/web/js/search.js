@@ -133,6 +133,7 @@ function setupTranscriptSearch() {
   });
 
   input.addEventListener('input', () => {
+    trackActionSettled('search', input.value);
     performSearch(input.value.trim());
   });
 

@@ -1,2 +1,3 @@
-"""Route modules; importing this package registers every endpoint with api.router."""
-from api.routes import capture, cloud, coaching, logs, media, people, recordings, settings, system  # noqa: F401
+"""Route modules; importing this package registers every endpoint with api.router.
+Plugin routes are served through api/routes/plugins.py (see plugin_host)."""
+from api.routes import beta, capture, cloud, logs, media, people, plugins, recordings, settings, system  # noqa: F401

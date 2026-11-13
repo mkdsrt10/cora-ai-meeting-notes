@@ -22,7 +22,7 @@ from pathlib import Path
 # fail on the exact same bare "ffmpeg" lookup for the exact same reason).
 for _brew_bin in ("/opt/homebrew/bin", "/usr/local/bin"):
     if _brew_bin not in os.environ.get("PATH", "").split(os.pathsep):
-        os.environ["PATH"] = _brew_bin + os.pathsep + os.environ.get("PATH", "")
+        os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + _brew_bin
 
 import sys
 
@@ -38,11 +38,14 @@ COMMAND = [
     str(paths.venv_python()),
     str(paths.PYTHON_DIR / "voice_memo_pipeline.py"),
     "--once",
+    # e.g. --recording-id <id> from the Processing queue; the exit code is
+    # passed back so the queue can retry or report.
+    *sys.argv[1:],
 ]
 
 stamp = dt.datetime.now().astimezone().isoformat()
 with LOG.open("a") as stdout, ERR.open("a") as stderr:
-    stdout.write(f"\n[{stamp}] cron scan\n")
+    stdout.write(f"\n[{stamp}] cron scan {' '.join(sys.argv[1:])}\n")
     stdout.flush()
     result = subprocess.run(COMMAND, cwd=ROOT, stdout=stdout, stderr=stderr, timeout=900)
 

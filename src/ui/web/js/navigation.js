@@ -4,20 +4,13 @@
 function renderStorage(){ $('#storageFree').textContent=fmtBytes(data.storage.disk_free_bytes); $('#archiveSize').textContent=fmtBytes(data.storage.archive_bytes); $('#audioSize').textContent=fmtBytes(data.storage.recordings_bytes); $('#storageDays').textContent=`${data.storage.estimated_days_at_four_hours} days`; }
 
 addEventListener('click', async event=>{
-  const seek=event.target.closest('[data-seek]'); if(seek){
-    const dashboard=seek.closest('.delivery-dashboard'), player=dashboard?.querySelector('.delivery-audio'), detail=dashboard?.querySelector('.delivery-event-detail');
-    if(player){player.currentTime=Number(seek.dataset.seek)||0;player.play().catch(()=>{});}
-    if(detail){
-      const source=seek.dataset.alternativeSource==='gemini_coaching'?'Recommended phrasing':'Tighter alternative';
-      detail.innerHTML=`<span class="kicker">${esc((seek.dataset.eventType||'moment').replaceAll('_',' '))} · ${fmtDuration(seek.dataset.seek)}</span><h4>${esc(seek.dataset.excerpt||'Delivery evidence')}</h4><p>${esc(seek.dataset.explanation||'Listen to this moment in context.')}</p><div class="event-alternative"><b>${source}</b><p>${esc(seek.dataset.alternative||'No rewrite is required for this moment.')}</p></div>`;
-    }
-    return;
-  }
   const copyPath=event.target.closest('[data-copy-path]'); if(copyPath){try{await copyText(copyPath.dataset.copyPath);toast('Recording folder path copied.');}catch(error){toast(error.message,true);}return;}
   const openFolder=event.target.closest('[data-open-recording-folder]'); if(openFolder){try{await api('/api/open-recording-folder',{method:'POST',body:JSON.stringify({id:openFolder.dataset.openRecordingFolder})});}catch(error){toast(error.message,true);}return;}
-  const view=event.target.closest('[data-view]'); if(view){event.preventDefault();showView(view.dataset.view);return;}
-  const open=event.target.closest('[data-open-id]'); if(open){openInRecordings(open.dataset.openId);return;}
-  const openPersonEl=event.target.closest('[data-open-person]'); if(openPersonEl){openPerson(openPersonEl.dataset.openPerson);return;}
+  // Before [data-open-id]: Retry sits inside a row that opens the meeting.
+  const retry=event.target.closest('[data-retry-processing]'); if(retry){trackAction('retry');retryProcessing(retry.dataset.retryProcessing,retry);return;}
+  const view=event.target.closest('[data-view]'); if(view){event.preventDefault();trackAction(view.dataset.view==='settings'?'open_settings':'switch_view');showView(view.dataset.view);return;}
+  const open=event.target.closest('[data-open-id]'); if(open){trackAction('open_recording');openInRecordings(open.dataset.openId);return;}
+  const openPersonEl=event.target.closest('[data-open-person]'); if(openPersonEl){trackAction('open_person');openPerson(openPersonEl.dataset.openPerson);return;}
   const savePerson=event.target.closest('[data-save-person]'); if(savePerson){
     const panel=savePerson.closest('.panel'), field=name=>panel.querySelector(`[data-person-field="${name}"]`).value.trim();
     try{
@@ -51,21 +44,28 @@ addEventListener('click', async event=>{
     return;
   }
 });
-$('#backToRecordings')?.addEventListener('click', () => showView('recordings'));
-$('#backToPeople')?.addEventListener('click', () => showView('people'));
-$('#sessionSearch').addEventListener('input',renderSessions);
-$('#stageFilter').addEventListener('change',renderSessions);
-$('#meetingTypeFilter')?.addEventListener('change',renderSessions);
-$('#personFilter')?.addEventListener('change',renderSessions);
-$('#dateFromFilter')?.addEventListener('change',renderSessions);
-$('#dateToFilter')?.addEventListener('change',renderSessions);
+// Effort / Active time (usage.js): the user-initiated paths above and below
+// count the action; showView/openPerson themselves do not, since code calls
+// them too (after a save, jumping to the live Recording).
+$('#backToRecordings')?.addEventListener('click', () => { trackAction('switch_view'); showView('recordings'); });
+$('#backToPeople')?.addEventListener('click', () => { trackAction('switch_view'); showView('people'); });
+$('#sessionSearch').addEventListener('input', e => { trackActionSettled('search', e?.target?.value); renderSessions(); });
+const filterChanged = () => { trackAction('filter'); renderSessions(); };
+$('#stageFilter').addEventListener('change',filterChanged);
+$('#meetingTypeFilter')?.addEventListener('change',filterChanged);
+$('#personFilter')?.addEventListener('change',filterChanged);
+$('#dateFromFilter')?.addEventListener('change',filterChanged);
+$('#dateToFilter')?.addEventListener('change',filterChanged);
 $('#folderFilterSelect')?.addEventListener('change', e => {
+  trackAction('filter');
   activeFolderFilter = e.target.value;
   $$('[data-folder-filter]').forEach(b => b.classList.toggle('active', b.dataset.folderFilter === activeFolderFilter));
   renderSessions();
 });
 addEventListener('keydown', event => {
   if(event.key !== 'Enter' && event.key !== ' ') return;
+  // A focused Retry button activates itself, not the row around it.
+  if(event.target.closest('[data-retry-processing]')) return;
   const target = event.target.closest('[role="button"][tabindex="0"]');
   if(!target) return;
   event.preventDefault();

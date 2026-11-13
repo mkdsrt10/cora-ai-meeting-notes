@@ -20,7 +20,7 @@
       <h2>Welcome to Cora</h2>
       <p class="muted">Cora records your meetings, transcribes and structures them, and separates speakers — 100% locally by default, using MLX Whisper and a local Liquid model on your own Mac. No account, no API key required.</p>
       <ul class="onboarding-feature-list">
-        <li><strong>Local transcription &amp; summaries</strong> — nothing leaves your Mac unless you turn on the optional cloud coaching plugin later.</li>
+        <li><strong>Local transcription &amp; summaries</strong> — nothing leaves your Mac unless you choose cloud processing or cloud coaching.</li>
         <li><strong>Auto meeting detection</strong> — Zoom, Google Meet, Teams, Slack Huddles.</li>
         <li><strong>Live notepad</strong> alongside the transcript and summary for every meeting.</li>
         <li><strong>Screenshot capture with local OCR</strong> so on-screen text is searchable too.</li>
@@ -155,6 +155,14 @@
         <span id="permMicStatus" class="stage-pill">Checking…</span>
         <button class="button secondary" id="permMicBtn">Grant</button>
       </div>
+      <div class="settings-field onboarding-microphone" id="onboardingMicrophoneField" hidden>
+        <label for="onboardingMicrophone">Record with</label>
+        <div class="microphone-picker">
+          <select id="onboardingMicrophone"><option value="">System default</option></select>
+          <button class="button secondary small" id="onboardingMicrophoneRefresh" type="button" title="List microphones again, e.g. after plugging one in">Refresh</button>
+        </div>
+        <small class="muted">Optional. System default follows the input chosen in macOS. You can change this later in Settings → Recording.</small>
+      </div>
       <div class="permission-row">
         <div><strong>Screen Recording</strong><small class="muted">Required by macOS to capture system audio (what others say).</small></div>
         <span id="permScreenStatus" class="stage-pill">Checking…</span>
@@ -165,6 +173,7 @@
         <span id="permAccessibilityStatus" class="stage-pill">Checking…</span>
         <button class="button secondary" id="permAccessibilityBtn">Open Settings</button>
       </div>
+      <p class="muted detect-hint" data-detect-hint hidden></p>
       <div class="onboarding-actions">
         <button class="button secondary" data-onboarding-back>Back</button>
         <button class="button secondary" id="permRecheckBtn">Check again</button>
@@ -175,9 +184,12 @@
     <section class="onboarding-step" data-step="models" hidden>
       <span class="kicker">STEP 5 OF 5</span>
       <h2>Models &amp; privacy</h2>
-      <p class="muted">Models download automatically the first time you process a recording if not already cached — nothing to wait for now.</p>
-      <div id="onboardingWhisperOptions" class="onboarding-checklist"></div>
-      <div id="onboardingLiquidOptions" class="onboarding-checklist" style="margin-top:12px"></div>
+      <div id="onboardingProcessing" class="processing-controls"></div>
+      <div id="onboardingLocalModels" hidden>
+        <p class="muted">Models download automatically the first time you process a recording if not already cached — nothing to wait for now.</p>
+        <div id="onboardingWhisperOptions" class="onboarding-checklist"></div>
+        <div id="onboardingLiquidOptions" class="onboarding-checklist" style="margin-top:12px"></div>
+      </div>
       <div class="permission-row" style="margin-top:16px">
         <div><strong>Keep source audio after processing</strong><small class="muted">Off deletes the recording once its transcript and summary are ready — you keep the notes, not the audio. This also removes playback/seek for that meeting.</small></div>
         <label class="switch"><input type="checkbox" id="onboardingRetainAudio" checked><span class="slider"></span></label>
@@ -190,9 +202,29 @@
   </div>
 </div>
 
+<div class="tour-overlay" id="tourOverlay" role="dialog" aria-modal="true" aria-labelledby="tourTitle" hidden>
+  <div class="tour-card">
+    <div class="tour-image-wrap"><img id="tourImage" alt=""></div>
+    <div class="tour-copy">
+      <div class="tour-step" id="tourStep"></div>
+      <h2 id="tourTitle"></h2>
+      <p id="tourBody"></p>
+    </div>
+    <div class="tour-actions">
+      <button class="button" id="tourSkip" type="button">Skip</button>
+      <div class="tour-dots" id="tourDots" aria-hidden="true"></div>
+      <div class="tour-nav">
+        <button class="button" id="tourBack" type="button" hidden>Back</button>
+        <button class="button primary" id="tourNext" type="button">Next</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="app-shell">
   <aside class="sidebar">
     <a class="brand" href="#" data-view="recordings" aria-label="Cora home"><span class="brand-mark"><span data-icon="mic" data-size="18"></span></span><span><strong>Cora</strong></span><span class="local-badge">LOCAL</span></a>
+    <button class="new-note-btn" id="newNoteBtn" type="button" title="Start recording and take notes (⌘N)"><span data-icon="mic" data-size="16"></span><span id="newNoteLabel">New note</span></button>
     <nav>
       <button class="nav-item active" data-view="recordings"><span data-icon="calendar" data-size="16"></span>Home</button>
       <button class="nav-item" data-view="people"><span data-icon="person" data-size="16"></span>People</button>
@@ -219,10 +251,20 @@
   </aside>
 
   <main>
+    <div class="update-banner" id="updateBanner" role="status" hidden>
+      <div class="update-banner-copy">
+        <strong id="updateBannerText"></strong>
+        <span class="update-banner-reason" id="updateBannerReason"></span>
+        <span class="update-banner-error" id="updateBannerError"></span>
+      </div>
+      <div class="update-banner-actions">
+        <button class="button secondary" id="updateLaterBtn">Later</button>
+        <button class="button primary" id="updateNowBtn">Update</button>
+      </div>
+    </div>
     <header class="topbar">
       <div><h1 id="viewTitle">Home</h1><p id="viewSubtitle" class="view-subtitle">Click a recording to view its analysis.</p></div>
       <div class="top-actions">
-        <button class="button secondary small" id="topbarSyncVmBtn" hidden title="Developer tool: sync meetings, transcripts &amp; datasets to the VM configured in settings (vm_sync_host / vm_sync_dir)">☁️ Sync to VM</button>
         <div id="recordingStatusBanner" style="display: none; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;"></div>
       </div>
     </header>
@@ -231,7 +273,7 @@
       <div class="filters-bar">
         <input id="sessionSearch" class="filters-search" type="search" placeholder="Search sessions & summaries…">
         <select id="folderFilterSelect" title="Folder"><option value="">All folders</option></select>
-        <select id="stageFilter" title="Stage"><option value="">All stages</option><option value="needs_diarization">Needs diarization</option><option value="needs_speaker_confirmation">Needs my identity</option><option value="ready_for_coaching">Ready to coach</option><option value="coached">Coached</option></select>
+        <select id="stageFilter" title="Stage"><option value="">All stages</option></select>
         <select id="meetingTypeFilter" title="Meeting type"><option value="">All meeting types</option></select>
         <select id="personFilter" title="Person"><option value="">Anyone</option></select>
         <span class="filters-date-range">
@@ -250,6 +292,14 @@
         <div class="breadcrumb-title-container">
           <span id="detailTitle" class="breadcrumb-current" title="Click to rename meeting">...</span>
           <button class="title-edit-btn" id="editTitleBtn" title="Rename meeting">✏️</button>
+          <button class="title-edit-btn" id="copyRecordingIdBtn" title="Copy recording ID">ID</button>
+          <span class="export-menu-wrap" id="exportMenuWrap">
+            <button class="title-edit-btn" id="exportRecordingBtn" title="Export as Markdown" aria-haspopup="menu" aria-expanded="false">Export</button>
+            <div class="export-menu" id="exportMenu" role="menu" hidden>
+              <button role="menuitem" data-export="notes">Notes (.md)</button>
+              <button role="menuitem" data-export="notes_transcript" id="exportWithTranscript">Notes + transcript (.md)</button>
+            </div>
+          </span>
           <input type="text" class="title-edit-input" id="editTitleInput" style="display:none" placeholder="Meeting title">
         </div>
       </div>
@@ -272,6 +322,7 @@
               <div class="audio-level-meter">
                 <span class="audio-level-label">You</span>
                 <div class="audio-level-track"><div class="audio-level-fill" id="audioLevelMic"></div></div>
+                <span class="audio-level-device" id="audioLevelMicDevice" hidden></span>
               </div>
               <div class="audio-level-meter">
                 <span class="audio-level-label">System</span>
@@ -285,6 +336,9 @@
         </div>
 
         <div id="notepadContinuationBanner" class="notepad-continuation-banner" style="display:none"></div>
+        <div id="notepadFailureBanner" class="notepad-continuation-banner failure-notice" role="alert" style="display:none"></div>
+        <div id="notepadEnginesBanner" class="notepad-continuation-banner" style="display:none"></div>
+        <div id="notepadAudioNotice" class="notepad-continuation-banner" style="display:none"></div>
 
         <div class="key-phrase-row" id="notepadKeyPhrases" title="Terms Cora biases transcription toward — add names, jargon, or product names it should spell correctly">
           <span class="key-phrase-label">Key phrases</span>
@@ -307,8 +361,42 @@
           <button class="notepad-tab" data-notepad-tab="participants">Participants</button>
           <button class="notepad-tab" data-notepad-tab="timeline">Meeting Timeline</button>
           <button class="notepad-tab" data-notepad-tab="transcript">Clean Transcript</button>
+          <button class="notepad-tab" data-notepad-tab="processing">Processing</button>
         </div>
         <div class="notepad-panel" data-notepad-panel="notes">
+          <div class="feedback-widget" id="feedbackWidget" hidden>
+            <div id="feedbackForm">
+              <div class="feedback-row">
+                <span class="feedback-label">Rate</span>
+                <div class="segmented" role="group" aria-label="What you are rating">
+                  <button type="button" class="segmented-btn" data-feedback-target="recording">Recording</button>
+                  <button type="button" class="segmented-btn" data-feedback-target="notes">Notes</button>
+                  <button type="button" class="segmented-btn" data-feedback-target="overall">Overall</button>
+                </div>
+                <button type="button" class="feedback-thumb" data-feedback-rating="up" title="Good" aria-label="Thumbs up">👍</button>
+                <button type="button" class="feedback-thumb" data-feedback-rating="down" title="Needs work" aria-label="Thumbs down">👎</button>
+              </div>
+              <div id="feedbackDetails" class="feedback-details" hidden>
+                <div class="feedback-chips">
+                  <button type="button" class="feedback-chip" data-feedback-reason="missed_items">Missed items</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="wrong_items">Wrong items</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="wrong_speakers">Wrong speakers</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="too_long">Too long</button>
+                  <button type="button" class="feedback-chip" data-feedback-reason="other">Other</button>
+                </div>
+                <textarea id="feedbackComment" maxlength="500" rows="2" placeholder="Optional comment for the Cora team"></textarea>
+                <div class="feedback-foot">
+                  <small class="muted">Please don't include customer names</small>
+                  <span class="muted feedback-count" id="feedbackCount">0/500</span>
+                  <button type="button" class="button small" id="feedbackSubmit" disabled>Send</button>
+                </div>
+              </div>
+            </div>
+            <div id="feedbackRated" class="feedback-row" hidden>
+              <span class="feedback-label">Rated</span>
+              <button type="button" class="button secondary small" id="feedbackRateAgain">Rate again</button>
+            </div>
+          </div>
           <div id="notepadProcessingStatus" class="notepad-processing-status" style="display:none"></div>
           <div class="notepad-notes-toggle" id="notepadNotesToggle" style="display:none">
             <button type="button" class="notes-toggle-btn active" data-notes-view="enhanced">Enhanced Notes</button>
@@ -317,6 +405,10 @@
           <div id="notepadEnhancedNotes" class="notepad-readonly" style="display:none"></div>
           <textarea id="notepadNotes" placeholder="Type notes during or after the meeting — saved automatically, and used to sharpen Cora's memory of names and terms."></textarea>
           <div class="notepad-status" id="notepadSaveStatus"></div>
+        </div>
+        <div class="notepad-panel" data-notepad-panel="processing" hidden>
+          <div class="processing-history-header"><div><h3>Processing history</h3><p class="muted">Model calls and measured usage, grouped by run. Logs stay on this Mac.</p></div><button type="button" class="button secondary small" id="refreshProcessingHistory">Refresh</button></div>
+          <div id="processingHistory" aria-live="polite"></div>
         </div>
         <div class="notepad-panel" data-notepad-panel="participants" hidden>
           <div id="notepadParticipants" class="notepad-readonly">Participants appear here as soon as Cora detects who's in the meeting.</div>
@@ -343,6 +435,15 @@
     </section>
 
     <section class="view" id="view-people">
+      <form id="createPersonForm" class="panel" style="margin-bottom:20px">
+        <h3>Add a person</h3>
+        <div class="speaker-fields">
+          <input id="createPersonName" name="name" placeholder="Name" aria-label="Person name" required maxlength="200">
+          <input id="createPersonRole" name="role" placeholder="Role (optional)" aria-label="Role">
+          <input id="createPersonOrganization" name="organization" placeholder="Organization (optional)" aria-label="Organization">
+        </div>
+        <div class="workflow-actions" style="margin-top:12px"><button type="submit" class="button primary" id="createPersonBtn">Add person</button><span id="createPersonFeedback" role="status" aria-live="polite"></span></div>
+      </form>
       <div id="peopleList" style="display:flex; flex-direction:column; gap:12px"></div>
     </section>
 
@@ -369,11 +470,13 @@
         <div class="settings-nav">
           <button class="settings-nav-item active" data-settings-panel="profile">Profile</button>
           <button class="settings-nav-item" data-settings-panel="preferences">Preferences</button>
+          <button class="settings-nav-item" data-settings-panel="recording">Recording</button>
           <button class="settings-nav-item" data-settings-panel="meeting-types">Meeting types</button>
-          <button class="settings-nav-item" data-settings-panel="models">On-Device Models</button>
-          <button class="settings-nav-item" data-settings-panel="cloud-models">Cloud LLMs &amp; APIs</button>
+          <button class="settings-nav-item" data-settings-panel="models">Processing &amp; models</button>
+          <button class="settings-nav-item" data-settings-panel="cloud-models">Where models run</button>
           <button class="settings-nav-item" data-settings-panel="mcp">Claude / ChatGPT (MCP)</button>
           <button class="settings-nav-item" data-settings-panel="privacy">Data &amp; privacy</button>
+          <button class="settings-nav-item" data-settings-panel="beta">Beta</button>
           <button class="settings-nav-item" data-settings-panel="logs">Notifications &amp; logs</button>
         </div>
         <div class="settings-content">
@@ -393,6 +496,26 @@
               <div><strong>Keep source audio after processing</strong><small>Off deletes the recording once its transcript and summary are ready — this also removes playback/seek for that meeting.</small></div>
               <label class="switch"><input type="checkbox" id="settingsRetainAudio" checked><span class="slider"></span></label>
             </div>
+            <div class="settings-row" id="settingsOpenAtLoginRow">
+              <div><strong>Open Cora at login</strong><small>Cora starts in the menu bar when you log in, so it can offer to record calls. Closing the window or ⌘Q keeps it there; quit from the menu bar icon.</small></div>
+              <label class="switch"><input type="checkbox" id="settingsOpenAtLogin"><span class="slider"></span></label>
+            </div>
+            <div class="settings-row">
+              <div><strong>Cora tour</strong><small>A quick look at the main features: New note, call prompts, your notes and the beta settings.</small></div>
+              <button class="button" id="settingsTakeTour" type="button">Take the tour</button>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-settings-content="recording" hidden>
+            <h1 class="settings-title">Recording</h1>
+            <p class="settings-sub">Which microphone records your side of the call. System default follows the input chosen in macOS when each recording starts.</p>
+            <div class="settings-field">
+              <label for="settingsMicrophone">Microphone</label>
+              <div class="microphone-picker">
+                <select id="settingsMicrophone"><option value="">System default</option></select>
+                <button class="button secondary small" id="settingsMicrophoneRefresh" type="button" title="List microphones again, e.g. after plugging one in">Refresh</button>
+              </div>
+            </div>
           </div>
 
           <div class="settings-panel" data-settings-content="meeting-types" hidden>
@@ -403,100 +526,55 @@
           </div>
 
           <div class="settings-panel" data-settings-content="models" hidden>
-            <h1 class="settings-title">On-Device Models</h1>
-            <p class="settings-sub">Pick a local model for each job. Everything downloads once and runs on-device — swap any of these anytime without losing past notes.</p>
-            <div class="settings-field" style="margin-bottom:16px">
-              <label for="settingsAsrEngine">Transcription engine</label>
-              <select id="settingsAsrEngine" class="recording-select">
-                <option value="local">On this Mac (private — default)</option>
-                <option value="gemini">Google Gemini (cloud — audio leaves your Mac)</option>
-              </select>
-              <small class="muted" id="settingsAsrEngineNote">Cloud transcription uses the Google credentials from "Cloud LLMs &amp; APIs" and is unavailable under enterprise lockdown.</small>
-            </div>
+            <h1 class="settings-title">Processing &amp; models</h1>
+            <p class="settings-sub">Choose the processing defaults used after recording stops, and configure local models. You can override these choices for any manual run.</p>
+            <div id="settingsProcessing" class="processing-controls"></div>
             <div id="settingsModelRows" class="settings-model-rows"></div>
           </div>
 
           <div class="settings-panel" data-settings-content="cloud-models" hidden>
-            <h1 class="settings-title">Cloud LLMs &amp; APIs</h1>
-            <p class="settings-sub">Connect your own Anthropic Claude, OpenAI ChatGPT, or Google Gemini keys to generate frontier-grade executive notes, action items, and coaching.</p>
-            
-            <div class="auth-tabs" style="margin-top:14px">
-              <button type="button" class="auth-tab active" id="settingsTabAnthropic">Anthropic Claude</button>
-              <button type="button" class="auth-tab" id="settingsTabOpenAI">OpenAI</button>
-              <button type="button" class="auth-tab" id="settingsTabGemini">Google Gemini</button>
-              <button type="button" class="auth-tab" id="settingsTabCustom">Custom / Ollama</button>
+            <h1 class="settings-title">Where models run</h1>
+            <p class="settings-sub">Local (Ollama, LM Studio, on-device) keeps meetings on your Mac. Hosted providers receive the transcript.</p>
+
+            <h2 class="settings-section-title">Bring your own key</h2>
+            <div class="auth-tabs byom-tabs" id="byomPresetTabs"></div>
+            <p class="muted" id="byomPresetNote"></p>
+
+            <div class="settings-field" id="byomBaseUrlField">
+              <label for="byomBaseUrl">Base URL</label>
+              <input type="text" id="byomBaseUrl" class="auth-input" spellcheck="false" autocomplete="off">
+            </div>
+            <label class="byom-advanced" id="byomAdvancedField"><input type="checkbox" id="byomAdvanced"> Change base URL</label>
+
+            <div class="settings-field" id="byomKeyField">
+              <label for="byomKey"><span id="byomKeyLabel">API key</span> <span class="badge" id="byomKeySaved" hidden>Saved</span></label>
+              <input type="password" id="byomKey" class="auth-input" autocomplete="off" spellcheck="false">
             </div>
 
-            <!-- Anthropic Form -->
-            <div id="settingsAnthropicForm" style="margin-top:12px">
-              <div class="settings-field">
-                <label for="settingsAnthropicKey">Anthropic API Key</label>
-                <input type="password" id="settingsAnthropicKey" class="auth-input" placeholder="sk-ant-api03-…">
+            <div class="settings-field">
+              <label for="byomModel">Model</label>
+              <div class="byom-model-row">
+                <input type="text" id="byomModel" class="auth-input" list="byomModelList" spellcheck="false" autocomplete="off">
+                <button class="button secondary small" id="byomLoadModels" type="button">Load models</button>
               </div>
-              <div class="settings-field">
-                <label for="settingsAnthropicModel">Model</label>
-                <select id="settingsAnthropicModel" class="recording-select">
-                  <option value="claude-3-7-sonnet-20250219">Claude 3.7 Sonnet (Recommended for Executive Reasoning)</option>
-                  <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                  <option value="claude-3-5-haiku-20241022">Claude 3.5 Haiku (Fast)</option>
-                </select>
-              </div>
+              <datalist id="byomModelList"></datalist>
             </div>
 
-            <!-- OpenAI Form -->
-            <div id="settingsOpenAIForm" style="display:none;margin-top:12px">
-              <div class="settings-field">
-                <label for="settingsOpenAIKey">OpenAI API Key</label>
-                <input type="password" id="settingsOpenAIKey" class="auth-input" placeholder="sk-proj-…">
-              </div>
-              <div class="settings-field">
-                <label for="settingsOpenAIModel">Model</label>
-                <select id="settingsOpenAIModel" class="recording-select">
-                  <option value="gpt-4o">GPT-4o (Recommended)</option>
-                  <option value="gpt-4o-mini">GPT-4o mini (Fast)</option>
-                  <option value="o3-mini">o3-mini (Reasoning)</option>
-                </select>
-              </div>
+            <div class="settings-field" id="byomAsrField">
+              <label for="byomAsrModel">Transcription model (optional)</label>
+              <input type="text" id="byomAsrModel" class="auth-input" spellcheck="false" autocomplete="off">
             </div>
 
-            <!-- Gemini Form -->
-            <div id="settingsGeminiForm" style="display:none;margin-top:12px">
-              <div class="settings-field">
-                <label for="settingsGeminiKey">Gemini AI Studio Key</label>
-                <input type="password" id="settingsGeminiKey" class="auth-input" placeholder="AIzaSy…">
-              </div>
-              <div class="settings-field">
-                <label for="settingsGeminiModel">Model</label>
-                <select id="settingsGeminiModel" class="recording-select">
-                  <option value="gemini-3.8-flash">Gemini 3.8 Flash (Recommended)</option>
-                  <option value="gemini-3.7-flash">Gemini 3.7 Flash</option>
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                </select>
-              </div>
+            <div id="byomVertexField" hidden>
+              <button class="button secondary small" id="byomOpenVertex" type="button">Use Google Cloud (Vertex AI) instead</button>
             </div>
 
-            <!-- Custom Form -->
-            <div id="settingsCustomForm" style="display:none;margin-top:12px">
-              <div class="settings-field">
-                <label for="settingsCustomUrl">API Base URL</label>
-                <input type="text" id="settingsCustomUrl" class="auth-input" placeholder="http://localhost:11434/v1">
-              </div>
-              <div class="settings-field">
-                <label for="settingsCustomKey">API Key (Optional)</label>
-                <input type="password" id="settingsCustomKey" class="auth-input" placeholder="Leave blank for local Ollama">
-              </div>
-              <div class="settings-field">
-                <label for="settingsCustomModel">Model Name</label>
-                <input type="text" id="settingsCustomModel" class="auth-input" placeholder="e.g. llama3, qwen2.5, deepseek-r1">
-              </div>
-            </div>
-
-            <p class="onboarding-error" id="settingsCredError" style="display:none;margin-top:8px"></p>
-            <p class="onboarding-success" id="settingsCredSuccess" style="display:none;margin-top:8px"></p>
+            <p class="onboarding-error" id="byomError" style="display:none;margin-top:8px"></p>
+            <p class="onboarding-success" id="byomSuccess" style="display:none;margin-top:8px"></p>
 
             <div style="display:flex;gap:8px;margin-top:16px">
-              <button class="button secondary" id="settingsCredTestBtn" type="button">Test Connection</button>
-              <button class="button primary" id="settingsCredSaveBtn" type="button">Save Key</button>
+              <button class="button secondary" id="byomTestBtn" type="button">Test</button>
+              <button class="button primary" id="byomSaveBtn" type="button">Save</button>
             </div>
           </div>
 
@@ -534,9 +612,37 @@
             <button class="button secondary" id="settingsOpenFolder">Open local data folder</button>
           </div>
 
+          <div class="settings-panel" data-settings-content="beta" hidden>
+            <h1 class="settings-title">Beta</h1>
+            <p class="settings-sub">Help the Cora team improve the beta. What is sent, where it goes, who sees it and how to stop: <a href="https://github.com/mkdsrt10/cora-ai-meeting-notes/blob/production/docs/BETA_POLICY.md" target="_blank" rel="noopener">the beta policy (docs/BETA_POLICY.md)</a>.</p>
+            <div class="settings-row">
+              <div><strong>Share usage and sample recordings with the Cora team</strong><small>Usage events, every Recording you rate, and about one in four Recordings under an hour. See <a href="https://github.com/mkdsrt10/cora-ai-meeting-notes/blob/production/docs/BETA_POLICY.md" target="_blank" rel="noopener">docs/BETA_POLICY.md</a>.</small></div>
+              <label class="switch"><input type="checkbox" id="settingsShareUsage"><span class="slider"></span></label>
+            </div>
+            <div class="settings-field"><label for="settingsBetaName">Your name for the Cora team</label><input type="text" id="settingsBetaName" maxlength="100" placeholder="Optional, e.g. Priya"></div>
+            <button class="button secondary" id="settingsShowShared" type="button" style="align-self:flex-start">Show what Cora shares</button>
+            <h4 style="margin-top:24px">Send feedback</h4>
+            <p class="muted" style="margin:4px 0 8px;">Anything not tied to one Recording: a bug, an idea, what works.</p>
+            <div class="feedback-row">
+              <button type="button" class="feedback-thumb" data-general-rating="up" title="Something good" aria-label="Thumbs up">👍</button>
+              <button type="button" class="feedback-thumb" data-general-rating="down" title="Something to fix" aria-label="Thumbs down">👎</button>
+            </div>
+            <textarea id="settingsFeedbackMessage" maxlength="500" rows="3" placeholder="Your message to the Cora team"></textarea>
+            <div class="feedback-foot">
+              <small class="muted">Please don't include customer names</small>
+              <span class="muted feedback-count" id="settingsFeedbackCount">0/500</span>
+              <button type="button" class="button small" id="settingsFeedbackSend" disabled>Send</button>
+            </div>
+            <h4 style="margin-top:24px">Audio on this Mac</h4>
+            <p class="muted" style="margin:4px 0 8px;">Older audio is removed first; transcripts and notes are kept.</p>
+            <div class="settings-field"><label for="settingsAudioRetentionDays">Keep audio for (days)</label><input type="number" id="settingsAudioRetentionDays" min="1" step="1"></div>
+            <div class="settings-field"><label for="settingsAudioCapMb">Keep at most (MB of audio)</label><input type="number" id="settingsAudioCapMb" min="50" step="50"></div>
+          </div>
+
           <div class="settings-panel" data-settings-content="logs" hidden>
             <h1 class="settings-title">Notifications &amp; logs</h1>
             <p class="settings-sub">A record of what Cora has shown you and the pipeline's own logs — useful for spotting failures after the fact, or sending to support.</p>
+            <p class="muted detect-hint" data-detect-hint hidden></p>
 
             <h4 style="margin-top:20px">Recent notifications</h4>
             <div id="notificationsList" class="settings-model-rows"><p class="muted">Loading…</p></div>
@@ -567,7 +673,7 @@
       <div>
         <span class="kicker">EXECUTIVE INTELLIGENCE</span>
         <h2>Re-summarize with AI</h2>
-        <p>Select a model to analyze the full transcript, slide OCR, and notes:</p>
+        <p>Choose a template, notes strategy and engines for this run. Defaults stay unchanged.</p>
       </div>
       <button class="modal-close" id="closeSummarizeModal" aria-label="Close">✕</button>
     </header>
@@ -577,7 +683,7 @@
 
     <div class="modal-actions" style="margin-top: 20px; justify-content: flex-end;">
       <button class="button secondary" id="cancelSummarizeModal" type="button">Cancel</button>
-      <button class="button primary" id="confirmSummarizeBtn" type="button">Generate Executive Notes</button>
+      <button class="button primary" id="confirmSummarizeBtn" type="button">Run processing</button>
     </div>
   </div>
 </div>
@@ -682,21 +788,32 @@
 <script src="/pixel-icons.js?v=cora-v4"></script>
 <!-- App scripts: classic scripts sharing one global scope; order matters (see scripts/lint-ui.js). -->
 <script src="/js/core.js"></script>
+<script src="/js/usage.js"></script>
 <script src="/js/folders.js"></script>
 <script src="/js/recording.js"></script>
 <script src="/js/sessions.js"></script>
 <script src="/js/memory.js"></script>
+<script src="/js/processing.js"></script>
 <script src="/js/settings.js"></script>
+<script src="/js/providers.js"></script>
 <script src="/js/model-setup.js"></script>
+<script src="/js/processing-history.js"></script>
 <script src="/js/notepad.js"></script>
 <script src="/js/transcript.js"></script>
 <script src="/js/detail.js"></script>
 <script src="/js/detail-actions.js"></script>
+<script src="/js/feedback.js"></script>
 <script src="/js/navigation.js"></script>
+<script src="/js/new-note.js"></script>
+<script src="/js/tour.js"></script>
 <script src="/js/credentials.js"></script>
 <script src="/js/onboarding.js"></script>
 <script src="/js/title-editor.js"></script>
 <script src="/js/search.js"></script>
+<script src="/js/plugin-host.js"></script>
+<!-- Enabled plugins' page scripts (src/ui/web/plugins/<id>.js) are loaded by plugin-host.js here, before init runs load(). -->
+<script src="/js/update-banner.js"></script>
+<script src="/js/detect-hint.js"></script>
 <script src="/js/init.js"></script>
 </body>
 </html>

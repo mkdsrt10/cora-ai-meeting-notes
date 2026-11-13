@@ -34,12 +34,21 @@ flowchart LR
 
 ## Recording → notes
 
-1. **Capture.** `mic-watch` notices a meeting app using the mic; `main.js` starts `dual-capture`
+1. **Call detection.** `mic-watch` reports the mic turning on and off; a 20-second poll is the
+   backstop. Both ask one detector (`src/meeting-detector.js`, wired by `src/main/call-detection.js`),
+   which runs one AppleScript per check: running meeting apps, every tab URL in Chrome, Edge, Brave
+   and Safari, Slack desktop window titles, and, for Meet and Slack tabs only, a page snapshot that
+   answers "is a Call live here?" (`{live, label}`, or null when the page cannot be asked). The
+   snapshot is `capture/live-call-snippet.js`, the same text `speaker-watch` embeds
+   (`scripts/gen-live-call-snippet.js` writes the Swift copy). Meet needs the page or falls back to
+   its URL; Slack in a browser needs the page; Zoom and Teams web go by URL. A detected Call shows a
+   notification and a `call_detected` Usage event; nothing records until the user clicks.
+2. **Capture.** On Start Recording, `main.js` starts `dual-capture`
    (mic and system audio as two tracks in one `.mov`) and `speaker-watch` (who's speaking, from the
    meeting app's Accessibility tree). Screenshots are OCR'd by `mac-ocr`.
-2. **Archive** (`voice_memo_pipeline.py`): the recording moves from `inbox/` into
+3. **Archive** (`voice_memo_pipeline.py`): the recording moves from `inbox/` into
    `recordings/<id>/` — the two-track `audio.mov` plus a mixed `playback.m4a` for the player.
-3. **Pipeline** (`pipeline/runner.py`):
+4. **Pipeline** (`pipeline/runner.py`):
    - `audio`: mix tracks for ASR, detect silence;
    - `context` + `transcribe`: pause-bounded chunks, each with a Whisper prompt built from
      attendees, nearby screenshot text, title, notes and vocabulary;
@@ -47,7 +56,7 @@ flowchart LR
    - `romanize`: Devanagari → Romanized Hinglish (local LLM, validated, rule-based fallback);
    - `speaker_guess`: the local LLM names remote turns, validated against roster and evidence;
    - `notes`: enhanced notes and summaries with a local LLM (or an opt-in cloud model).
-4. **Serve.** The UI and MCP read the results; the transcript editor writes corrections back and
+5. **Serve.** The UI and MCP read the results; the transcript editor writes corrections back and
    logs them as training data.
 
 ## Boundaries worth knowing

@@ -28,6 +28,8 @@ RECORDINGS = paths.RECORDINGS_DIR
 
 import db
 import credentials
+import recording_export
+import recording_stage
 
 
 def _recording_folder(recording_id: str) -> Optional[Path]:
@@ -52,22 +54,7 @@ mcp = MCPServer(
 )
 
 
-def _resolve_speaker_name(speaker_id: str, speaker_labels: dict[str, Any], identity: dict[str, Any]) -> str:
-    """Resolve a raw speaker_1/speaker_2 ID into a human-friendly name."""
-    self_id = identity.get("speaker_id")
-    if self_id and speaker_id == self_id:
-        self_name = identity.get("identity") or db.get_setting("pending_self_name") or "You"
-        return f"{self_name} (Self)"
-
-    entry = speaker_labels.get("speakers", {}).get(speaker_id, {})
-    if entry.get("name"):
-        parts = [entry["name"]]
-        if entry.get("role"):
-            parts.append(entry["role"])
-        if entry.get("organization"):
-            parts.append(f"({entry['organization']})")
-        return " — ".join(parts)
-    return speaker_id
+_resolve_speaker_name = recording_export.speaker_name
 
 
 @mcp.tool()
@@ -135,8 +122,9 @@ def cora_list_recordings(
 
     Args:
         limit: Maximum number of recordings to return (1-100, default 20).
-        stage: Optional filter by analysis stage ('recording', 'needs_diarization',
-               'needs_speaker_confirmation', 'ready_for_coaching', 'coached').
+        stage: Optional filter by analysis stage ('recording', 'processing', 'paused',
+               'needs_diarization', 'needs_speaker_confirmation', 'ready'; with the
+               coaching plugin enabled, 'ready_for_coaching' or 'coached' instead of 'ready').
         archetype: Optional substring filter for archetype (e.g. 'Technical Steering',
                    'Strategic L10', 'Client Solutioning', 'Standup', '1:1').
         meeting_tool: Optional exact-ish filter for which app the meeting was in
@@ -163,18 +151,7 @@ def cora_list_recordings(
         meta = r.get("metadata") or {}
         labels = r.get("speaker_labels") or {}
 
-        # Determine stage
-        rec_status = r.get("status")
-        if rec_status in {"recording", "processing"}:
-            current_stage = rec_status
-        elif not diarization or not diarization.get("segments"):
-            current_stage = "needs_diarization"
-        elif not identity.get("speaker_id"):
-            current_stage = "needs_speaker_confirmation"
-        elif not coaching or not coaching.get("executive_assessment"):
-            current_stage = "ready_for_coaching"
-        else:
-            current_stage = "coached"
+        current_stage = recording_stage.stage(r)
 
         if stage and current_stage.lower() != stage.lower():
             continue

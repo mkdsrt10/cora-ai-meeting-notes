@@ -1,6 +1,7 @@
 """ffmpeg helpers: probing, silence detection, clipping and mic/system mixing."""
 from __future__ import annotations
 
+import functools
 import json
 import re
 import shutil
@@ -13,10 +14,83 @@ from .config import _config
 
 
 def probe_duration(path: Path) -> float:
+    """Duration in seconds. Raises CorruptedAudioError when ffprobe cannot
+    read the file, MissingDependencyError when ffprobe is not installed."""
+    from .errors import CorruptedAudioError, MissingDependencyError
     ffprobe = shutil.which("ffprobe") or "/opt/homebrew/bin/ffprobe"
     cmd = [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)]
-    result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-    return float(json.loads(result.stdout)["format"]["duration"])
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise MissingDependencyError("ffprobe") from None
+    except subprocess.CalledProcessError:
+        raise CorruptedAudioError() from None
+    try:
+        return float(json.loads(result.stdout)["format"]["duration"])
+    except (ValueError, KeyError, TypeError):
+        raise CorruptedAudioError() from None
+
+
+MAIN_MARGIN_DB = 10.0  # speech starts this far above the recording's noise floor
+STRICT_MARGIN_DB = 18.0  # "clearly speech", for cloud Window coverage checks
+THRESHOLD_CAP_DB = -20.0  # a threshold never sits above this, however noisy the floor
+# A measured floor above this means the recording has no quiet frames (speech
+# end to end), so the "floor" is speech itself; clamp it before the margin.
+FLOOR_CLAMP_DB = -45.0
+# A muted mic writes exact zeros (floor -inf, clamped to _SILENT_FRAME_DB); a
+# threshold that low is under one 16-bit step and silencedetect never fires.
+FLOOR_MIN_DB = -80.0
+_FRAME_S = 0.1
+_SILENT_FRAME_DB = -120.0  # digital silence reports -inf; clamp it
+# config.example.json used to ship this exact value, and every new data dir
+# copied it, so it reads as "unset" rather than a deliberate override.
+_LEGACY_EXAMPLE_THRESHOLD = "-50dB"
+
+
+def _threshold_override(key: str) -> Optional[str]:
+    """The configured threshold at key, or None when unset, empty, or the
+    legacy example default for the main detector."""
+    value = _config().get(key) or None
+    if key == "silence_threshold_db" and value == _LEGACY_EXAMPLE_THRESHOLD:
+        print(f"[Local MLX] Ignoring legacy example {key}={value!r}; using the relative threshold.", flush=True)
+        return None
+    return value
+
+
+def measure_noise_floor_db(audio_path: Path) -> float:
+    """The recording's noise floor in dBFS: the 10th percentile of RMS over
+    100 ms frames (mono-downmixed). Raises on ffmpeg failure or empty audio.
+
+    Memoized on (path, size, mtime) so the main and strict detectors on the
+    same file share one ffmpeg pass; a rewritten file is measured again."""
+    stat = Path(audio_path).stat()
+    return _measure_noise_floor_db(str(audio_path), stat.st_size, stat.st_mtime_ns)
+
+
+@functools.lru_cache(maxsize=32)
+def _measure_noise_floor_db(audio_path: str, _size: int, _mtime_ns: int) -> float:
+    ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+    rate = 16000
+    chain = (f"aresample={rate},aformat=channel_layouts=mono,"
+             f"asetnsamples=n={int(rate * _FRAME_S)}:p=0,astats=metadata=1:reset=1,"
+             "ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-")
+    result = subprocess.run([ffmpeg, "-nostats", "-loglevel", "error", "-i", str(audio_path),
+                             "-af", chain, "-f", "null", "-"],
+                            check=True, capture_output=True, text=True)
+    levels = sorted(
+        max(_SILENT_FRAME_DB, float(v)) if v not in ("-inf", "nan") else _SILENT_FRAME_DB
+        for v in re.findall(r"RMS_level=(\S+)", result.stdout)
+    )
+    if not levels:
+        raise ValueError(f"no audio frames in {audio_path}")
+    return levels[int(0.1 * (len(levels) - 1))]
+
+
+def relative_threshold_db(floor: float, margin_db: float, cap_db: float = THRESHOLD_CAP_DB) -> str:
+    """silencedetect threshold `floor + margin`, the floor bounded to
+    [FLOOR_MIN_DB, FLOOR_CLAMP_DB], never above cap_db, e.g. "-35dB"."""
+    floor = min(max(floor, FLOOR_MIN_DB), FLOOR_CLAMP_DB)
+    return f"{min(floor + margin_db, cap_db):.0f}dB"
 
 
 def find_speech_segments(
@@ -25,11 +99,18 @@ def find_speech_segments(
     min_gap: Optional[float] = None,
     pad: float = 0.3,
     min_speech: float = 0.5,
+    margin_db: Optional[float] = None,
+    override_key: str = "silence_threshold_db",
 ) -> list[tuple[float, float]]:
-    noise_db = noise_db or str(_config().get("silence_threshold_db", "-50dB"))
-    min_gap = min_gap if min_gap is not None else float(_config().get("silence_min_gap_seconds", 1.2))
     """Detect the non-silent stretches of a recording so Whisper only ever sees
-    speech, never dead air. Timestamps stay anchored to the ORIGINAL file —
+    speech, never dead air.
+
+    Threshold, first that applies: an explicit noise_db; the config value at
+    override_key (`silence_threshold_db` for the main detector,
+    `strict_silence_threshold_db` for the strict one; empty, or the legacy
+    example value "-50dB" for the main key, counts as unset); else the recording's
+    noise floor + margin_db (MAIN_MARGIN_DB by default), capped at
+    THRESHOLD_CAP_DB. Timestamps stay anchored to the ORIGINAL file —
     unlike trimming the whole file up front, each stretch is transcribed
     separately and its segments are shifted back by that stretch's start time,
     so AX-speaker matching, screenshot correlation, and click-to-seek in the
@@ -38,9 +119,12 @@ def find_speech_segments(
     Falls back to "the whole file is one speech segment" on any ffmpeg error,
     so a detection hiccup degrades to the old behavior rather than losing audio.
     """
+    min_gap = min_gap if min_gap is not None else float(_config().get("silence_min_gap_seconds", 1.2))
     ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
     try:
         duration = probe_duration(audio_path)
+        noise_db = noise_db or _threshold_override(override_key) or relative_threshold_db(
+            measure_noise_floor_db(audio_path), MAIN_MARGIN_DB if margin_db is None else margin_db)
         cmd = [
             ffmpeg, "-i", str(audio_path), "-af",
             f"silencedetect=noise={noise_db}:d={min_gap}",
@@ -92,6 +176,23 @@ def extract_clip(audio_path: Path, start: float, end: float) -> Path:
         "-ac", "1", "-ar", "16000", str(tmp_path),
     ]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return tmp_path
+
+
+def extract_clip_flac(audio_path: Path, start: float, end: float) -> Path:
+    """A window as 16 kHz mono FLAC (lossless; ~5-8 MB for 4-6 minutes, small
+    enough to send inline). The caller deletes the file."""
+    ffmpeg = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+    tmp = tempfile.NamedTemporaryFile(suffix=".flac", delete=False)
+    tmp_path = Path(tmp.name)
+    tmp.close()
+    cmd = [ffmpeg, "-y", "-ss", str(start), "-i", str(audio_path), "-t", str(max(0.05, end - start)),
+           "-ac", "1", "-ar", "16000", "-c:a", "flac", str(tmp_path)]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
     return tmp_path
 
 

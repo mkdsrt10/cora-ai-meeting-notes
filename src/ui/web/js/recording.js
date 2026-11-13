@@ -42,11 +42,7 @@ async function triggerStopRecording() {
     banner.innerHTML = '<span style="display:inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 1s linear infinite;"></span> Saving &amp; Processing...';
   }
   try {
-    if (window.electronAPI?.stopRecording) {
-      await window.electronAPI.stopRecording();
-    } else {
-      await api('/api/recording/stop', { method: 'POST' });
-    }
+    await window.electronAPI?.stopRecording?.();
   } catch(e) {
     console.error('Stop recording error:', e);
   }
@@ -74,8 +70,7 @@ if (window.electronAPI && window.electronAPI.onRecordingStateChange) {
       banner.style.color = '#b07010';
       banner.innerHTML = '<span class="recording-pulse-dot paused"></span> <span style="font-weight:700">Recording Paused</span> <button class="button secondary small" id="topbarResumeBtn" style="margin-left:8px; padding:3px 10px; font-size:11px">▶ Resume</button> <button class="button danger small" id="topbarStopBtn" style="margin-left:4px; padding:3px 10px; font-size:11px">Stop</button>';
       $('#topbarResumeBtn')?.addEventListener('click', async () => {
-        if (window.electronAPI?.resumeRecording) await window.electronAPI.resumeRecording();
-        else await api('/api/recording/resume', { method: 'POST', body: JSON.stringify({ id: selectedRecordingId }) });
+        await window.electronAPI.resumeRecording();
       });
       $('#topbarStopBtn')?.addEventListener('click', triggerStopRecording);
     } else if (state === 'processing') {
@@ -113,8 +108,7 @@ if (window.electronAPI && window.electronAPI.onRecordingStateChange) {
           banner.style.color = '#b07010';
           banner.innerHTML = '<span class="recording-pulse-dot paused"></span> <span style="font-weight:700">Recording Paused</span> <button class="button secondary small" id="topbarResumeBtn" style="margin-left:8px; padding:3px 10px; font-size:11px">▶ Resume</button> <button class="button danger small" id="topbarStopBtn" style="margin-left:4px; padding:3px 10px; font-size:11px">Stop</button>';
           $('#topbarResumeBtn')?.addEventListener('click', async () => {
-            if (window.electronAPI?.resumeRecording) await window.electronAPI.resumeRecording();
-            else await api('/api/recording/resume', { method: 'POST', body: JSON.stringify({ id: selectedRecordingId }) });
+            await window.electronAPI.resumeRecording();
           });
           $('#topbarStopBtn')?.addEventListener('click', triggerStopRecording);
         } else if (state === 'processing') {
@@ -137,6 +131,20 @@ function setAudioLevelMeter(el, db){
   const pct = Math.max(0, Math.min(100, ((db + 55) / 55) * 100));
   el.style.width = `${pct}%`;
   el.style.backgroundColor = db > -6 ? 'var(--coral)' : 'var(--violet)';
+}
+// Name of the Microphone the helper actually opened, beside the mic meter
+// (null until known and when idle). Notifications are posted by main.js.
+function showMicDevice(name){
+  const el = $('#audioLevelMicDevice');
+  if(!el) return;
+  el.textContent = name || '';
+  el.title = name ? `Recording your side with ${name}` : '';
+  el.hidden = !name;
+}
+if (window.electronAPI?.onMicDevice) {
+  let heard = false;
+  window.electronAPI.onMicDevice(name => { heard = true; showMicDevice(name); });
+  window.electronAPI.getMicDevice?.().then(name => { if (!heard) showMicDevice(name); }).catch(() => {});
 }
 if (window.electronAPI?.onAudioLevel) {
   window.electronAPI.onAudioLevel(({ mic, sys }) => {

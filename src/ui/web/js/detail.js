@@ -17,23 +17,58 @@ function stopLiveFeedPolling(){
 // tells those two apart (actively running vs genuinely just queued).
 const activeReprocess = new Set();
 const reprocessStartTimes = {};
+const activeSummaries = new Set();
+let processingStatusRequest = 0;
+
+function isSelectedMeeting(id){
+  return selectedRecordingId === id && selectedRecording()?.id === id;
+}
+
+function resetProcessingStatus(){
+  processingStatusRequest++;
+  const host = $('#notepadProcessingStatus');
+  if(host){
+    host.style.display = 'none';
+    host.innerHTML = '';
+    host.classList.remove('stalled');
+  }
+  const record = selectedRecording()?.id === selectedRecordingId ? selectedRecording() : null;
+  const reprocess = $('#notepadReprocessBtn');
+  if(reprocess){
+    reprocess.disabled = !!record && activeReprocess.has(record.id);
+    reprocess.textContent = reprocess.disabled ? '🔁 Initializing pipeline…' : '🔁 Retranscribe & Re-summarize';
+    if(record?.audio_pruned) reprocess.disabled = true;
+  }
+  const summarize = $('#notepadAiSummarizeBtn');
+  if(summarize){
+    summarize.disabled = !!record && activeSummaries.has(record.id);
+    summarize.textContent = summarize.disabled ? '✨ Summarizing…' : '✨ Re-summarize with LLM';
+  }
+}
 
 function isLiveOrProcessing(record){
-  return !!record && (PENDING_STAGES.has(record.analysis_stage) || record.analysis_stage === 'needs_diarization' || activeReprocess.has(record.id));
+  return !!record && (PENDING_STAGES.has(record.analysis_stage) || record.analysis_stage === 'needs_diarization' || activeReprocess.has(record.id) || activeSummaries.has(record.id));
 }
 
 async function renderProcessingStatus(record){
   const host = $('#notepadProcessingStatus');
-  if(!host || !record) return;
+  if(!host || !record || !isSelectedMeeting(record.id)) return;
+  if(activeSummaries.has(record.id)){
+    host.innerHTML = '<span>Generating notes for this meeting…</span>';
+    host.style.display = 'flex';
+    return true;
+  }
   if(PENDING_STAGES.has(record.analysis_stage) && record.analysis_stage !== 'processing'){
     host.style.display = 'none';
     return;
   }
+  const request = ++processingStatusRequest;
   try{
     const progress = await api(`/api/recording/progress?id=${encodeURIComponent(record.id)}`);
+    if(!isSelectedMeeting(record.id) || request !== processingStatusRequest) return;
     if(!progress || !progress.active){
       if(!activeReprocess.has(record.id)){
-        host.style.display = 'none';
+        resetProcessingStatus();
       }
       return;
     }
@@ -71,27 +106,36 @@ async function renderProcessingStatus(record){
 
     const btn = $('#notepadReprocessBtn');
     if(btn && document.body.contains(btn)){
-      btn.disabled = true;
-      btn.textContent = `🔁 ${progress.detail || stageText} (${percent}%)`;
+      btn.disabled = progress.stage !== 'error';
+      btn.textContent = progress.stage === 'error' ? '🔁 Retranscribe & Re-summarize' : `🔁 ${progress.detail || stageText} (${percent}%)`;
     }
+    return progress.stage !== 'error';
   }catch{
+    if(!isSelectedMeeting(record.id) || request !== processingStatusRequest) return;
     if(!activeReprocess.has(record.id)){
-      host.style.display = 'none';
+      resetProcessingStatus();
     }
   }
 }
 
-function pollLiveFeedIfRecording(){
+async function pollLiveFeedIfRecording(){
   stopLiveFeedPolling();
   const record = selectedRecording();
-  if(!isLiveOrProcessing(record)) return;
-  renderProcessingStatus(record);
+  if(!record){ resetProcessingStatus(); return; }
+  if(!isLiveOrProcessing(record)) resetProcessingStatus();
+  // Check this meeting's server progress even when it already has notes:
+  // a reprocess started elsewhere may not be in this window's local Set.
+  const active = await renderProcessingStatus(record);
+  if(!isSelectedMeeting(record.id)) return;
+  if(!active && !isLiveOrProcessing(record)) return;
   liveFeedPollTimer = setTimeout(async () => {
     if(!selectedRecording() || selectedRecording().id !== record.id) return;
     try{
       const fresh = await api(`/api/recording?id=${encodeURIComponent(record.id)}`);
+      if(!isSelectedMeeting(record.id)) return;
       const stageChanged = fresh.analysis_stage !== record.analysis_stage;
       selectedDetail = fresh;
+      if(typeof syncCopyRecordingIdButton === 'function') syncCopyRecordingIdButton();
       if(stageChanged){
         // The recording moved out of "recording" (e.g. Stop was clicked,
         // now "processing") or finished entirely — a narrow sub-panel
@@ -112,7 +156,7 @@ function pollLiveFeedIfRecording(){
       // Only re-render participants when the roster actually changed —
       // re-rendering on every 2s tick would blow away an in-progress
       // rename edit (lost cursor/focus) for no reason most ticks.
-      const participantsKey = JSON.stringify(selectedDetail.participants || []);
+      const participantsKey = JSON.stringify([selectedDetail.participants || [], selectedDetail.participant_capture]);
       if(participantsKey !== lastPolledParticipantsKey){
         lastPolledParticipantsKey = participantsKey;
         renderParticipants(selectedDetail);
@@ -136,10 +180,15 @@ function pollLiveFeedIfRecording(){
   }, 2000);
 }
 
+// The notepad text as first loaded for the open Recording: notes_edited
+// measures each save against it (re-renders of the same Recording keep it).
+let notesBaseline = { id: null, text: '' };
+
 function loadNotepad(){
   const record = selectedRecording();
   const notesEl = $('#notepadNotes');
   if(notesEl) notesEl.value = record?.notes || '';
+  if(record && notesBaseline.id !== record.id) notesBaseline = { id: record.id, text: record.notes || '' };
 
   const notesToggle = $('#notepadNotesToggle');
   if(hasEnhancedNotes(record)){
@@ -155,11 +204,12 @@ function loadNotepad(){
   }
 
   renderMeetingTimeline(record);
-  lastPolledParticipantsKey = JSON.stringify(record?.participants || []);
+  lastPolledParticipantsKey = JSON.stringify([record?.participants || [], record?.participant_capture]);
   renderParticipants(record);
   lastPolledKeyPhrasesKey = JSON.stringify(record?.key_phrases || []);
   renderKeyPhrases(record);
   renderCleanTranscript(record);
+  renderProcessingNotices(record);
   pollLiveFeedIfRecording();
 
   // Live recording actions & timer banner inside notepad
@@ -254,7 +304,12 @@ function loadNotepad(){
   const reprocessBtn = $('#notepadReprocessBtn');
   if(reprocessBtn && record){
     reprocessBtn.style.display = !PENDING_STAGES.has(record.analysis_stage) ? '' : 'none';
+    if(!activeReprocess.has(record.id) && !isLiveOrProcessing(record)){
+      reprocessBtn.disabled = false;
+      reprocessBtn.textContent = '🔁 Retranscribe & Re-summarize';
+    }
   }
+  renderAudioState(record);
   const aiSummarizeBtn = $('#notepadAiSummarizeBtn');
   if(aiSummarizeBtn && record){
     aiSummarizeBtn.style.display = !PENDING_STAGES.has(record.analysis_stage) ? '' : 'none';
@@ -272,17 +327,95 @@ function loadNotepad(){
   }
 }
 
+const fmtMinutes = seconds => seconds < 60 ? 'Under 1 min' : `${Math.round(seconds / 60)} min`;
+
+// Two banners above the notes: "Processing failed" with its reason and Retry,
+// and, when the cloud engine rejected some Windows, how many minutes were
+// transcribed on this Mac or left as gaps (the item's transcription_engines).
+function renderProcessingNotices(record){
+  const failureHost = $('#notepadFailureBanner');
+  if(failureHost){
+    const notice = failureNotice(record);
+    failureHost.innerHTML = notice ? `<strong>${esc(stageLabels.failed || 'Processing failed')}</strong>${notice}` : '';
+    failureHost.style.display = notice ? '' : 'none';
+  }
+  const enginesHost = $('#notepadEnginesBanner');
+  if(!enginesHost) return;
+  const engines = record?.transcription_engines || {};
+  const local = Number(engines.local_s) || 0, gap = Number(engines.gap_s) || 0;
+  if(local + gap <= 0){
+    enginesHost.style.display = 'none';
+    enginesHost.innerHTML = '';
+    return;
+  }
+  const parts = [];
+  if(local > 0) parts.push(`${fmtMinutes(local)} transcribed on this Mac`);
+  if(gap > 0) parts.push(`${fmtMinutes(gap)} could not be transcribed`);
+  const reasons = [...new Set((engines.windows || []).map(w => w.reason).filter(Boolean))];
+  enginesHost.innerHTML = `<span>${esc(parts.join(' · '))}${reasons.length ? ` (${esc(reasons.join('; '))})` : ''}. Affected lines are marked in the Clean Transcript.</span>`;
+  enginesHost.style.display = '';
+}
+
+// Audio pruning (python/audio_pruning.py) removed this Recording's audio:
+// say why where the player would be, and keep Retranscribe (which needs the
+// audio) disabled. record.audio_pruned = {at, reason: retention|cap, limit}.
+function audioPrunedText(record){
+  const pruned = record?.audio_pruned;
+  if(!pruned) return '';
+  const why = pruned.reason === 'cap' ? `to stay under the ${Number(pruned.limit)} MB cap`
+    : `after ${Number(pruned.limit)} days`;
+  return `Audio removed ${why}. The transcript and notes are kept.`;
+}
+
+const REPROCESS_TITLE = 'Re-run transcription and notes generation from the original audio — the current transcript and notes are archived first, so this is safe to redo';
+
+function renderAudioState(record){
+  const text = audioPrunedText(record);
+  const notice = $('#notepadAudioNotice');
+  if(notice){
+    notice.textContent = text;
+    notice.style.display = text ? '' : 'none';
+  }
+  const reprocess = $('#notepadReprocessBtn');
+  if(reprocess && record){
+    if(text){
+      reprocess.disabled = true;
+      reprocess.title = 'Unavailable: this recording\'s audio was removed to save space';
+    } else {
+      reprocess.title = REPROCESS_TITLE;
+    }
+  }
+}
+
 $('#notepadFolder')?.addEventListener('change', async (e) => {
   const record = selectedRecording();
   if(!record) return;
   try{
     const newFolderId = e.target.value || null;
+    trackAction('file_to_folder');
     await api('/api/recording/folder', { method: 'POST', body: JSON.stringify({ id: record.id, folder_id: newFolderId }) });
     selectedDetail.folder_id = newFolderId;
     const listItem = data?.recordings?.find(r => r.id === record.id);
     if(listItem) listItem.folder_id = newFolderId;
     toast('Saved');
   }catch(error){ toast(error.message, true); }
+});
+
+// Every notepad save is manual_notes_written (during the meeting or after);
+// a save after the meeting of notes that already had text is also
+// notes_edited, measured against the text first loaded (see editRatio).
+function trackNotesSaved(record, text){
+  const phase = PENDING_STAGES.has(record.analysis_stage) ? 'during' : 'after';
+  track('manual_notes_written', { recording_id: record.id, chars: text.length, phase });
+  if(phase === 'after' && notesBaseline.id === record.id && notesBaseline.text){
+    track('notes_edited', { recording_id: record.id, edit_ratio: editRatio(notesBaseline.text, text) });
+  }
+}
+
+// Text copied out of the generated notes leaves Cora: an export by copy.
+$('#notepadEnhancedNotes')?.addEventListener('copy', () => {
+  const record = selectedRecording();
+  if(record) track('notes_exported', { recording_id: record.id, kind: 'copy' });
 });
 
 $('#notepadNotes')?.addEventListener('input', () => {
@@ -293,9 +426,11 @@ $('#notepadNotes')?.addEventListener('input', () => {
     const record = selectedRecording();
     if(!record) return;
     try{
-      await api('/api/recording/notes', { method: 'POST', body: JSON.stringify({ id: record.id, text: $('#notepadNotes').value }) });
+      const text = $('#notepadNotes').value;
+      await api('/api/recording/notes', { method: 'POST', body: JSON.stringify({ id: record.id, text }) });
       if(status) status.textContent = 'Saved';
-      if(selectedDetail) selectedDetail.notes = $('#notepadNotes').value;
+      if(selectedDetail) selectedDetail.notes = text;
+      trackNotesSaved(record, text);
     }catch(error){ if(status) status.textContent = 'Failed to save'; }
   }, 1500);
 });
@@ -341,7 +476,9 @@ function renderMarkdownSubset(markdown){
 function renderEnhancedNotes(record){
   const host = $('#notepadEnhancedNotes');
   if(!host) return;
-  host.innerHTML = renderMarkdownSubset(record?.enhanced_notes) || '<p class="muted">No notes generated yet.</p>';
+  const info = record?.call_summary?.processing;
+  host.innerHTML = (info ? `<p class="muted">Template: ${esc(info.template)} (${esc(info.template_selection)}) · ${esc(info.mode)} · ${esc(info.provider)} · ${esc(info.model)} <button type="button" class="button secondary small" data-change-template>Change template / regenerate</button></p>` : '') + (renderMarkdownSubset(record?.enhanced_notes) || '<p class="muted">No notes generated yet.</p>');
+  host.querySelector('[data-change-template]')?.addEventListener('click', () => openSummarizeModal());
 }
 
 // versions/ stamps are time.strftime("%Y%m%dT%H%M%S") from the Python side.
@@ -351,35 +488,6 @@ function fmtVersionStamp(stamp){
   const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
   return d.toLocaleString();
 }
-
-// Developer-only: the VM sync button stays hidden unless a target is configured.
-api('/api/cloud/sync-status').then(s => { if (s.configured) $('#topbarSyncVmBtn')?.removeAttribute('hidden'); }).catch(() => {});
-$('#topbarSyncVmBtn')?.addEventListener('click', async () => {
-  const btn = $('#topbarSyncVmBtn');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = '☁️ Syncing to VM…';
-  }
-  toast('Syncing meetings, database & datasets to your VM…');
-  try {
-    const res = await api('/api/cloud/sync-vm', { method: 'POST', body: '{}' });
-    if (res.status === 'success') {
-      toast(`✅ ${res.message || 'Synced successfully!'}`);
-      if (btn) btn.textContent = '✅ Synced to VM';
-      setTimeout(() => { if (btn) btn.textContent = '☁️ Sync to VM'; }, 3000);
-    } else {
-      toast(`⚠️ VM Sync: ${res.message}`, true);
-      if (btn) btn.textContent = '☁️ Sync to VM';
-    }
-  } catch (err) {
-    toast(`VM Sync failed: ${err.message}`, true);
-    if (btn) btn.textContent = '☁️ Sync to VM';
-  } finally {
-    if (btn && document.body.contains(btn)) {
-      btn.disabled = false;
-    }
-  }
-});
 
 // Lets you listen to a pause/resume or "Continue this meeting" segment
 // while it's stopped-but-not-yet-merged (the gap this whole feature exists

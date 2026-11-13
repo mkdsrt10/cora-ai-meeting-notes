@@ -29,19 +29,12 @@ KEYCHAIN_SERVICE = "ai.cora.desktop"
 CONFIG_DIR = Path.home() / ".config" / "cora"
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
 DEFAULT_LOCATION = "global"
-DEFAULT_VERTEX_MODEL = "gemini-3.8-flash"
-DEFAULT_AI_STUDIO_MODEL = "gemini-3.7-flash"
 
 
 def get_default_model() -> str:
-    """Return the optimal model for the current provider."""
-    status = get_public_status()
-    if status.get("provider") == "vertex":
-        return DEFAULT_VERTEX_MODEL
-    return DEFAULT_AI_STUDIO_MODEL
-
-
-DEFAULT_MODEL = DEFAULT_VERTEX_MODEL
+    """Default Gemini model for the configured Gemini backend (see pipeline.text_model)."""
+    from pipeline.text_model import gemini_default
+    return gemini_default()
 
 
 def _keychain_available() -> bool:
@@ -231,6 +224,7 @@ def _invalidate_public_status_cache() -> None:
 
 def _compute_public_status() -> dict[str, Any]:
     """Return a safe status dictionary suitable for UI and logs (no secrets exposed)."""
+    from pipeline import text_model
     file_cfg = _read_secure_file()
     keychain_provider = _keychain_get("auth_provider")
     keychain_project = _keychain_get("vertex_project")
@@ -316,6 +310,7 @@ def _compute_public_status() -> dict[str, Any]:
     return {
         "provider": provider,
         "notes_llm_provider": notes_provider,
+        "gemini_model": file_cfg.get("gemini_model") or text_model.gemini_default(provider),
         "vertex_project": vertex_project,
         "vertex_location": vertex_location,
         "vertex_auth_type": vertex_auth_type,
@@ -327,9 +322,15 @@ def _compute_public_status() -> dict[str, Any]:
         "has_openai_key": has_openai_key,
         "has_custom_llm": has_custom_llm,
         "custom_llm_url": custom_url,
-        "anthropic_model": file_cfg.get("anthropic_model", "claude-3-7-sonnet-20250219"),
-        "openai_model": file_cfg.get("openai_model", "gpt-4o"),
-        "custom_llm_model": file_cfg.get("custom_llm_model", "llama3"),
+        "anthropic_model": file_cfg.get("anthropic_model") or text_model.ANTHROPIC_DEFAULT,
+        "openai_model": file_cfg.get("openai_model") or text_model.default_model("openai"),
+        "openai_base_url": text_model.resolve_base_url("openai", file_cfg.get("openai_base_url")),
+        "custom_llm_model": file_cfg.get("custom_llm_model") or text_model.default_model("custom"),
+        # Other OpenAI-compatible presets: which ones have a saved base URL.
+        "openai_compatible_presets": {p: bool(file_cfg.get(f"{p}_base_url")) for p in ("openrouter", "groq", "ollama", "lmstudio")},
+        # Every text-model preset Settings can configure: saved model/base URL
+        # and whether a key is saved. Never the key itself.
+        "presets": _presets_status(has_ai_studio_key or (provider == "vertex" and is_configured)),
         "detected_gcloud_project": detected_project,
         "is_configured": is_configured,
         "storage_mode": "macOS Keychain (Secure Enclave) + 0600 file",
@@ -337,14 +338,68 @@ def _compute_public_status() -> dict[str, Any]:
     }
 
 
-def save_anthropic_credentials(api_key: str, model: str = "claude-3-7-sonnet-20250219") -> None:
+# Saved fields per text-model provider: (api key account, model field, base URL field, key env var).
+# `custom` keeps its original field names; other OpenAI-compatible presets use <preset>_*.
+_PROVIDER_FIELDS = {
+    "anthropic": ("anthropic_api_key", "anthropic_model", None, "ANTHROPIC_API_KEY"),
+    "openai": ("openai_api_key", "openai_model", "openai_base_url", "OPENAI_API_KEY"),
+    "custom": ("custom_llm_key", "custom_llm_model", "custom_llm_url", None),
+    "openrouter": ("openrouter_api_key", "openrouter_model", "openrouter_base_url", "OPENROUTER_API_KEY"),
+    "groq": ("groq_api_key", "groq_model", "groq_base_url", "GROQ_API_KEY"),
+    "ollama": ("ollama_api_key", "ollama_model", "ollama_base_url", None),
+    "lmstudio": ("lmstudio_api_key", "lmstudio_model", "lmstudio_base_url", None),
+    "gemini": (None, "gemini_model", None, None),
+}
+OPENAI_COMPATIBLE_PRESETS = tuple(p for p in _PROVIDER_FIELDS if p not in {"anthropic", "gemini"})
+
+
+def provider_settings(provider: str) -> dict[str, Any]:
+    """Saved api_key / model / base_url for one text-model provider ("" when unset).
+    Keys come from the Keychain first, then the 0600 file, then the environment."""
+    key_field, model_field, url_field, env = _PROVIDER_FIELDS[provider]
+    file_cfg = _read_secure_file()
+    api_key = ""
+    if key_field:
+        api_key = _keychain_get(key_field) or file_cfg.get(key_field) or (os.environ.get(env) if env else "") or ""
+    base_url = ""
+    if url_field:
+        base_url = file_cfg.get(url_field) or ""
+        if provider == "custom":
+            base_url = _keychain_get("custom_llm_url") or base_url or os.environ.get("CUSTOM_LLM_URL", "")
+    return {"api_key": api_key, "model": file_cfg.get(model_field) or "", "base_url": base_url}
+
+
+_HOSTED_PRESETS = frozenset({"openai", "openrouter", "groq", "anthropic"})
+
+
+def _presets_status(gemini_configured: bool) -> dict[str, dict[str, Any]]:
+    """Public, key-free status per preset. A hosted preset is configured once it
+    has a key; a local one (Ollama, LM Studio, custom) once it was saved."""
+    from pipeline import text_model
+    out: dict[str, dict[str, Any]] = {}
+    for preset in (*OPENAI_COMPATIBLE_PRESETS, "anthropic"):
+        saved = provider_settings(preset)
+        has_key = bool(saved.get("api_key"))
+        out[preset] = {
+            "has_key": has_key,
+            "model": saved.get("model") or text_model.default_model(preset),
+            "base_url": text_model.ANTHROPIC_API if preset == "anthropic"
+            else text_model.resolve_base_url(preset, saved.get("base_url")),
+            "configured": has_key if preset in _HOSTED_PRESETS else bool(saved.get("base_url")),
+        }
+    out["gemini"] = {"has_key": gemini_configured, "configured": gemini_configured}
+    return out
+
+
+def save_anthropic_credentials(api_key: str, model: str = "") -> None:
+    from pipeline.text_model import ANTHROPIC_DEFAULT
     api_key = api_key.strip()
     if not api_key:
         raise ValueError("Anthropic API key cannot be empty.")
     _keychain_set("anthropic_api_key", api_key)
     file_cfg = _read_secure_file()
     file_cfg["anthropic_api_key"] = api_key
-    file_cfg["anthropic_model"] = model.strip() or "claude-3-7-sonnet-20250219"
+    file_cfg["anthropic_model"] = model.strip() or ANTHROPIC_DEFAULT
     file_cfg["notes_llm_provider"] = "anthropic"
     _write_secure_file(file_cfg)
     _invalidate_public_status_cache()
@@ -366,31 +421,43 @@ def validate_llm_base_url(base_url: str) -> str:
     return base_url.strip().rstrip("/")
 
 
-def save_openai_credentials(api_key: str, model: str = "gpt-4o", base_url: str = "https://api.openai.com/v1") -> None:
+def save_openai_compatible_credentials(preset: str, base_url: str = "", api_key: str = "", model: str = "") -> None:
+    """Save an OpenAI-compatible preset (openai, openrouter, groq, ollama,
+    lmstudio, custom). The key goes to the Keychain like every other key."""
+    from pipeline import text_model
+    if preset not in OPENAI_COMPATIBLE_PRESETS:
+        raise ValueError(f"Unknown OpenAI-compatible preset: {preset}")
+    default_model = text_model.default_model(preset)
+    base_url = text_model.resolve_base_url(preset, base_url)
+    if not base_url:
+        raise ValueError("Base URL cannot be empty.")
+    base_url = validate_llm_base_url(base_url)
     api_key = api_key.strip()
-    if not api_key:
-        raise ValueError("OpenAI API key cannot be empty.")
-    _keychain_set("openai_api_key", api_key)
+    if preset in {"openai", "openrouter", "groq"} and not api_key:
+        raise ValueError(f"{preset} API key cannot be empty.")
+    key_field, model_field, url_field, _ = _PROVIDER_FIELDS[preset]
     file_cfg = _read_secure_file()
-    file_cfg["openai_api_key"] = api_key
-    file_cfg["openai_model"] = model.strip() or "gpt-4o"
-    file_cfg["openai_base_url"] = validate_llm_base_url(base_url or "https://api.openai.com/v1")
-    file_cfg["notes_llm_provider"] = "openai"
+    if api_key:
+        _keychain_set(key_field, api_key)
+        file_cfg[key_field] = api_key
+    else:
+        _keychain_delete(key_field)
+        file_cfg.pop(key_field, None)
+    file_cfg[model_field] = model.strip() or default_model
+    file_cfg[url_field] = base_url
+    file_cfg["notes_llm_provider"] = preset
     _write_secure_file(file_cfg)
     _invalidate_public_status_cache()
+
+
+def save_openai_credentials(api_key: str, model: str = "", base_url: str = "") -> None:
+    save_openai_compatible_credentials("openai", base_url=base_url, api_key=api_key, model=model)
 
 
 def save_custom_llm_credentials(base_url: str, api_key: str = "", model: str = "") -> None:
     if not base_url.strip():
         raise ValueError("Base URL cannot be empty.")
-    base_url = validate_llm_base_url(base_url)
-    file_cfg = _read_secure_file()
-    file_cfg["custom_llm_url"] = base_url
-    file_cfg["custom_llm_key"] = api_key.strip()
-    file_cfg["custom_llm_model"] = model.strip() or "default"
-    file_cfg["notes_llm_provider"] = "custom"
-    _write_secure_file(file_cfg)
-    _invalidate_public_status_cache()
+    save_openai_compatible_credentials("custom", base_url=base_url, api_key=api_key, model=model or "default")
 
 
 def save_notes_provider(provider: str) -> None:
@@ -398,169 +465,6 @@ def save_notes_provider(provider: str) -> None:
     file_cfg["notes_llm_provider"] = provider
     _write_secure_file(file_cfg)
     _invalidate_public_status_cache()
-
-
-def call_configured_llm(
-    prompt: str,
-    system_prompt: str = "",
-    provider: Optional[str] = None,
-    model: Optional[str] = None,
-    max_tokens: int = 4096,
-    trace_name: str = "configured_llm",
-) -> str:
-    """Universal caller for user-configured frontier or custom LLMs.
-
-    Every call is recorded in the local AI trace (inputs, output, token
-    usage, latency) under `trace_name`.
-    """
-    import ai_trace
-
-    p = (provider or get_public_status().get("notes_llm_provider") or "local_mlx").lower()
-    with ai_trace.span("llm", trace_name, provider=p, model=model,
-                       input={"system": system_prompt, "prompt": prompt},
-                       params={"max_tokens": max_tokens}, prompt_template=system_prompt or None) as trace:
-        text, usage, used_model = _call_configured_llm(prompt, system_prompt, provider, model, max_tokens)
-        trace.set_output(text, model=used_model, **usage)
-    return text
-
-
-def _call_configured_llm(
-    prompt: str,
-    system_prompt: str,
-    provider: Optional[str],
-    model: Optional[str],
-    max_tokens: int,
-) -> tuple[str, dict[str, Any], str]:
-    """Returns (text, usage, model actually used)."""
-    import requests
-    status = get_public_status()
-    file_cfg = _read_secure_file()
-    p = (provider or status.get("notes_llm_provider") or "local_mlx").lower()
-    if not policy.provider_allowed(p, file_cfg.get("custom_llm_url")):
-        raise policy.LockdownError(f"LLM provider '{p}' is disabled by enterprise lockdown.")
-
-    if p == "anthropic":
-        key = _keychain_get("anthropic_api_key") or file_cfg.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")
-        if not key:
-            raise RuntimeError("Anthropic API key is not configured. Set it in Settings -> Models.")
-        m = model or file_cfg.get("anthropic_model") or "claude-3-7-sonnet-20250219"
-        headers = {
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-        payload = {
-            "model": m,
-            "max_tokens": max_tokens,
-            "system": system_prompt or "You are an executive chief of staff. Produce clear, structured, and factual meeting notes.",
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=90)
-        res.raise_for_status()
-        data = res.json()
-        usage = data.get("usage") or {}
-        return ("".join(c.get("text", "") for c in data.get("content", [])),
-                {"input_tokens": usage.get("input_tokens"), "output_tokens": usage.get("output_tokens")}, m)
-
-    elif p == "openai":
-        key = _keychain_get("openai_api_key") or file_cfg.get("openai_api_key") or os.environ.get("OPENAI_API_KEY")
-        if not key:
-            raise RuntimeError("OpenAI API key is not configured. Set it in Settings -> Models.")
-        m = model or file_cfg.get("openai_model") or "gpt-4o"
-        base_url = file_cfg.get("openai_base_url") or "https://api.openai.com/v1"
-        headers = {
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": m,
-            "messages": [
-                {"role": "system", "content": system_prompt or "You are an executive chief of staff. Produce clear, structured, and factual meeting notes."},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.2,
-        }
-        res = requests.post(f"{base_url.rstrip('/')}/chat/completions", headers=headers, json=payload, timeout=90)
-        res.raise_for_status()
-        data = res.json()
-        return data["choices"][0]["message"]["content"], _openai_usage(data), m
-
-    elif p == "custom":
-        base_url = file_cfg.get("custom_llm_url") or "http://localhost:11434/v1"
-        key = file_cfg.get("custom_llm_key", "")
-        m = model or file_cfg.get("custom_llm_model") or "llama3"
-        headers = {"Content-Type": "application/json"}
-        if key:
-            headers["Authorization"] = f"Bearer {key}"
-        payload = {
-            "model": m,
-            "messages": [
-                {"role": "system", "content": system_prompt or "You are an executive chief of staff. Produce clear, structured, and factual meeting notes."},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.2,
-        }
-        res = requests.post(f"{base_url.rstrip('/')}/chat/completions", headers=headers, json=payload, timeout=90)
-        res.raise_for_status()
-        data = res.json()
-        return data["choices"][0]["message"]["content"], _openai_usage(data), m
-
-    elif p in {"vertex", "ai_studio", "gemini"}:
-        client = get_client(traced=False)  # traced once, by call_configured_llm
-        m = model or DEFAULT_MODEL
-        full_content = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
-        res = client.models.generate_content(model=m, contents=full_content)
-        return (res.text.strip() if res and res.text else ""), _gemini_usage(res), m
-
-    else:
-        raise ValueError(f"Unknown or local provider: {p}")
-
-
-def _openai_usage(data: dict[str, Any]) -> dict[str, Any]:
-    usage = data.get("usage") or {}
-    return {"input_tokens": usage.get("prompt_tokens"), "output_tokens": usage.get("completion_tokens")}
-
-
-def _gemini_usage(response: Any) -> dict[str, Any]:
-    meta = getattr(response, "usage_metadata", None)
-    return {
-        "input_tokens": getattr(meta, "prompt_token_count", None),
-        "output_tokens": getattr(meta, "candidates_token_count", None),
-    }
-
-
-class _TracedModels:
-    """Wraps `client.models` so every generate_content call — diarization,
-    voice matching, coaching, dataset tools — lands in the local AI trace
-    without touching each caller. Audio/image bytes are fingerprinted,
-    never stored."""
-
-    def __init__(self, models: Any) -> None:
-        self._models = models
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._models, name)
-
-    def generate_content(self, *, model: str, contents: Any, config: Any = None, **kwargs: Any) -> Any:
-        import inspect
-
-        import ai_trace
-        caller = inspect.stack()[1]
-        name = f"gemini.{Path(caller.filename).stem}.{caller.function}"
-        with ai_trace.span("llm", name, provider="gemini", model=model,
-                           input={"contents": contents}, params={"config": config}) as trace:
-            response = self._models.generate_content(model=model, contents=contents, config=config, **kwargs)
-            trace.set_output(getattr(response, "text", None), **_gemini_usage(response))
-        return response
-
-
-class _TracedClient:
-    def __init__(self, client: Any) -> None:
-        self._client = client
-        self.models = _TracedModels(client.models)
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._client, name)
 
 
 def save_vertex_credentials(
@@ -658,16 +562,17 @@ def _sanitize_db() -> None:
 
 
 def get_client(traced: bool = True) -> Any:
-    """Construct and return an authenticated google.genai.Client instance.
+    """Gemini client for callers outside python/ core (plugins, tools).
+    Core code uses pipeline.text_model.gemini_client(trace=...) instead."""
+    from pipeline import text_model
+    if not traced:
+        return build_gemini_client()
+    return text_model.gemini_client(text_model.caller_trace_name())
 
-    By default the client's generate_content calls are recorded in the
-    local AI trace (see _TracedClient).
-    """
-    client = _build_client()
-    return _TracedClient(client) if traced else client
 
-
-def _build_client() -> Any:
+def build_gemini_client() -> Any:
+    """Untraced google-genai client for the configured Gemini backend. Callers
+    go through pipeline.text_model (text) or text_model.gemini_client (audio)."""
     policy.require_outbound_allowed("Google Gemini")
     from google import genai
     from google.oauth2 import service_account
@@ -773,143 +678,90 @@ def test_credentials(
     service_account_json: Optional[str] = None,
     api_key: Optional[str] = None,
     model: Optional[str] = None,
+    base_url: Optional[str] = None,
 ) -> tuple[bool, str]:
-    """Test candidate credentials without saving them.
+    """Test candidate credentials without saving them: one tiny call through
+    the Text model with these credentials in place of the saved ones.
+    `location` is the Vertex region; `base_url` the OpenAI-compatible endpoint.
 
     Returns (success, message).
     """
-    if not policy.provider_allowed(provider, location if provider == "custom" else None):
-        return False, f"Provider '{provider}' is disabled by enterprise lockdown."
-    if provider in {"openai", "custom"} and location:
+    import requests
+
+    from pipeline import text_model
+    k = (api_key or "").strip()
+    if provider in OPENAI_COMPATIBLE_PRESETS:
+        base_url = text_model.resolve_base_url(provider, base_url)
+        if not base_url:
+            return False, "Custom API Base URL cannot be empty (e.g. http://localhost:11434/v1)."
         try:
-            validate_llm_base_url(location)
+            base_url = validate_llm_base_url(base_url)
         except ValueError as exc:
             return False, str(exc)
-    from google import genai
-    from google.oauth2 import service_account
-    import google.auth
+    if not policy.provider_allowed(provider, base_url):
+        return False, f"Provider '{provider}' is disabled by enterprise lockdown."
 
+    labels = {"anthropic": "Anthropic Claude", "openai": "OpenAI", "openrouter": "OpenRouter", "groq": "Groq",
+              "ollama": "Ollama", "lmstudio": "LM Studio"}
     try:
         if provider == "vertex":
+            from google import genai
+            from google.oauth2 import service_account
+            import google.auth
             proj = (project or "").strip() or detect_gcloud_project()
             loc = (location or DEFAULT_LOCATION).strip()
             atype = (auth_type or "adc").strip().lower()
-
             if not proj:
                 return False, "Project ID is required for Vertex AI."
-
-            credentials = None
             if atype == "service_account":
                 raw = (service_account_json or "").strip()
                 if not raw:
                     return False, "Service account JSON is required."
                 if Path(raw).exists():
                     raw = Path(raw).read_text()
-                info = json.loads(raw)
                 credentials = service_account.Credentials.from_service_account_info(
-                    info, scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                    json.loads(raw), scopes=["https://www.googleapis.com/auth/cloud-platform"]
                 )
+                client = genai.Client(vertexai=True, project=proj, location=loc, credentials=credentials)
             elif atype == "api_key":
-                if not api_key:
+                if not k:
                     return False, "Vertex API key is required."
-                client = genai.Client(vertexai=True, project=proj, location=loc, api_key=api_key.strip())
+                client = genai.Client(vertexai=True, project=proj, location=loc, api_key=k)
             else:
                 credentials, detected_proj = google.auth.default(
                     scopes=["https://www.googleapis.com/auth/cloud-platform"]
                 )
-                if not proj and detected_proj:
-                    proj = detected_proj
-
-            if atype != "api_key":
+                proj = proj or detected_proj
                 client = genai.Client(vertexai=True, project=proj, location=loc, credentials=credentials)
-
-            # Verification ping
-            res = client.models.generate_content(
-                model=DEFAULT_VERTEX_MODEL,
-                contents="Ping. Respond with 'pong'.",
-            )
-            if not res or not res.text:
-                return False, "Model did not return a response."
-            return True, f"Connected to Vertex AI ({proj} / {loc}) successfully."
-
+            profile, connection = {"provider": "gemini", "model": text_model.gemini_default("vertex")}, {"client": client}
+            success = f"Connected to Vertex AI ({proj} / {loc}) successfully."
         elif provider in {"ai_studio", "gemini"}:
-            k = (api_key or "").strip()
+            from google import genai
             if not k:
                 return False, "Gemini API key cannot be empty."
-            client = genai.Client(api_key=k)
-            # Lightweight verification
-            m = model or DEFAULT_AI_STUDIO_MODEL
-            res = client.models.generate_content(
-                model=m,
-                contents="Ping. Respond with 'pong'.",
-            )
-            return True, f"Connected to Gemini AI Studio ({m}) successfully."
-
-        elif provider == "anthropic":
-            import requests
-            k = (api_key or "").strip()
-            if not k:
-                return False, "Anthropic API key cannot be empty."
-            headers = {
-                "x-api-key": k,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            }
-            m = model or "claude-3-5-haiku-20241022"
-            payload = {
-                "model": m,
-                "max_tokens": 10,
-                "messages": [{"role": "user", "content": "Ping"}],
-            }
-            res = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=15)
-            if res.status_code == 401:
-                return False, "Invalid Anthropic API key."
-            res.raise_for_status()
-            return True, f"Connected to Anthropic Claude ({m}) successfully."
-
-        elif provider == "openai":
-            import requests
-            k = (api_key or "").strip()
-            if not k:
-                return False, "OpenAI API key cannot be empty."
-            burl = (location or "https://api.openai.com/v1").rstrip("/")
-            headers = {
-                "Authorization": f"Bearer {k}",
-                "Content-Type": "application/json",
-            }
-            m = model or "gpt-4o-mini"
-            payload = {
-                "model": m,
-                "max_tokens": 10,
-                "messages": [{"role": "user", "content": "Ping"}],
-            }
-            res = requests.post(f"{burl}/chat/completions", headers=headers, json=payload, timeout=15)
-            if res.status_code == 401:
-                return False, "Invalid OpenAI API key."
-            res.raise_for_status()
-            return True, f"Connected to OpenAI ({m}) successfully."
-
-        elif provider == "custom":
-            import requests
-            burl = (location or "").strip().rstrip("/")
-            if not burl:
-                return False, "Custom API Base URL cannot be empty (e.g. http://localhost:11434/v1)."
-            headers = {"Content-Type": "application/json"}
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key.strip()}"
-            m = model or "default"
-            payload = {
-                "model": m,
-                "max_tokens": 10,
-                "messages": [{"role": "user", "content": "Ping"}],
-            }
-            res = requests.post(f"{burl}/chat/completions", headers=headers, json=payload, timeout=15)
-            res.raise_for_status()
-            return True, f"Connected to custom LLM endpoint ({burl}) successfully."
-
+            m = model or text_model.gemini_default("ai_studio")
+            profile, connection = {"provider": "gemini", "model": m}, {"client": genai.Client(api_key=k)}
+            success = f"Connected to Gemini AI Studio ({m}) successfully."
+        elif provider == "anthropic" or provider in OPENAI_COMPATIBLE_PRESETS:
+            if not k and provider in {"anthropic", "openai", "openrouter", "groq"}:
+                return False, f"{labels[provider]} API key cannot be empty."
+            m = model or text_model.default_model(provider)
+            profile, connection = {"provider": provider, "model": m}, {"api_key": k, "base_url": base_url}
+            success = (f"Connected to custom LLM endpoint ({base_url}) successfully." if provider == "custom"
+                       else f"Connected to {labels[provider]} ({m}) successfully.")
         else:
             return False, f"Unknown provider: {provider}"
 
+        reply = text_model.text_model(profile, connection=connection).complete(
+            "Ping. Respond with 'pong'.", max_tokens=10, trace="credentials.test")
+        if provider == "vertex" and not reply:
+            return False, "Model did not return a response."
+        return True, success
+
+    except requests.HTTPError as exc:
+        if getattr(exc.response, "status_code", None) == 401:
+            return False, f"Invalid {labels.get(provider, provider)} API key."
+        return False, str(exc)
     except Exception as exc:
         msg = getattr(exc, "message", None) or str(exc)
         return False, msg

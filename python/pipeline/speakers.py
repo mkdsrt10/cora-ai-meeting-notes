@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import db
-from participants import _BAD_PARTICIPANT_WORDS, clean_and_validate_participant  # noqa: F401
+from participants import _BAD_PARTICIPANT_WORDS, clean_and_validate_participant, same_person_name  # noqa: F401
 from .audio import track_mean_volume
 from .common import _parse_ts, _write_progress
 
@@ -84,22 +84,14 @@ def resolve_other_participant_name(participants: list[str]) -> Optional[str]:
     None, never a guess) for 0 or 2+ others, since audio-level comparison
     alone can't say *which* of several other people is talking."""
     self_name = db.get_setting("pending_self_name") or (db.get_person(db.get_self_person_id() or "") or {}).get("name")
-    self_name = (self_name or "").strip().lower()
-    self_tokens = set(self_name.split()) if self_name else set()
-
-    def is_self(p: str) -> bool:
-        p_low = p.strip().lower()
-        if p_low == self_name:
-            return True
-        p_tokens = set(p_low.split())
-        return bool(self_tokens and self_tokens.intersection(p_tokens))
-
-    others = [p for p in participants if not is_self(p)]
+    others = [p for p in participants if not same_person_name(p, self_name)]
     return others[0] if len(others) == 1 else None
 
 
-def _guess_remote_speakers(folder: Path, segments: list[dict[str, Any]], roster: list[str], title: str, llm) -> None:
+def _guess_remote_speakers(folder: Path, segments: list[dict[str, Any]], roster: list[str], title: str, model) -> None:
+    """`model`: the run's Text model (pipeline.text_model)."""
     import speaker_guess
+    from .llm import UNTRUSTED
 
     self_name = db.get_setting("pending_self_name") or (db.get_person(db.get_self_person_id() or "") or {}).get("name")
     others = speaker_guess.other_participants(roster, self_name)
@@ -107,11 +99,10 @@ def _guess_remote_speakers(folder: Path, segments: list[dict[str, Any]], roster:
         return
     _write_progress(folder, "identifying_speakers", "Working out who said what...", percent=48)
     def generate(prompt: str) -> str:
-        return llm.generate(prompt, name="speaker_guess", prompt_template=speaker_guess.INSTRUCTION,
-                            input_payload={"prompt": prompt, "roster": others})
+        return model.complete(prompt, system=UNTRUSTED, trace="speaker_guess", template=speaker_guess.INSTRUCTION)
 
     try:
-        stats = speaker_guess.guess_speakers(segments, roster, self_name, title, generate=generate, model_id=llm.model_id)
+        stats = speaker_guess.guess_speakers(segments, roster, self_name, title, generate=generate, model_id=model.model)
         print(f"[Local Pipeline] Speaker naming: {stats}", flush=True)
     except Exception as exc:  # naming is an enhancement; never fail the pipeline over it
         print(f"[Local Pipeline] Speaker naming skipped: {exc}", flush=True)

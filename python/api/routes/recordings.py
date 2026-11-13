@@ -15,8 +15,8 @@ import db
 import json
 import re
 import time
-from api.core import ARCHETYPES, RECORDINGS, current_self_name, safe_folder
-from api.views import PENDING_TITLES, dashboard_payload, key_phrases_payload, live_transcript_payload, participants_payload, pending_recording_item, recording_item
+from api.core import archetypes, RECORDINGS, current_self_name, safe_folder
+from api.views import participant_capture_payload, PENDING_TITLES, dashboard_payload, key_phrases_payload, live_transcript_payload, participants_payload, pending_recording_item, recording_item
 
 
 @route("GET", '/api/recording/summary-formats')
@@ -59,14 +59,37 @@ def get_api_recording(req, path: str, query: dict) -> None:
         item["available_summary_formats"] = []
         item["live_transcript"] = live_transcript_payload(rec_id)
         item["participants"] = participants_payload(rec_id, None)
+        item["participant_capture"] = participant_capture_payload(rec_id, None)
         item["key_phrases"] = key_phrases_payload(rec_id)
         return req.send_json(item)
     folder = safe_folder(rec_id)
     detailed_item = recording_item(folder, detailed=True)
     detailed_item["live_transcript"] = live_transcript_payload(rec_id)
     detailed_item["participants"] = participants_payload(rec_id, folder)
+    detailed_item["participant_capture"] = participant_capture_payload(rec_id, folder)
     detailed_item["key_phrases"] = key_phrases_payload(rec_id)
     return req.send_json(detailed_item)
+
+
+@route("GET", '/api/recording/export')
+def get_api_recording_export(req, path: str, query: dict) -> None:
+    """Export: the Recording as one Markdown document, {filename, markdown,
+    notepad}. The renderer hands it to Electron main, which shows the save
+    dialog. transcript=1 adds the transcript; refused under enterprise
+    lockdown, where only the Notes may leave Cora as a file."""
+    import policy
+    import recording_export
+    rec_id = query.get("id", [""])[0]
+    include_transcript = query.get("transcript", ["0"])[0] == "1"
+    if include_transcript and policy.lockdown_enabled():
+        return req.send_json({"error": "Exporting the transcript is disabled by enterprise lockdown."}, 403)
+    try:
+        safe_folder(rec_id)
+        return req.send_json(recording_export.build(rec_id, include_transcript=include_transcript))
+    except FileNotFoundError:
+        return req.send_json({"error": "Recording not found."}, 404)
+    except ValueError as err:
+        return req.send_json({"error": str(err)}, 409 if db.get_recording(rec_id) else 404)
 
 
 @route("GET", '/api/recording/version')
@@ -118,9 +141,9 @@ def post_api_recording_archetype(req, path: str, body: dict) -> None:
     if archetype_key.lower() not in ["auto", "none", ""]:
         try:
             aid = int(archetype_key)
-            arch_data = ARCHETYPES.get(aid)
+            arch_data = archetypes().get(aid)
         except (ValueError, TypeError):
-            for a in ARCHETYPES.values():
+            for a in archetypes().values():
                 if a["archetype_name"].lower() == archetype_key.lower():
                     arch_data = a
                     break
@@ -214,11 +237,37 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
     # it runs local processing by default, not Gemini — the
     # confusing name is exactly why /api/process-recording
     # exists now).
-    folder = safe_folder(body.get("id", ""))
+    # Every failure is answered as {"error", "code", "retryable"} so the
+    # Processing queue can tell permanent from transient (api.processing_errors).
+    import audio_pruning
+    try:
+        return _process_recording(req, path, body)
+    except Exception as exc:
+        from api.processing_errors import classify
+        status, payload = classify(exc)
+        print(f"[process-recording] failed: {type(exc).__name__} -> {payload['code']}", flush=True)
+        return req.send_json(payload, status)
+    finally:
+        audio_pruning.trigger()  # every Processing queue job ends here, ok or not
+
+
+def _process_recording(req, path: str, body: dict) -> None:
+    from pipeline.errors import NoAudioError
+    rec_id = str(body.get("id", ""))
+    # The Electron Processing queue sends the live id it recorded under
+    # (meeting_<timestamp>); archiving gave the Recording its folder id.
+    if not db.get_recording(rec_id):
+        archived = db.get_recording_by_live_id(rec_id)
+        if archived:
+            rec_id = archived["id"]
+    try:
+        folder = safe_folder(rec_id)
+    except (ValueError, FileNotFoundError):
+        raise NoAudioError() from None
     engine = str(body.get("engine", "")).lower()
     # The legacy whole-file Gemini diarization runs only on an explicit,
     # per-request ask. The Settings "Transcription engine" choice is handled
-    # inside the pipeline (pipeline/cloud_asr.py), so "On this Mac" never
+    # inside the pipeline (pipeline/transcriber.py), so "On this Mac" never
     # uploads anything and "Google Gemini" uses the chunked cloud engine.
     # (Previously this compared the setting to "local_mlx" while Settings
     # saves "local"/"gemini", so choosing the private option sent the whole
@@ -226,21 +275,16 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
     wants_cloud = path != "/api/local-process" and engine in {"cloud", "gemini", "vertex"}
     is_local = not wants_cloud
     if is_local:
-        try:
-            import local_meeting_pipeline
+        import local_meeting_pipeline
+        if 'processing' in body:
+            res = local_meeting_pipeline.process_recording_local(folder, options=body['processing'])
+        else:
             res = local_meeting_pipeline.process_recording_local(folder)
-        except ImportError as exc:
-            return req.send_json({
-                "error": (
-                    "Local transcription isn't set up on this machine "
-                    f"(missing dependency: {exc}). Install it with "
-                    "`pip install mlx-whisper mlx-lm`, or set "
-                    "transcription_engine to \"gemini\" via /api/settings "
-                    "to use cloud diarization instead."
-                )
-            }, 503)
+        # A merged Continuation is deleted; recording_id names the Recording
+        # (its parent) that now holds the result.
         return req.send_json({
             "ok": True,
+            "recording_id": res.get("recording_id") or folder.name,
             "diarization": res["diarization"],
             "speaker_profiles": res["speaker_profiles"],
             "call_summary": res["call_summary"],
@@ -248,7 +292,8 @@ def post_api_process_recording(req, path: str, body: dict) -> None:
         })
     else:
         result = gemini_diarize(folder, model=LATEST_AUDIO_MODEL)
-        return req.send_json({"ok": True, "diarization": result, "speaker_profiles": speaker_profiles(result)})
+        return req.send_json({"ok": True, "recording_id": folder.name, "diarization": result,
+                              "speaker_profiles": speaker_profiles(result)})
 
 
 @route("POST", '/api/recording/key-phrase')
@@ -316,73 +361,71 @@ def post_api_recording_summary(req, path: str, body: dict) -> None:
     transcript_text = (folder / "transcript_diarized.md").read_text(errors="replace") if (folder / "transcript_diarized.md").exists() else ""
     notes_text = db.get_notes(folder.name)
     slides_data = local_meeting_pipeline.load_slides_ocr(folder)
-    result = local_meeting_pipeline.generate_summary_variant(transcript_text, notes_text, slides_data, format_name)
+    import ai_trace
+    import processing
+    with ai_trace.run('summary_variant', recording_id=folder.name, format=format_name):
+        result = local_meeting_pipeline.generate_summary_variant(transcript_text, notes_text, slides_data, format_name,
+                                                                 processing.resolve())
     db.update_summary(folder.name, format_name, result)
     return req.send_json({"ok": True, "summary": result})
 
 
 @route("POST", '/api/recording/re-summarize')
 def post_api_recording_re_summarize(req, path: str, body: dict) -> None:
-    folder = safe_folder(body.get("id", ""))
-    provider = str(body.get("provider", "")).strip().lower() or None
-    model = str(body.get("model", "")).strip() or None
+    import processing
+    overrides = body.get('processing')
+    if overrides is None and body.get('provider'):
+        overrides = dict(provider=body['provider'], model=body.get('model', ''))
+    folder = safe_folder(body.get('id', ''))
+    import ai_trace
+    options = processing.resolve(overrides)
+    with processing.scope(options):
+        with ai_trace.run('notes_regeneration', recording_id=folder.name):
+            return _re_summarize(req, path, body, options)
 
+
+def _re_summarize(req, path: str, body: dict, options: dict) -> None:
+    folder = safe_folder(body.get("id", ""))
+    from pipeline.processing_notes import generate_notes, render, privacy_note
+    import processing
     import local_meeting_pipeline
-    t_path = folder / "transcript_diarized.md"
-    if not t_path.exists():
-        raise FileNotFoundError("Transcript not found for this recording")
-    transcript_text = t_path.read_text(encoding="utf-8")
     user_notes = db.get_notes(folder.name) or ""
     slides_data = local_meeting_pipeline.load_slides_ocr(folder)
     diar_data = db.get_recording_data(folder.name, "diarization") or {}
     aligned_segments = diar_data.get("segments", [])
-
-    if provider and provider != "local_mlx":
-        notes = local_meeting_pipeline.generate_enhanced_notes_frontier(
-            transcript_text=transcript_text,
-            slides_data=slides_data,
-            aligned_segments=aligned_segments,
-            user_notes=user_notes,
-            provider=provider,
-            model=model,
-        )
-        used_model = f"{provider}:{model or 'default'}"
-    else:
-        notes = local_meeting_pipeline.generate_enhanced_notes(
-            transcript_text=transcript_text,
-            slides_data=slides_data,
-            aligned_segments=aligned_segments,
-            folder=folder,
-        )
-        used_model = db.get_setting("liquid_model", local_meeting_pipeline.LOCAL_LLM_MODEL_DEFAULT)
+    if not aligned_segments:
+        raise ValueError("Canonical transcript segments are unavailable; retranscribe this recording first")
+    transcript_text = "\n".join(f"[{s.get('start', '')} - {s.get('end', '')}] {s.get('speaker_name', 'Speaker')}: {s.get('text', '')}" for s in aligned_segments)
+    metadata = db.get_recording_data(folder.name, "metadata") or {}
+    notes = generate_notes(transcript_text, slides_data, aligned_segments, folder=folder,
+                           user_notes=user_notes, context=processing.meeting_context(metadata, aligned_segments), options=options)
+    used_model = notes['processing']['model']
 
     now_iso = dt.datetime.now().astimezone().isoformat()
     call_summary_payload = {
+        "title": notes.get("title", ""),
         "overview": notes["overview"],
         "decisions": local_meeting_pipeline._markdown_bullets(notes["decisions_md"]),
         "action_items": local_meeting_pipeline._markdown_bullets(notes["action_items_md"]),
         "unresolved_questions": local_meeting_pipeline._markdown_bullets(notes["open_questions_md"]),
         "keywords": notes["keywords"],
         "model": used_model,
+        "processing": notes["processing"],
         "generated_at": now_iso,
         "schema_version": "2.0",
         "source_recording": "audio.mov",
     }
 
-    enhanced_notes_md = "\n\n".join([
-        "## Overview", notes["overview"],
-        "## Action Items", notes["action_items_md"],
-        "## Key Discussion & Decisions", notes["decisions_md"],
-        "## Timeline", notes["timeline_md"],
-        "## Open Questions", notes["open_questions_md"],
-        "## Key Entities", notes["key_entities_md"],
-    ])
+    enhanced_notes_md = render(notes)
 
     local_meeting_pipeline._archive_previous_outputs(folder)
     (folder / "enhanced_notes.md").write_text(enhanced_notes_md + "\n", encoding="utf-8")
     (folder / "call_summary.json").write_text(json.dumps(call_summary_payload, indent=2, ensure_ascii=False) + "\n")
     if diar_data:
         diar_data["summary"] = notes["overview"]
+        diar_data['processing'] = notes['processing']
+        diar_data['privacy_note'] = privacy_note(None, options)
+        (folder / "diarization.json").write_text(json.dumps(diar_data, indent=2, ensure_ascii=False) + "\n")
         (folder / "gemini_diarization.json").write_text(json.dumps(diar_data, indent=2, ensure_ascii=False) + "\n")
         db.update_recording_data(folder.name, "diarization", diar_data)
 
@@ -405,3 +448,11 @@ def post_api_recording_transcript_edit(req, path: str, body: dict) -> None:
     if not isinstance(edits, list) or not edits or len(edits) > 2000:
         raise ValueError("edits must be a non-empty list")
     return req.send_json(transcript_edit.apply_edits(folder.name, folder, edits, self_name=current_self_name()))
+
+
+@route('GET', '/api/recording/processing')
+def get_api_recording_processing(req, path: str, query: dict) -> None:
+    from processing_history import history
+    folder = safe_folder(query.get('id', [''])[0])
+    metadata = db.get_recording_data(folder.name, 'metadata') or {}
+    return req.send_json(history(folder.name, aliases=[metadata.get('live_recording_id')]))

@@ -9,13 +9,14 @@ import credentials
 import datetime as dt
 import db
 import meeting_types
+import usage_events
 import shutil
 from api.core import PYTHON, ROOT, available_models, local_usage_stats
 
 
 @route("GET", '/api/settings')
 def get_api_settings(req, path: str, query: dict) -> None:
-    return req.send_json({"value": db.get_setting(query.get("key", [""])[0])})
+    return req.send_json({"value": read_setting(query.get("key", [""])[0])})
 
 
 @route("GET", '/api/onboarding/status')
@@ -144,21 +145,50 @@ def post_api_memory_terms_merge(req, path: str, body: dict) -> None:
     return req.send_json({"ok": True})
 
 
+def _candidate(provider: str, body: dict) -> dict:
+    """Entered api_key/base_url completed from the saved ones, for the
+    OpenAI-compatible presets and Anthropic (blank key = keep the saved key)."""
+    from pipeline import text_model
+    if provider == "anthropic" or provider in credentials.OPENAI_COMPATIBLE_PRESETS:
+        conn = text_model.candidate_connection(provider, base_url=body.get("base_url"), api_key=body.get("api_key"))
+        return {"api_key": conn["api_key"], "base_url": None if provider == "anthropic" else conn["base_url"]}
+    return {"api_key": body.get("api_key"), "base_url": body.get("base_url")}
+
+
 @route("POST", '/api/credentials/test')
 def post_api_credentials_test(req, path: str, body: dict) -> None:
     provider = body.get("provider", "vertex")
-    ok, msg = credentials.test_credentials(
-        provider=provider,
-        project=body.get("project"),
-        location=body.get("location", "us-central1"),
-        auth_type=body.get("auth_type", "adc"),
-        service_account_json=body.get("service_account_json"),
-        api_key=body.get("api_key"),
-        model=body.get("model"),
-    )
+    if provider in credentials.OPENAI_COMPATIBLE_PRESETS or provider == "anthropic":
+        ok, msg = credentials.test_credentials(provider=provider, model=body.get("model"), **_candidate(provider, body))
+    else:
+        ok, msg = credentials.test_credentials(
+            provider=provider,
+            project=body.get("project"),
+            location=body.get("location", "us-central1"),
+            auth_type=body.get("auth_type", "adc"),
+            service_account_json=body.get("service_account_json"),
+            api_key=body.get("api_key"),
+            model=body.get("model"),
+        )
     if not ok:
         return req.send_json({"ok": False, "error": msg}, 400)
     return req.send_json({"ok": True, "message": msg})
+
+
+@route("POST", '/api/credentials/models')
+def post_api_credentials_models(req, path: str, body: dict) -> None:
+    """Settings' "Load models": the provider's model ids, fetched here so the
+    saved key never reaches the renderer. Errors never echo the provider body."""
+    import policy
+    from pipeline import text_model
+    preset = str(body.get("provider") or body.get("preset") or "")
+    try:
+        models = text_model.list_models(preset, base_url=body.get("base_url"), api_key=body.get("api_key"))
+    except policy.LockdownError as exc:
+        return req.send_json({"ok": False, "error": str(exc)}, 403)
+    except (text_model.ModelListError, ValueError) as exc:
+        return req.send_json({"ok": False, "error": str(exc)}, 400)
+    return req.send_json({"ok": True, "models": models})
 
 
 @route("POST", '/api/credentials/save', '/api/onboarding/api-key')
@@ -172,23 +202,26 @@ def post_api_credentials_save(req, path: str, body: dict) -> None:
     sa_json = body.get("service_account_json")
     base_url = str(body.get("base_url", "")).strip()
 
+    if provider == "anthropic" or provider in credentials.OPENAI_COMPATIBLE_PRESETS:
+        candidate = _candidate(provider, body)
+        raw_key, base_url = candidate["api_key"], candidate["base_url"] or ""
+
     if provider == "anthropic":
         ok, msg = credentials.test_credentials(provider="anthropic", api_key=raw_key, model=model or None)
         if not ok:
             return req.send_json({"ok": False, "error": f"Anthropic key rejected: {msg}"}, 400)
-        credentials.save_anthropic_credentials(raw_key, model=model or "claude-3-7-sonnet-20250219")
+        credentials.save_anthropic_credentials(raw_key, model=model)
 
-    elif provider == "openai":
-        ok, msg = credentials.test_credentials(provider="openai", api_key=raw_key, model=model or None, location=base_url or None)
+    elif provider in credentials.OPENAI_COMPATIBLE_PRESETS:
+        # openai, openrouter, groq, ollama, lmstudio, custom: one OpenAI-compatible adapter.
+        if provider == "custom" and not base_url:
+            raise ValueError("Base URL cannot be empty.")
+        ok, msg = credentials.test_credentials(provider=provider, api_key=raw_key, model=model or None, base_url=base_url or None)
         if not ok:
-            return req.send_json({"ok": False, "error": f"OpenAI key rejected: {msg}"}, 400)
-        credentials.save_openai_credentials(raw_key, model=model or "gpt-4o", base_url=base_url or "https://api.openai.com/v1")
-
-    elif provider == "custom":
-        ok, msg = credentials.test_credentials(provider="custom", api_key=raw_key, model=model or None, location=base_url)
-        if not ok:
-            return req.send_json({"ok": False, "error": f"Custom endpoint rejected: {msg}"}, 400)
-        credentials.save_custom_llm_credentials(base_url=base_url, api_key=raw_key, model=model or "default")
+            label = {"openai": "OpenAI key", "custom": "Custom endpoint"}.get(provider, f"{provider} endpoint")
+            return req.send_json({"ok": False, "error": f"{label} rejected: {msg}"}, 400)
+        credentials.save_openai_compatible_credentials(provider, base_url=base_url, api_key=raw_key,
+                                                       model=model or ("default" if provider == "custom" else ""))
 
     elif provider == "vertex":
         ok, msg = credentials.test_credentials(
@@ -222,6 +255,10 @@ def post_api_credentials_save(req, path: str, body: dict) -> None:
             credentials._write_secure_file(file_cfg)
             credentials._invalidate_public_status_cache()
 
+    asr_model = str(body.get("asr_model") or "").strip()
+    if asr_model and provider in credentials.OPENAI_COMPATIBLE_PRESETS:
+        db.set_setting("openai_asr_model", asr_model)
+
     return req.send_json({"ok": True, "credentials": credentials.get_public_status()})
 
 
@@ -231,6 +268,7 @@ def post_api_onboarding_name(req, path: str, body: dict) -> None:
     if not name:
         raise ValueError("Name is empty")
     db.set_setting("pending_self_name", name)
+    usage_events.seed_display_name()
     return req.send_json({"ok": True})
 
 
@@ -240,12 +278,110 @@ def post_api_onboarding_complete(req, path: str, body: dict) -> None:
     return req.send_json({"ok": True})
 
 
+# Keys where a stored null means something (microphone: System default;
+# beta_display_name: no name), so {key, value: null} clears them. For every
+# other key null stays a read.
+NULLABLE_SETTINGS = frozenset({"microphone", "beta_display_name"})
+
+# Defaults for keys whose unset value is not null (beta audio retention).
+SETTING_DEFAULTS = {"audio_retention_days": 30, "audio_cap_mb": 500}
+READ_ONLY_SETTINGS = frozenset({"install_id"})
+DISPLAY_NAME_MAX = usage_events.DISPLAY_NAME_MAX
+
+
+def read_setting(key: str):
+    """A setting as the app should see it: the Install id (created on first
+    read), the share toggle's effective value (build-variant default, off
+    under lockdown), and the audio retention defaults."""
+    import usage_events
+    if key == "install_id":
+        return usage_events.install_id()
+    if key == "share_usage":
+        return usage_events.share_usage()
+    return db.get_setting(key, SETTING_DEFAULTS.get(key))
+
+
 @route("POST", '/api/settings')
 def post_api_settings(req, path: str, body: dict) -> None:
+    """{key, value} writes; {key} alone, or {key, value: null}, reads; for a
+    key in NULLABLE_SETTINGS, {key, value: null} clears it instead."""
     key = str(body.get("key", ""))
     value = body.get("value")
-    if value is not None:
-        db.set_setting(key, value)
-        return req.send_json({"ok": True})
-    else:
-        return req.send_json({"value": db.get_setting(key)})
+    if value is None and not ("value" in body and key in NULLABLE_SETTINGS):
+        return req.send_json({"value": read_setting(key)})
+    if key in READ_ONLY_SETTINGS:
+        raise ValueError(f"{key} is read-only")
+    validate = _VALIDATORS.get(key)
+    if validate and value is not None:
+        value = validate(value)
+    db.set_setting(key, value)
+    return req.send_json({"ok": True})
+
+
+def _validate_microphone(value):
+    """The Microphone setting is {unique_id, name} (null = System default)."""
+    if not (isinstance(value, dict) and set(value) == {"unique_id", "name"}
+            and all(isinstance(v, str) and v.strip() for v in value.values())):
+        raise ValueError("microphone must be {unique_id, name} or null")
+    return value
+
+
+def _validate_display_name(value):
+    """Your name for the Cora team: trimmed text; blank means no name."""
+    if not isinstance(value, str) or len(value.strip()) > DISPLAY_NAME_MAX:
+        raise ValueError(f"beta_display_name must be text of at most {DISPLAY_NAME_MAX} characters, or null")
+    return value.strip() or None
+
+
+def _true_or_false(key: str):
+    def validate(value):
+        if not isinstance(value, bool):
+            raise ValueError(f"{key} must be true or false")
+        return value
+    return validate
+
+
+def _whole_number_at_least(key: str, minimum: int):
+    def validate(value):
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            raise ValueError(f"{key} must be a whole number of at least {minimum}")
+        return value
+    return validate
+
+
+_VALIDATORS = {
+    "microphone": _validate_microphone,
+    "beta_display_name": _validate_display_name,
+    "share_usage": _true_or_false("share_usage"),
+    # Menu bar mode (src/main/menu-bar.js): the user's open-at-login choice
+    # (unset = first run) and the one-time "still running" notice.
+    "open_at_login": _true_or_false("open_at_login"),
+    "menu_bar_notice_shown": _true_or_false("menu_bar_notice_shown"),
+    "audio_retention_days": _whole_number_at_least("audio_retention_days", 1),
+    "audio_cap_mb": _whole_number_at_least("audio_cap_mb", 50),
+}
+
+
+@route("GET", '/api/audio-devices')
+def get_api_audio_devices(req, path: str, query: dict) -> None:
+    """Microphone picker's device list, from the capture helper. Local-only:
+    not gated by enterprise lockdown."""
+    import capture_devices
+    return req.send_json({"devices": capture_devices.list_devices()})
+
+
+@route('GET', '/api/processing')
+def get_api_processing(req, path: str, query: dict) -> None:
+    import processing
+    return req.send_json(dict(preferences=processing.preferences(), hardware=processing.hardware(),
+                              templates=[dict(id=k, name=v[0], description=v[1]) for k, v in processing.TEMPLATES.items()]))
+
+
+@route('POST', '/api/processing')
+def post_api_processing(req, path: str, body: dict) -> None:
+    import processing
+    selected = processing.validate(body)
+    # Saving this explicit profile is consent to automatic use, unlike saving an API key.
+    processing.resolve(selected)
+    db.set_setting('processing_preferences', selected)
+    return req.send_json(dict(ok=True, preferences=selected))

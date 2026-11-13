@@ -14,6 +14,9 @@ function transcriptSegments(record){
       speaker: seg.speaker_id === 'You' ? (record.self_name || 'You') : (seg.speaker_name || seg.speaker_id || 'Unknown'),
       speakerId: seg.speaker_id || '',
       source: seg.speaker_source || '',
+      // Which engine produced the turn: a cloud Window the cloud engine kept
+      // rejecting is transcribed locally ("local") or left as a gap ("gap").
+      engine: seg.engine || '', reason: seg.reason || '',
     }));
   }
   const out = [];
@@ -33,9 +36,12 @@ function speakerChoices(record, segments){
 }
 
 function transcriptAsText(segments){
-  return segments.filter(s => s.text && s.text !== '!')
-    .map(s => `[${s.start}–${s.end}] ${s.speaker}: ${s.text}`).join('\n\n');
+  return segments.filter(isShownTurn)
+    .map(s => s.engine === 'gap' ? `[${s.start}–${s.end}] ${gapText(s)}` : `[${s.start}–${s.end}] ${s.speaker}: ${s.text}`).join('\n\n');
 }
+
+const isShownTurn = s => s.engine === 'gap' || (s.text && s.text !== '!');
+const gapText = s => `[not transcribed: ${s.reason || 'unknown reason'}]`;
 
 function renderCleanTranscript(record){
   // The final, processed transcript — one row per turn with speaker and time
@@ -59,9 +65,13 @@ function renderCleanTranscript(record){
   }
 
   if(!transcriptEditing){
-    host.innerHTML = segments.filter(s => s.text && s.text !== '!').map(s => `
+    host.innerHTML = segments.filter(isShownTurn).map(s => s.engine === 'gap' ? `
+      <div class="timeline-turn transcript-gap"><div class="timeline-turn-head">
+        <span class="timeline-speaker"></span>
+        <span class="timeline-time">${esc(s.start)}–${esc(s.end)}</span></div>
+        <p class="timeline-text">${esc(gapText(s))}</p></div>` : `
       <div class="timeline-turn"><div class="timeline-turn-head">
-        <span class="timeline-speaker">${esc(s.speaker)}${s.source === 'manual' ? '<span class="speaker-source">edited</span>' : ''}</span>
+        <span class="timeline-speaker">${esc(s.speaker)}${s.source === 'manual' ? '<span class="speaker-source">edited</span>' : ''}${s.engine === 'local' ? '<span class="engine-note">transcribed on this Mac</span>' : ''}</span>
         <span class="timeline-time">${esc(s.start)}–${esc(s.end)}</span></div>
         <p class="timeline-text">${esc(s.text)}</p></div>`).join('');
   } else {
@@ -90,7 +100,11 @@ function renderCleanTranscript(record){
   }
 
   const copyBtn = $('#copyTranscriptBtn');
-  if(copyBtn) copyBtn.onclick = () => { copyText(transcriptAsText(segments)); toast('Transcript copied with speakers and timestamps.'); };
+  if(copyBtn) copyBtn.onclick = () => {
+    copyText(transcriptAsText(segments));
+    toast('Transcript copied with speakers and timestamps.');
+    if(record?.id) track('notes_exported', { recording_id: record.id, kind: 'copy' });
+  };
   if(editBtn) editBtn.onclick = () => { transcriptEditing = true; renderCleanTranscript(record); };
   if(cancelBtn) cancelBtn.onclick = () => { transcriptEditing = false; renderCleanTranscript(record); };
   if(saveBtn) saveBtn.onclick = () => saveTranscriptEdits(record, segments);
@@ -116,6 +130,7 @@ async function saveTranscriptEdits(record, segments){
   try{
     await api('/api/recording/transcript/edit', { method: 'POST', body: JSON.stringify({ id: record.id, edits }) });
     transcriptEditing = false;
+    track('transcript_corrected', { recording_id: record.id, corrections: edits.length });
     toast(`Saved ${edits.length} correction${edits.length === 1 ? '' : 's'}. Re-summarize to refresh the notes.`);
     await loadSelectedRecording(record.id);
   }catch(err){ toast(err.message, true); }

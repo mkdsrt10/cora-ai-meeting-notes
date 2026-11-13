@@ -1,9 +1,90 @@
 # Changelog
 
-## Unreleased
+## 0.4.4 — 2026-11-13
 
+- New note: a button at the top of the sidebar (and ⌘N) starts a Recording from the Cora window and opens it with the cursor in the Notepad. While a Recording is live or paused it reads "Go to live note". Until now you could only start from the menu bar icon or the call prompt.
+- Cora stays in the menu bar: closing the window, ⌘Q and Dock > Quit keep Cora running in the menu bar (no Dock icon) so it still notices calls; only "Quit Cora" in the menu bar icon quits. Cora opens at login straight into the menu bar (turn it off in Settings). The first time the window closes, a notice says where Cora went. The menu item "Open Dashboard" is now "Open Cora", and clicking Cora in the Dock or Spotlight shows the window again.
+- Beta builds: your name for the Cora team (Settings > Beta) starts out as the name you typed during onboarding, copied once (also on first start of 0.4.4 if you onboarded earlier and left it empty). Change or clear it there; a cleared name stays cleared. Public builds never fill it in. See `docs/BETA_POLICY.md`.
+- A short tour of the main features (New note, call prompts and the menu bar, your notes, Settings > Beta) as a screenshot carousel: shown once after onboarding, and once on the first start of 0.4.4 for everyone who onboarded earlier. Replay it from Settings > Preferences > Take the tour.
+- Usage events: `recording_started` carries `started_from` (`new_note`, `tray`, `call_prompt`, `continue`, `other`); new `onboarding_completed`, `tour_closed` (slide, outcome), and per day `ui_activity` (active minutes, doing and browsing counts) and `ui_action_count` (per action id). Counts and action ids only, never text. Listed in `docs/TRACING.md`.
+
+## 0.4.3 — 2026-11-12
+
+- Call prompts now wait until you are in the call: a Meet green room, an idle Zoom or Slack desktop app never prompts from the 20-second poll, and clicking Join prompts within a few seconds. The prompt is a small always-on-top panel (Start recording, Dismiss) that stays until you act or the call ends; the macOS banner is only the fallback.
+- A missing permission (Accessibility, or "Allow JavaScript from Apple Events" in a browser) is now a hint in the permissions area, shown once per Install, instead of a notification once per app start.
+- Usage events: `call_detected` now carries `trigger` (`mic`, `poll` or `followup`, replacing `signal`) and `seconds_to_prompt`; new `call_prompt_action` (`start`, `dismiss`, `expired`) and `detect_fallback` (`ax_untrusted`, `js_events_off`). Metadata only; listed in `docs/TRACING.md`.
+- Participants: a name on the call is linked to someone in People only when it is the same name (or a lone first name that only one Person has). A shared surname no longer links "Shashank Yadav" to "Neeraj Yadav", and a colleague who shares your surname is no longer dropped from the roster as you.
+- Export: an Export button in the recording title bar saves the meeting as a Markdown file, either the Notes or the Notes plus the transcript, with your Notepad text as a "My notes" section. Under enterprise lockdown only the Notes can be exported. Each export attempt sends one Usage event, `notes_exported` (kind `export`, content, whether the Notepad was included, saved/cancelled/failed); never a title, path or text.
+- Recording detail: a Copy ID button in the title bar copies the Recording's ID (handy when reporting a problem).
+- The app's daily log is buffered and pruned again when the day rolls over.
+
+0.4.2 was never published; its changes ship in 0.4.3.
+
+## 0.4.2 — 2026-11-11
+
+- Call detection for Google Meet: rooms at today's `meet.google.com/meet/xxx-xxxx-xxx` address are detected again (the old rule wanted the room code right after the host, so Meet never prompted since October). Cora asks the tab whether you have joined, so the "Google Meet call detected. Start recording?" prompt comes after you click Join, not in the green room. The landing page, `/new` and `/landing` never count.
+- Slack huddles in a browser (Chrome, Brave, Edge, Safari) are detected, expanded or collapsed to the bottom mini-bar. A Slack tab with no huddle never prompts.
+- Zoom's web client (`zoom.us/wc/...`) is detected like a Zoom join link.
+- The prompt still never records by itself: nothing starts until you click Start Recording. The mic turning on and the 20-second poll use the same check, and each check writes one `[call-detect]` line to the log.
+- Leaving a Call stops only a Recording that Cora's prompt started: when the Call's tab or window goes away, a Recording you started from the tray or floater keeps going (the microphone being released still stops any Recording, as before).
+- When a browser does not allow "Allow JavaScript from Apple Events", Cora shows one notification per app start naming the setting (it is listed under Settings > Notifications & logs). Without it, Meet is still detected from the tab address alone (so it may prompt before you join) and browser huddles are not detected.
+- New Usage event `call_detected` (app, `mic` or `poll`, and whether the page or app confirmed the Call); no URL, title or names. Listed in `docs/TRACING.md`.
+- Developers: the "is a Call live in this tab?" check is one snippet, `capture/live-call-snippet.js`, shared by the detector and the speaker watcher (`scripts/gen-live-call-snippet.js` writes the Swift copy; a test fails if they drift).
+
+## 0.4.1 — 2026-11-11
+
+- Fix: every recording on a Mac running an older macOS than the build machine failed at once with "capture helper exited with code null". The Swift helpers (dual-capture, mic-watch, speaker-watch, mac-ocr) were compiled without a deployment target, so they were linked against the build Mac's macOS and aborted at load elsewhere (dyld "Symbol not found", "built for macOS 27.0 which is newer than running OS"). They are now built for macOS 14.0, the app's minimum, and the build script refuses a helper built for anything else.
+- Onboarding: the last step could not be scrolled back to its top on a small screen (the centered card overflowed above the window), and it showed the local Whisper and notes-model lists plus a redundant Save button to everyone. The card now scrolls from its top, the model lists appear only when a local processing mode is chosen, and Finish setup saves the processing choices.
+
+## 0.4.0 — 2026-11-11
+
+Internal beta telemetry, feedback and in-app updates. What is shared, in plain words: `docs/BETA_POLICY.md`.
+
+- Usage events: small, metadata-only records (counts, durations, versions, models, error codes; never titles, names, transcripts or note text) from Electron main, the Recording session, the renderer and the processing pipeline, checked against a fixed catalog (`python/usage_events.py`, listed in `docs/TRACING.md`) and stored in a local `usage_events` table. A background sender delivers them to the Cora team's receiver at start, every 10 minutes while any are unsent, right after Feedback and on quit; a failed send keeps them, dropping only those over 7 days old or beyond 5 MB (the same limits apply while sharing is off). New Settings > Beta panel: the share toggle, an optional name for the Cora team, and "Show what Cora shares", which exports every stored event to `usage-events-export.jsonl` and shows it in Finder.
+- Share toggle default by build variant: on in team builds, off in public ones; enterprise lockdown forces it off (nothing is sent, nothing is captured, no update check). A build without a receiver URL and token never sends anything.
+- Feedback: a widget at the top of a Recording's notes rates the Recording, its Notes or Overall with a thumbs up or down, reasons (a thumbs down needs one) and an optional comment of up to 500 characters; Settings > Beta has a general message box for anything not tied to a Recording.
+- Captured Recordings: every rated Recording, and one in four Recordings under an hour (seeded by the Recording id, rate and length cap from the remote config), is uploaded in full to the receiver for accuracy review: audio tracks, transcript, speaker timeline, Participants, generated notes, metadata and run metadata without prompts or model output. Pending captures upload one at a time after each event batch, retried every flush until sent; one the receiver refuses (4xx) or not sent within 7 days is dropped.
+- Audio pruning: audio older than 30 days, then the oldest audio beyond 500 MB in total, is deleted from the Mac (both adjustable in Settings > Beta); transcripts, notes and screenshots stay. Recordings being recorded, processed, failed or waiting to be captured are skipped. The notes view says "Audio removed after N days" (or "to stay under the N MB cap") and disables Retranscribe; one notification per pass, and a local log at `logs/audio_pruning.jsonl`.
+- In-app updates: the app checks the latest GitHub release at start and every 6 hours and shows a banner with Update and Later (24 h). Update downloads the dmg, verifies its published sha256, stages the new bundle beside the old one, and swaps it in and restarts once nothing is recording or processing; any failure leaves the installed app untouched. Update is disabled while a meeting is recording or processing, and Later disappears when the remote config's `min_app_version` is above the running version. `docs/TEAM_SETUP.md` describes it; the install command remains the fallback.
+- Receiver and report tools: `receiver/receiver.py` (stdlib only; events into day files, Captured Recordings into per-install folders, the remote config served from a hand-edited file; setup with launchd and Tailscale Funnel in `receiver/README.md`) and `tools/usage_report.py <receiver-root> [--since DAYS]`, a per-version Markdown report.
+- Fix: packaged runs recorded no app version or commit in traces (a packaged app has no `package.json` or `.git` at its root). The build script now writes `build-info.json` (version, commit, variant, receiver) into the app resources and Electron passes it to the Python server at spawn.
+
+## 0.3.3 — 2026-11-10
+
+- Slack huddles in a browser: a huddle collapsed to Slack's bottom mini-bar (or popped out to its own window) has no participant tiles in the tab. The other party of a DM huddle is now read from the mini-bar's "Huddle with <Name>" title, and that title is used as the meeting title; a channel huddle still names nobody there.
+
+## 0.3.2 — 2026-11-10
+
+- Slack huddles in a browser: participants are read from the huddle's own tiles and "Name's profile" labels (the previous selectors matched nothing in today's Slack), the huddle title comes from the huddle window, and a DM tab without a huddle is no longer treated as a live call.
+- A meeting title is announced once per recording; two live tabs no longer make the title alternate every scan.
+- Participants tab: "Add <name> to People…" in a row's link dropdown creates the Person and links the participant in one step.
+
+## 0.3.1 — 2026-11-10
+
+- Fix: participant names in browser meetings (Meet, Zoom web, Slack huddles) were empty since 0.2.3. The page-snapshot script is flattened onto one line before it reaches the browser, and `//` comments added in 0.2.3 commented out the rest of it. Comments are now block comments and a test parses the flattened script.
+- The speaker watcher's full output is back in `logs/speaker-watch-*.log` (only level meters are left out), and an AppleScript failure is logged with its message, not just its number.
+- A browser Slack huddle popup (window titled "Huddle…") now counts as a Slack window for the Accessibility fallback.
+
+## 0.3.0 — 2026-11-10
+
+- Microphone selector: Settings > Recording and the onboarding permissions step let you pick the microphone Cora records with. "System default" now follows the macOS default input (it previously followed AVFoundation's own idea of a default, which could be the webcam mic). The floating bar and recording panel name the microphone in use; a mic that is missing or disconnects mid-call falls back to the system default without stopping the recording, with a notification.
+- Cloud transcription resilience: speech detection is relative to each recording's noise floor instead of fixed thresholds; a Window the cloud engine keeps rejecting or refuses is transcribed on this Mac (or kept as a marked gap on builds without a local model) instead of failing the meeting; affected lines are marked in the transcript and summarised in one notification.
+- A Recording whose processing failed now shows "Processing failed" with the reason and a Retry button, instead of "Needs diarization".
+- Architecture (v0.3): one Text model and one Transcriber behind every model call, a Plugin seam (Coaching and Todo as plugins), a Recording session and Processing queue in Electron, "Where models run" settings with OpenAI-compatible presets, typed processing errors.
+- Research: `docs/RESEARCH.md` gains a week-long local vs Gemini comparison with judge-graded accuracy, and `tools/compare_engine_reruns.py`.
+
+## 0.2.3 — 2026-10-31
+
+- Team builds (`scripts/build-app.sh --team`): new installs default to Gemini for transcription and notes, skip local model downloads, and ask for the Gemini key after onboarding. `docs/TEAM_SETUP.md` walks a new member through it.
+- Bundled ffmpeg/ffprobe (built from the official 7.1.1 source by `scripts/build-ffmpeg.sh`): no Homebrew needed.
+- Releases are signed with one persistent self-signed identity (`scripts/signing-setup.sh`), so macOS permission grants survive updates.
+- Participant names in browser meetings: one tab-less window or tab refusing JavaScript no longer aborts the whole scan; Zoom web client supported; clear fixes shown for "Allow JavaScript from Apple Events" and Automation errors.
+- Fix: packaged app now ships `config.example.json`, so fresh installs get default settings.
+- Installer URL now points at the `production` branch.
 - Notifications & logs panel, pause/resume and "Continue this meeting" now show live progress on the original meeting (and let you listen before it merges), floating widget lost its Screen button.
-- Optional hosted transcription: Settings > On-Device Models > Transcription engine can now use Google Gemini instead of the local model (off by default, disabled under enterprise lockdown).
+- Optional hosted transcription: Settings > On-Device Models > Transcription engine can use Google Gemini instead of the local model (off by default, disabled under enterprise lockdown). It transcribes in ~4-minute windows (15-17 requests per meeting-hour instead of ~200 short clips), validates every window, snaps timestamps to the local speech detector, retries then splits a bad window, and fails loudly rather than silently switching engines. See docs/transcription.md.
+- Fix: choosing "On this Mac" no longer uploads the recording; transcripts now record which engine really ran.
+- One-line installer (`scripts/install.sh`) so the unsigned app opens without the macOS warning; INSTALL docs explain why the app isn't notarized.
 - `tools/asr_bench.py` + `docs/ASR_BENCHMARK.md`: score candidate speech models on your own meeting.
 
 ## 0.2.2 — 2026-10-05

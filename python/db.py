@@ -154,6 +154,58 @@ def init_db():
             )
         ''')
         conn.execute('CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at)')
+
+        # Usage events (beta telemetry): written locally regardless of the
+        # share toggle; sent_at is set once the sender delivered the row.
+        # See python/usage_events.py.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS usage_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                name TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                sent_at TEXT
+            )
+        ''')
+        conn.execute('CREATE INDEX IF NOT EXISTS idx_usage_events_unsent ON usage_events(sent_at, id)')
+
+        # Effort / Active time: counts of days not yet emitted, per action id;
+        # the day's active minutes under '@active_min'. See python/activity.py.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS ui_activity_counts (
+                day TEXT NOT NULL,
+                action TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (day, action)
+            )
+        ''')
+
+        # Captured Recordings (beta): one row per Recording asked for, by a
+        # rating or the sample; uploaded_at / dropped_at end it. See python/capture.py.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS captures (
+                recording_id TEXT PRIMARY KEY,
+                reason TEXT NOT NULL,
+                requested_at TEXT NOT NULL,
+                uploaded_at TEXT,
+                dropped_at TEXT
+            )
+        ''')
+
+        # Feedback (beta): a thumbs up/down on a Recording, its notes, or Cora
+        # overall (recording_id NULL for the Settings general message);
+        # reasons is a JSON list. See python/api/routes/beta.py.
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                recording_id TEXT,
+                target TEXT NOT NULL,
+                rating TEXT NOT NULL,
+                reasons TEXT NOT NULL DEFAULT '[]',
+                comment TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+        ''')
         conn.commit()
 
 
@@ -259,6 +311,29 @@ def get_pending_recording(source_stem):
 def set_pending_recording_status(recording_id, status):
     with get_db() as conn:
         conn.execute("UPDATE recordings SET status = ? WHERE id = ?", (status, recording_id))
+        conn.commit()
+
+
+def set_processing_failure(recording_id, failure=None):
+    """Record how this Recording's last processing run failed
+    ({"code", "message", "at"}) and set its status to "failed" (the
+    "Processing failed" Stage), or, with failure=None, clear both after a
+    successful run. Stored on the Recording itself so the Stage survives a
+    restart. A no-op for an id with no row."""
+    with get_db() as conn:
+        row = conn.execute("SELECT metadata, status FROM recordings WHERE id = ?", (recording_id,)).fetchone()
+        if not row:
+            return
+        meta = json.loads(row["metadata"]) if row["metadata"] else {}
+        if failure:
+            meta["processing_failure"] = dict(failure)
+            status = "failed"
+        else:
+            if "processing_failure" not in meta and row["status"] != "failed":
+                return
+            meta.pop("processing_failure", None)
+            status = None if row["status"] == "failed" else row["status"]
+        conn.execute("UPDATE recordings SET metadata = ?, status = ? WHERE id = ?", (json.dumps(meta), status, recording_id))
         conn.commit()
 
 
@@ -371,6 +446,22 @@ def update_recording_data(recording_id, field, data):
         conn.execute(f"UPDATE recordings SET {field} = ? WHERE id = ?", (json.dumps(data), recording_id))
         conn.commit()
 
+
+def set_recording_metadata(recording_id, **fields):
+    """Set top-level metadata keys on a Recording in one statement, so a
+    concurrent read-modify-write of other keys is not lost. A no-op for an
+    id with no row."""
+    if not fields:
+        return
+    args = []
+    for key, value in fields.items():
+        args += [f"$.{key}", json.dumps(value)]
+    pairs = ", ".join("?, json(?)" for _ in fields)
+    with get_db() as conn:
+        conn.execute(f"UPDATE recordings SET metadata = json_set(COALESCE(NULLIF(metadata, ''), '{{}}'), {pairs})"
+                     " WHERE id = ?", (*args, recording_id))
+        conn.commit()
+
 def get_recording_data(recording_id, field):
     allowed_fields = {"metadata", "diarization", "coaching", "delivery_metrics", "call_summary", "speaker_labels", "identity"}
     if field not in allowed_fields:
@@ -387,7 +478,9 @@ def get_recording_by_live_id(live_id):
     that id before archiving replaced it with the real folder id."""
     with get_db() as conn:
         row = conn.execute(
-            "SELECT * FROM recordings WHERE status IS NULL AND json_extract(metadata, '$.live_recording_id') = ?",
+            # status 'failed' is an archived Recording whose last run failed;
+            # the Processing queue retries it by this live id.
+            "SELECT * FROM recordings WHERE (status IS NULL OR status = 'failed') AND json_extract(metadata, '$.live_recording_id') = ?",
             (live_id,),
         ).fetchone()
         if row:
@@ -571,6 +664,14 @@ def upsert_speaker_match(recording_id, speaker_id, person_id, confidence, confir
 def get_todo_states():
     with get_db() as conn:
         return [dict(row) for row in conn.execute("SELECT * FROM todo_state").fetchall()]
+
+def set_todo_state(recording_id, item_index, done, done_at):
+    with get_db() as conn:
+        conn.execute('''
+            INSERT INTO todo_state (recording_id, item_index, done, done_at) VALUES (?, ?, ?, ?)
+            ON CONFLICT(recording_id, item_index) DO UPDATE SET done=excluded.done, done_at=excluded.done_at
+        ''', (recording_id, int(item_index), int(bool(done)), done_at))
+        conn.commit()
 
 def upsert_vocabulary_term(term, source, now_iso):
     """Record or reinforce a transcription vocabulary term (a name, product, or

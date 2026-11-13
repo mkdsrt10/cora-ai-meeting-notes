@@ -4,6 +4,13 @@
 
 async function checkModelsOnStartup(){
   try{
+    // Gemini transcription needs a key, not local weights.
+    const processing = await api('/api/processing');
+    if(processing.preferences?.transcription === 'gemini'){
+      const creds = await fetchCredentialsStatus();
+      if(!creds?.has_ai_studio_key && !creds?.is_configured) await openCredentialsModal();
+      return;
+    }
     const status = await api('/api/models/status');
     if(!status.whisper?.ready) await openModelSetupModal(status);
   }catch(error){ console.error('Model status check failed:', error); }

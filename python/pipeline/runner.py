@@ -14,18 +14,18 @@ import ai_trace
 import db
 import paths
 from .common import _parse_ts, _write_progress, format_ts
-from .config import LOCAL_LLM_MODEL_DEFAULT, resolve_whisper_model
-from .llm import _last_llm_stats
-from .notes import _markdown_bullets, generate_enhanced_notes
+from .config import resolve_whisper_model
+from .llm import UNTRUSTED, _last_llm_stats
+from .notes import _markdown_bullets
 from .speakers import _guess_remote_speakers, _load_continuation_segments, guess_speaker_from_tracks, load_accessibility_timeline, load_ax_participants, match_speaker_from_timeline, resolve_other_participant_name
-from .transcribe import transcribe_with_silence_removal
+from .transcriber import transcriber
 from . import romanize
 from .context import build_context
-from .llm import LazyLLM
+from .text_model import text_model
 from .vocabulary import learn_from_transcript
 
 
-def log_resource_usage(recording_id: str, stage_timings: dict[str, float], audio_duration: float, speech_duration: float, llm_stats: dict[str, Any] | None = None) -> None:
+def log_resource_usage(recording_id: str, stage_timings: dict[str, float], audio_duration: float, speech_duration: float, llm_stats: dict[str, Any] | None = None) -> dict[str, Any]:
     """Append a JSONL entry with wall-clock, CPU, and peak-memory usage for a
     local processing run. GPU/power draw aren't available from plain Python on
     macOS without root (that needs `powermetrics`, which requires sudo) — this
@@ -55,6 +55,7 @@ def log_resource_usage(recording_id: str, stage_timings: dict[str, float], audio
     with log_path.open("a") as f:
         f.write(json.dumps(entry) + "\n")
     print(f"[Local Pipeline] Resource usage: {entry}", flush=True)
+    return entry
 
 
 def load_slides_ocr(folder: Path) -> list[dict[str, Any]]:
@@ -95,25 +96,63 @@ def _archive_previous_outputs(folder: Path) -> None:
     print(f"[Local Pipeline] Archived previous outputs for {folder.name} to versions/{stamp}", flush=True)
 
 
-def process_recording_local(folder: Path) -> dict[str, Any]:
-    """Complete end-to-end local processing: MLX Whisper + AX Speakers + OCR Slides + Qwen3-4B."""
-    audio_file = next((p for p in folder.iterdir() if p.is_file() and p.name.startswith("audio.")), None)
-    if not audio_file:
-        raise FileNotFoundError(f"No audio file found in {folder}")
+def process_recording_local(folder: Path, options: dict | None = None) -> dict[str, Any]:
+    """Process one Recording, then (lock released, trace run closed) run the
+    after_meeting Hook and clean up source audio — see post_processing.finish.
+    The result's `recording_id` is the Recording that now holds it: a merged
+    Continuation reports its parent."""
+    import post_processing
+    import processing
+    profile = processing.resolve(options)
+    with processing.scope(profile, wait=options is None):
+        result = _process_recording_selected(folder, profile)
+    source_audio = result.pop("source_audio")
+    post_processing.finish(result["recording_id"], source_audio)
+    return result
 
-    _archive_previous_outputs(folder)
-    _write_progress(folder, "starting", "Initializing local pipeline...", percent=5)
+
+def _process_recording_selected(folder: Path, profile: dict[str, Any]) -> dict[str, Any]:
+    """Complete end-to-end local processing: MLX Whisper + AX Speakers + OCR Slides + Qwen3-4B.
+    Every run, ok or failed, ends with exactly one processing_finished Usage event."""
+    import usage_emitters
+    started, run_id = time.time(), None
     try:
-        with ai_trace.run("local_meeting_pipeline", recording_id=folder.name, audio_file=audio_file.name):
-            result = _process_recording_local_inner(folder, audio_file)
-        (folder / ".pipeline_progress.json").unlink(missing_ok=True)
-        return result
+        audio_file = next((p for p in folder.iterdir() if p.is_file() and p.name.startswith("audio.")), None)
+        if not audio_file:
+            from .errors import NoAudioError
+            raise NoAudioError()
+        _archive_previous_outputs(folder)
+        _write_progress(folder, "starting", "Initializing selected processing pipeline...", percent=5)
+        with ai_trace.run("local_meeting_pipeline", recording_id=folder.name, audio_file=audio_file.name) as run_id:
+            result = _process_recording_local_inner(folder, audio_file, profile)
     except Exception as exc:
-        _write_progress(folder, "error", str(exc), percent=0)
+        code = _record_failure(folder, exc)
+        # The transcriber model comes from the run's traced transcription span, if it got that far.
+        usage_emitters.processing_finished(folder.name, profile, run_id=run_id, started=started, error_code=code)
         raise
+    usage = result.pop("usage", None) or {}
+    usage_emitters.processing_finished(result["recording_id"], profile, run_id=run_id, started=started, **usage)
+    (folder / ".pipeline_progress.json").unlink(missing_ok=True)
+    db.set_processing_failure(result["recording_id"], None)
+    return result
 
 
-def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, Any]:
+def _record_failure(folder: Path, exc: BaseException) -> str:
+    """The "Processing failed" Stage: store the classified code and its fixed,
+    plain-language message (never exception text) on the Recording. Returns the code."""
+    from api.processing_errors import classify
+    _, payload = classify(exc)
+    if folder.is_dir():
+        _write_progress(folder, "error", payload["error"], percent=0)
+    db.set_processing_failure(folder.name, {
+        "code": payload["code"],
+        "message": payload["error"],
+        "at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+    })
+    return payload["code"]
+
+
+def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict[str, Any]) -> dict[str, Any]:
     metadata = db.get_recording_data(folder.name, "metadata") or {}
     title = metadata.get("recording_name") or folder.name
 
@@ -140,6 +179,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
     total_speech_duration = 0.0
     current_time_offset = 0.0
     t0 = time.time()
+    asr = transcriber(profile)
 
     for idx, pfile in enumerate(part_files):
         p_label = f" (Part {idx + 1}/{len(part_files)})" if len(part_files) > 1 else ""
@@ -149,8 +189,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
             context.record(start + offset, end + offset, chunk_prompt)
             return chunk_prompt
 
-        p_segs, p_dur, p_speech = transcribe_with_silence_removal(pfile, prompt, folder=(folder if idx == 0 else None),
-                                                                  prompt_for=prompt_for)
+        p_segs, p_dur, p_speech = asr.transcribe(pfile, prompt=prompt, keep_audio_in=(folder if idx == 0 else None),
+                                                 prompt_for=prompt_for, context=context, offset=current_time_offset)
         for s in p_segs:
             raw_segments.append({
                 **s,
@@ -166,6 +206,11 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
     context.save(folder)
     stage_timings["transcription"] = time.time() - t0
     raw_segments.sort(key=lambda s: s["start"])
+    from .windowed import engine_notice, engine_summary
+    metadata["transcription_engines"] = engine_summary(raw_segments)
+    db.update_recording_data(folder.name, "metadata", metadata)
+    if notice := engine_notice(metadata["transcription_engines"]):
+        db.log_notification(f"Part of \"{title}\" was not transcribed in the cloud", notice, "warning", folder.name)
     _write_progress(folder, "aligning_speakers", "Aligning speakers and audio tracks...", percent=45)
 
     # 2. Align speakers from Accessibility timeline
@@ -179,6 +224,11 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         start_sec = float(seg.get("start", 0.0))
         end_sec = float(seg.get("end", 0.0))
         text = seg.get("text", "").strip()
+        marks = {k: seg[k] for k in ("engine", "reason") if seg.get("engine") in ("local", "gap") and k in seg}
+        if marks.get("engine") == "gap":  # a Window nobody transcribed: kept so the transcript shows it
+            aligned_segments.append({"speaker_id": "", "speaker_name": "", "start": format_ts(start_sec),
+                                     "end": format_ts(end_sec), "text": "", "language": "en", "emotion": "neutral", **marks})
+            continue
         if not text or text in {"!", ".", "?", "...", ",", "-", "!!", "!!!"} or re.fullmatch(r"[!?. ,\-_]+", text):
             continue
 
@@ -207,26 +257,24 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
             "text": text,
             "language": "en",
             "emotion": "neutral",
+            **marks,
         })
 
     # 2a. Name the remote turns the audio couldn't attribute (several other
-    # people on the call): conversational rules first, then the local LLM.
-    # One local model serves both text passes below, then is released
-    # before the notes stage loads its own.
-    text_llm = LazyLLM(db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT))
-    try:
+    # people on the call): conversational rules first, then the Text model.
+    # One Text model (a local model loads once) serves both text passes
+    # below, then is released before the notes stage opens its own.
+    with text_model(profile) as model:
         # 2a-i. Romanized Hinglish: convert any Devanagari the ASR produced
         # (see pipeline/romanize.py) before names and notes are derived.
         if any(romanize.DEVANAGARI.search(s["text"]) for s in aligned_segments):
             _write_progress(folder, "romanizing", "Converting to Romanized Hinglish...", percent=46)
-            stats = romanize.romanize_segments(aligned_segments, generate=lambda prompt: text_llm.generate(
-                prompt, name="romanize", prompt_template=romanize.INSTRUCTION, max_tokens=2000))
+            stats = romanize.romanize_segments(aligned_segments, generate=lambda prompt: model.complete(
+                prompt, system=UNTRUSTED, trace="romanize", template=romanize.INSTRUCTION, max_tokens=2000))
             print(f"[Local Pipeline] Romanization: {stats}", flush=True)
         # 2a-ii. Name remote turns the audio couldn't attribute.
-        _guess_remote_speakers(folder, aligned_segments, ax_participants, title, text_llm)
-    finally:
-        text_llm.release()
-    assigned_speakers = {s["speaker_name"] for s in aligned_segments}
+        _guess_remote_speakers(folder, aligned_segments, ax_participants, title, model)
+    assigned_speakers = {s["speaker_name"] for s in aligned_segments if s["speaker_name"]}
 
     # 2b. If this recording is linked as a continuation of an earlier one,
     # shift this recording's own segments onto the end of that meeting's
@@ -249,7 +297,10 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
     # structured-JSON ask — see generate_enhanced_notes() for why.
     full_transcript = "\n".join(f"[{s['start']} - {s['end']}] {s['speaker_name']}: {s['text']}" for s in aligned_segments)
     t0 = time.time()
-    notes = generate_enhanced_notes(full_transcript, slides_data, aligned_segments, folder=folder)
+    import processing
+    from .processing_notes import generate_notes, render
+    notes = generate_notes(full_transcript, slides_data, aligned_segments, options=profile, folder=folder,
+                           user_notes=db.get_notes(folder.name) or '', context=processing.meeting_context(metadata, aligned_segments))
     stage_timings["summarization"] = time.time() - t0
     _write_progress(folder, "persisting", "Saving notes & updating Cora database...", percent=98)
 
@@ -268,13 +319,15 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         for s in sorted(assigned_speakers)
     ]
 
-    asr_model, privacy_note = _provenance()
+    asr_model, privacy_note = _provenance(profile)
+    diarization_processing = notes["processing"]
     diarization_payload = {
         "summary": notes["overview"],
         "model": asr_model,
         "analyzed_at": now_iso,
         "audio_file": audio_file.name,
         "privacy_note": privacy_note,
+        "processing": diarization_processing,
         "speakers": speaker_profiles,
         "segments": aligned_segments,
         "slides_indexed": len(slides_data),
@@ -293,7 +346,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         "action_items": _markdown_bullets(notes["action_items_md"]),
         "unresolved_questions": _markdown_bullets(notes["open_questions_md"]),
         "keywords": notes["keywords"],
-        "model": db.get_setting("liquid_model", LOCAL_LLM_MODEL_DEFAULT),
+        "model": notes["processing"]["model"],
+        "processing": notes["processing"],
         "generated_at": now_iso,
         "schema_version": "2.0",
         "source_recording": audio_file.name,
@@ -305,14 +359,7 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         (folder / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n")
         db.update_recording_data(folder.name, "metadata", metadata)
 
-    enhanced_notes_md = "\n\n".join([
-        "## Overview", notes["overview"],
-        "## Action Items", notes["action_items_md"],
-        "## Key Discussion & Decisions", notes["decisions_md"],
-        "## Timeline", notes["timeline_md"],
-        "## Open Questions", notes["open_questions_md"],
-        "## Key Entities", notes["key_entities_md"],
-    ])
+    enhanced_notes_md = render(notes)
 
     # Save to disk
     (folder / "diarization.json").write_text(json.dumps(diarization_payload, indent=2, ensure_ascii=False) + "\n")
@@ -337,7 +384,8 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
     db.update_recording_data(folder.name, "diarization", diarization_payload)
     db.update_recording_data(folder.name, "call_summary", call_summary_payload)
 
-    log_resource_usage(folder.name, stage_timings, audio_duration, speech_duration, llm_stats=_last_llm_stats or None)
+    resource_entry = log_resource_usage(folder.name, stage_timings, audio_duration, speech_duration,
+                                        llm_stats=_last_llm_stats or None)
 
     try:
         import tracing
@@ -364,15 +412,9 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
     except Exception as exc:
         print(f"[Local Pipeline] Langfuse tracing failed for {folder.name}: {exc}", flush=True)
 
-    # Audio retention is an explicit opt-out (default: keep it) set during
-    # onboarding. Only delete here, at the very end, after every artifact that
-    # reads the audio file (transcription, delivery metrics if coaching ran)
-    # has already been generated and persisted. Note this is a one-way trade:
-    # deleting the source audio also permanently removes playback/seek for
-    # this recording in the UI, not just the processing dependency.
-    if not db.get_setting("retain_audio", True):
-        audio_file.unlink(missing_ok=True)
-        print(f"[Local Pipeline] Deleted source audio for {folder.name} (retain_audio is off)", flush=True)
+    # The source audio stays until post_processing.finish has run the
+    # after_meeting Hook, so plugins may still read it.
+    source_audio = [audio_file]
 
     # If this recording is a continuation of an earlier meeting, merge the combined
     # artifacts directly into the parent meeting folder and database record, then clean up
@@ -388,7 +430,9 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
         (parent_folder / "transcript_diarized.md").write_text("\n".join(t_lines), encoding="utf-8")
 
         part_idx = len(list(parent_folder.glob("audio_part*.mov"))) + 2
-        shutil.copy2(audio_file, parent_folder / f"audio_part{part_idx}.mov")
+        merged_audio = parent_folder / f"audio_part{part_idx}.mov"
+        shutil.copy2(audio_file, merged_audio)
+        source_audio = [merged_audio]
 
         child_screenshots = folder / "screenshots"
         parent_screenshots = parent_folder / "screenshots"
@@ -420,32 +464,37 @@ def _process_recording_local_inner(folder: Path, audio_file: Path) -> dict[str, 
             )
             conn.commit()
 
+        ai_trace.reassign_recording(folder.name, parent_folder.name)
+        if live_rec_id:
+            ai_trace.reassign_recording(live_rec_id, parent_folder.name)
         db.delete_recording(folder.name)
         shutil.rmtree(folder, ignore_errors=True)
+        import capture
+        capture.drop(folder.name)  # a capture asked for the child can never be built now
         print(f"[Local Pipeline] Continuation merged directly into parent {parent_folder.name} and child removed.", flush=True)
 
     print(f"[Local Pipeline] All artifacts saved for {folder.name}", flush=True)
     return {
+        "recording_id": folder.name if folder.is_dir() else parent_id,
+        "source_audio": source_audio,
         "diarization": diarization_payload,
         "call_summary": call_summary_payload,
         "speaker_profiles": speaker_profiles,
+        # For the processing_finished Usage event; popped by the caller.
+        "usage": {"resource": resource_entry,
+                  "window_fallbacks": len(metadata["transcription_engines"]["windows"]),
+                  "transcriber_model": asr.model},
     }
 
 
-def _provenance() -> tuple[str, str]:
+def _provenance(profile: dict[str, Any]) -> tuple[str, str]:
     """What actually transcribed this recording, and an honest statement of
     what left the device — never a blanket "100% local" when it wasn't."""
-    from . import cloud_asr
     import tracing
-    engine = cloud_asr.engine()
-    if engine == "local":
-        model_id = resolve_whisper_model()
-        model = f"local-mlx:{Path(model_id).name if os.path.isabs(model_id) else model_id}"
-        note = "Transcribed and summarized locally on Apple Silicon (MLX). No audio or text left this device."
-    else:
-        model = f"cloud-asr:{engine}:{db.get_setting('cloud_asr_model') or 'default'}"
-        note = ("Speech audio was sent to Google Gemini for transcription (Settings > Transcription engine). "
-                "Notes were generated locally on Apple Silicon (MLX).")
+    from .processing_notes import privacy_note
+    asr = transcriber(profile)
+    model = f"local-mlx:{asr.model}" if asr.engine == "local" else f"cloud-asr:{asr.engine}:{asr.model}"
+    note = privacy_note(asr.engine != "local", profile)
     if tracing.tracing_opted_in():
         note += " Summary metadata was also sent to your Langfuse project (tracing opt-in)."
     return model, note

@@ -40,6 +40,10 @@ If you build something on it, I'd genuinely like to know — see [Contributing](
   framework, so on-screen text ends up searchable alongside the transcript.
 - **Structures notes** (summary, decisions, action items) using a small local LLM
   (Qwen3 4B by default, via MLX) — again, no cloud call for this by default.
+- **Remembers context**: each transcription is primed with the call's participants, the meeting
+  title, your own notes, text from snapped slides, terms from past meetings with the same people,
+  and a learned vocabulary, so names and jargon come out right.
+- **Exports** any meeting to Markdown (notes, optionally with the transcript) to share anywhere.
 
 Behind the app layer in this repo, there's an ongoing effort on the model and data side —
 fine-tuning the ASR model, curating training data from corrected transcripts, and evaluation
@@ -58,9 +62,14 @@ one — is written up in [docs/RESEARCH.md](docs/RESEARCH.md). More is coming as
 
 ## Install
 
-Download the `.dmg` from the [latest release](https://github.com/mkdsrt10/cora-ai-meeting-notes/releases/latest)
-and follow [docs/INSTALL.md](docs/INSTALL.md) (the build is not notarized yet, so first launch needs one
-extra step). Or build from source:
+```bash
+curl -fsSL https://raw.githubusercontent.com/mkdsrt10/cora-ai-meeting-notes/production/scripts/install.sh | bash
+```
+
+Downloads the latest release, verifies its checksum, and installs the app (Apple Silicon, macOS 14+).
+Cora is open source and **not notarized** (that needs a paid Apple Developer ID), which is why a browser-downloaded
+DMG shows a "can't verify" warning; the script avoids it. Details, the manual DMG route, and why:
+[docs/INSTALL.md](docs/INSTALL.md). Or build from source:
 
 ## Quickstart (from source)
 
