@@ -1,0 +1,312 @@
+{
+ "summary": "Product Hunt in 2025-26 is an editorially curated leaderboard. Editors decide which launches get featured, and they judge on four official criteria: Useful, Novel, High Craft and Creative. Rank comes from \"points\", not raw upvotes. Votes from verified and active accounts count more, and thoughtful comments add weight. Asking for upvotes, contests tied to upvotes, paid hunters and bought votes can all get a launch un-featured or banned. The official advice is still to go live at 12:01am PT. Product Hunt encourages makers to post their own launch: 79% of featured posts were self-hunted, and a hunter has no proven advantage. The old \"Coming soon / Notify me\" teaser pages were retired on Aug 28, most likely in 2025. Their replacement is a product forum thread, so any 2026 guide that tells you to set up a Coming Soon page is out of date.\n\nComparable products show a clear pattern for open-source tools: Hacker News, GitHub trending and Reddit move far more people than Product Hunt.\n- Screenpipe: an HN post (submitted by someone else) got 218 points and it reached #1 on GitHub trending, yet its Product Hunt launches placed only #14 and #9. It now has 22k stars.\n- Meetily: its Show HN got 4 points and I found no Product Hunt listing, yet it has 31.8k stars.\n- Open SaaS: Product Hunt #7, and HN sent about 3x more visitors.\n- Hyprnote: #2 on Product Hunt with 457 upvotes and a YC hunter, but its two Show HN posts got 18 and 4 points before the YC-only Launch HN got 270.\n- Humla, another open-source local meeting-notes app for Mac, got 9 upvotes, placed #144 and was not featured.\n\nThe \"local, open-source meeting notetaker\" category is crowded. Product Hunt's \"Novel\" bar and the CEO's line \"expect our bar to rise\" both mean Cora has to lead with what is new: the plugin platform, with a concrete example such as rehearsing the hard conversation from a real meeting with an AI role-player.\n\nThe biggest pre-launch blocker is that Cora is not code-signed. package.json has identity null, hardenedRuntime false and target \"dir\", and the README admits the build is not notarized. Since macOS Sequoia, users can no longer Control-click to open an unsigned app. They have to go to System Settings > Privacy & Security > Open Anyway within about an hour and enter their password, and Apple's own help page tells users not to do this. Homebrew began disabling casks that fail Gatekeeper checks in Sept 2026. Electron's auto-updater and safeStorage need a signed app. Unsigned builds also lose microphone and screen-recording permissions on updates. Get notarized before launching: it costs $99 a year, and every Mach-O binary inside the app must be signed, including the bundled Python .so files and the Swift helpers.\n\nRecommended sequence:\n1. Show HN on a Tuesday morning (US Eastern), linking the GitHub repo.\n2. Product Hunt two days later at 12:01am PT, scheduled at least 10 days ahead.\n3. Reddit posts that follow each subreddit's rules.\n4. Every channel inside about a 48-hour window, because GitHub trending rewards how fast stars arrive.\n\nAvoid Thanksgiving week (Nov 23-27, 2026). The full T-4 weeks to T+1 week timeline is in implications_for_cora.",
+ "findings": [
+  {
+   "claim": "Product Hunt officially recommends launching at 12:01am Pacific Time. The homepage runs on a 24-hour Pacific cycle, so this gives a full day of visibility. Otherwise, the 'best day is the day on which you're most prepared.'",
+   "evidence": "PH's Launch Guide pages (launch home and 'Preparing for launch') both state 12:01am PT and explain the 24-hour Pacific cycle.",
+   "confidence": "verified",
+   "source_url": "https://www.producthunt.com/launch/preparing-for-launch"
+  },
+  {
+   "claim": "Product Hunt encourages makers to hunt their own products and sees no clear advantage in a third-party hunter. 79% of featured posts were self-hunted. Paying a hunter or promoter violates the guidelines and can lead to un-featuring, removal or a permanent ban.",
+   "evidence": "From PH's 'Before launch' page: 'Hunting is just posting.' The page cites the 79% self-hunted figure and says paid hunters and promoters violate the guidelines.",
+   "confidence": "verified",
+   "source_url": "https://www.producthunt.com/launch/before-launch"
+  },
+  {
+   "claim": "Featuring is an editorial decision. The official criteria are Useful, Novel, High Craft and Creative ('often they spike in one or two of these'). The product must be live; waitlists only qualify with immediate access. Templates, boilerplates and directories are excluded. Engagement is 'not the sole factor', and decisions are final.",
+   "evidence": "PH Help Center article 'Product Hunt featuring guidelines'.",
+   "confidence": "verified",
+   "source_url": "https://help.producthunt.com/en/articles/9883485-product-hunt-featuring-guidelines"
+  },
+  {
+   "claim": "The leaderboard ranks by 'points', which are based primarily on upvotes with comments as an additional factor. The leaderboard switched from showing upvotes to showing points in a December changelog, most likely Dec 2024.",
+   "evidence": "PH changelog post by CEO Rajiv Ayyangar: 'Points determine the ranking.' The year is inferred from '2yr ago' and a staff reply about verified accounts arriving 'early in 2025'.",
+   "confidence": "verified",
+   "source_url": "https://www.producthunt.com/p/producthunt/changelog-december-11-leaderboard-redesign-mobile-mentions"
+  },
+  {
+   "claim": "PH CTO Mike Kerzhner said not every upvote is worth the same number of points. Votes from verified users count more, and thoughtful comments make a user's votes count for more. Low-effort comments and 'AI slop' reduce a user's impact. A launch with strong evidence of paid votes will be un-featured.",
+   "evidence": "A forum post on PH (around Oct 2025) quotes the CTO's statements. The original comment is quoted second-hand rather than fetched directly.",
+   "confidence": "likely",
+   "source_url": "https://www.producthunt.com/p/flexprice/why-your-500-member-community-might-not-help-you-win-on-product-hunt-at-all"
+  },
+  {
+   "claim": "Specific vote multipliers circulating online, such as a new account's vote being worth 0.2 points or high-karma votes counting 5x to 10x, are not confirmed by Product Hunt.",
+   "evidence": "These figures appear only in third-party guides and founder interviews. No official source gives a multiplier.",
+   "confidence": "unverified",
+   "source_url": "https://www.postbeam.ai/blog/how-to-launch-on-product-hunt"
+  },
+  {
+   "claim": "For roughly the first 4 hours (12:01 to about 4am PT), the leaderboard order is shuffled and vote counts are hidden. Makers report that the order rarely changes much once it is revealed.",
+   "evidence": "Open SaaS's May 2025 post-mortem reports getting about 100 upvotes in the first 4 hours, when 'PH hides vote counts and randomizes order'. Several Indie Hackers and PH forum posts say the same, with small inconsistencies. Product Hunt has not documented this.",
+   "confidence": "likely",
+   "source_url": "https://docs.opensaas.sh/blog/2025-05-07-you-should-still-launch-your-product-on-ph/"
+  },
+  {
+   "claim": "Product Hunt ran a one-day 'Randomized Leaderboard Day' experiment on March 27, most likely 2026. The leaderboard was randomized for 25 minutes out of every 30, and votes cast during random periods counted double. No commitment was made to repeat it.",
+   "evidence": "PH forum announcement by Gabe Perez (@gabe). The year is not shown on the page.",
+   "confidence": "likely",
+   "source_url": "https://www.producthunt.com/p/producthunt/introducing-randomized-leaderboard-day-on-product-hunt"
+  },
+  {
+   "claim": "Official launch-form limits: tagline 60 characters maximum, 'no gimmicks or over-the-top language'; description 500 characters maximum; up to 3 launch tags (topics); up to 3 shoutouts; square thumbnail, 240x240 recommended, under 3MB (GIFs don't autoplay, so the first frame must work as a still); gallery needs at least 2 images, 1270x760 recommended; video must be a public YouTube link; no length limit is stated; launches can be scheduled up to 1 month ahead; personal accounts only.",
+   "evidence": "PH 'Preparing for launch' page.",
+   "confidence": "verified",
+   "source_url": "https://www.producthunt.com/launch/preparing-for-launch"
+  },
+  {
+   "claim": "A maker 'first comment' is strongly recommended: 70% of Product of the Day, Week and Month winners had one. It should cover key features, target users, the maker's story and goals, with a request for feedback rather than upvotes. Co-makers should create their accounts before launch day.",
+   "evidence": "PH 'Preparing for launch' page.",
+   "confidence": "verified",
+   "source_url": "https://www.producthunt.com/launch/preparing-for-launch"
+  },
+  {
+   "claim": "Demo video best practice is 30 to 60 seconds (rarely more than 90), showing the result in the first 3 seconds, with captions. Guides suggest 4 to 8 gallery images.",
+   "evidence": "Several vendor guides agree, but Product Hunt publishes no video length or image count beyond the 2-image minimum.",
+   "confidence": "unverified",
+   "source_url": "https://screenhance.com/blog/product-hunt-launch-video-guide"
+  },
+  {
+   "claim": "Banned or penalized on Product Hunt: asking for upvotes ('Don't ask for upvotes'), contests tied to upvotes (which may be un-featured), mass or unsolicited messages and scraped contacts, company accounts, and posting from an account less than 1 week old. Product Hunt also advises against flooding Reddit or Indie Hackers on launch day unless you already post there.",
+   "evidence": "PH 'Sharing your launch', launch home and 'Before launch' pages. Product Hunt recommends joining at least 3 months before launch.",
+   "confidence": "verified",
+   "source_url": "https://www.producthunt.com/launch/sharing-your-launch"
+  },
+  {
+   "claim": "The 'Coming soon' / 'Notify me' teaser pages were retired in an Aug 28 changelog, most likely 2025. Each new product now gets a forum thread instead. A launch can be started as a draft to create the product page and forum before scheduling. A staff comment says follower notifications were removed. Guides that still recommend a 'PH Coming Soon page', such as Setproduct's Sept 2026 guide, are out of date.",
+   "evidence": "PH changelog post: 'The old Coming Soon pages have officially retired.' The 2025 recap thread lists the removal. The year is inferred from '1yr ago' alongside a 2026 page footer.",
+   "confidence": "likely",
+   "source_url": "https://www.producthunt.com/p/producthunt/changelog-august-28-no-more-coming-soon-and-a-couple-other-shiny-updates"
+  },
+  {
+   "claim": "The Daily Digest newsletter goes out every weekday with the previous day's top 10 most-upvoted products plus editor picks. After launch, claim the product page, use the Launch Day dashboard and embed badges.",
+   "evidence": "PH 'Launch day duties' page. Separately, Open SaaS reported the newsletter brought only about 20 upvotes.",
+   "confidence": "verified",
+   "source_url": "https://www.producthunt.com/launch/launch-day-duties"
+  },
+  {
+   "claim": "PH CEO Rajiv Ayyangar's guidance: 'expect our bar to rise, not lower'; write a tagline that is 'both clear and compelling. Test it with friends'; 'Be as loud as possible on as many channels as possible.' An Oct 2024 newsletter quote attributed to him reads: 'We can't just feature everyone's AI wrapper.'",
+   "evidence": "CEO AMA thread on PH. The AI-wrapper quote comes via the Awesome Directories guide.",
+   "confidence": "likely",
+   "source_url": "https://www.producthunt.com/p/producthunt/i-m-the-product-hunt-ceo-and-i-ve-launched-8-times-on-ph-ama-unfiltered"
+  },
+  {
+   "claim": "Competition is rising: PH reportedly had 2,345 launches in Q2 2026 against 1,508 in Q2 2025, and about 20 launches per day in Jan-Sep 2026. The median points needed for the daily top 5 was about 165 on Saturday and 235 on Thursday. AI launches averaged about 252 upvotes in Q2 2026.",
+   "evidence": "mean.ceo statistics post, citing a Databox analysis of 4,962 launches and PH's 'State of Tech Discovery Q2 2026' report. I did not read the PH report itself.",
+   "confidence": "likely",
+   "source_url": "https://blog.mean.ceo/product-hunt-launch-statistics/"
+  },
+  {
+   "claim": "A claimed featured rate of about 10% (16 featured per day in Sept 2024, against 47 in Sept 2023) is a single-source figure from 2024 data.",
+   "evidence": "Awesome Directories guide (Nov 2025), citing Tetriz.io. It is not confirmed by Product Hunt.",
+   "confidence": "unverified",
+   "source_url": "https://awesome-directories.com/blog/product-hunt-launch-guide-2025-algorithm-changes"
+  },
+  {
+   "claim": "Hyprnote, an open-source, local-first AI meeting notetaker (YC S25), placed #2 Product of the Day on Aug 11, 2025 with 457 upvotes and 94 comments. Garry Tan hunted it. Tagline: 'AI Notepad for Private Meetings \u2014 fully on your device'. Topics: Productivity, Notes, Meetings, GitHub.",
+   "evidence": "hunted.space launch page, a third-party tracker that mirrors PH data.",
+   "confidence": "likely",
+   "source_url": "https://hunted.space/product/hyprnote/launches/hyprnote-2"
+  },
+  {
+   "claim": "Hyprnote's HN history: 'Show HN: Hyprnote \u2013 VSCode for Meeting Notes (Open-Source and Local-First)' got 18 points (Apr 20, 2025), and a second Show HN got 4 points (Apr 24, 2025). The YC-only 'Launch HN' got 270 points and 180 comments (Jul 29, 2025). The team's developer-tool spinoff 'Show HN: OWhisper \u2013 Ollama for realtime speech-to-text' got 289 points. The repo (now fastrepl/anarlog) has about 9.5k stars.",
+   "evidence": "HN Algolia API (objectIDs 43741559, 43779207, 44725306, 44901853) and the GitHub API, both queried 2026-10-16.",
+   "confidence": "verified",
+   "source_url": "https://hn.algolia.com/api/v1/search?query=hyprnote&tags=story"
+  },
+  {
+   "claim": "Screenpipe, an open-source local screen and microphone recorder, grew mainly through HN and GitHub. 'Screenpipe: 24/7 local AI screen and mic recording' got 218 points and 125 comments on HN (Sep 30, 2024, not a Show HN). Its Product Hunt launches placed modestly: #14 with 106 upvotes (Feb 3, 2026) and #9 with 128 upvotes (Aug 28, 2026). The repo has about 22k stars.",
+   "evidence": "HN Algolia API (objectID 41695840), hunted.space launch pages and the GitHub API (screenpipe/screenpipe: 21,958 stars).",
+   "confidence": "verified",
+   "source_url": "https://www.hunted.space/product/screenpipe/launches/screenpipe-2"
+  },
+  {
+   "claim": "Meetily, an open-source local meeting assistant, reached about 31.8k GitHub stars even though its Show HN got 4 points (Feb 2025). I found no Product Hunt listing for it.",
+   "evidence": "GitHub API: Zackriya-Solutions/meetily, 31,804 stars, MIT license, created 2024-12-26. HN Algolia API: objectID 43137186. A PH search returned no Meetily listing.",
+   "confidence": "verified",
+   "source_url": "https://hn.algolia.com/api/v1/search?query=meetily&tags=story"
+  },
+  {
+   "claim": "Humla ('Local-first AI meeting notes for Mac. No bot, open source.') got 9 upvotes and 6 comments, placed #144, and was not featured. This is direct evidence that an undifferentiated local open-source meeting notetaker does not clear the 'Novel' bar.",
+   "evidence": "hunted.space product page. The launch date is not shown.",
+   "confidence": "likely",
+   "source_url": "https://www.hunted.space/product/humla"
+  },
+  {
+   "claim": "Cap, an open-source Loom alternative for macOS, relaunched on Nov 28, 2024 and placed #2 Product of the Day with 1,064 upvotes. Tagline: 'Beautiful screen recordings, owned by you. 100% open source.' The maker comment cited an earlier #1 on Show HN and GitHub trending with 5k+ stars. The repo now has about 23.4k stars.",
+   "evidence": "hunted.space launch page and the GitHub API (CapSoftware/Cap).",
+   "confidence": "likely",
+   "source_url": "https://hunted.space/dashboard/cap-3/launches/cap-4"
+  },
+  {
+   "claim": "Granola, a closed-source AI notepad and the category leader, has never been shown as #1 on Product Hunt despite heavy demand: original launch May 22, 2024; Granola for iOS #5 (May 12, 2025); Granola 2.0 #4 (May 15, 2025); Windows #5 (Jun 16, 2025); Recipes #8 (Oct 1, 2025).",
+   "evidence": "PH launch page for Granola 2.0, which lists all launches, plus hunted.space. Vote counts on the PH page were unlabeled.",
+   "confidence": "likely",
+   "source_url": "https://www.producthunt.com/products/granola/launches/granola-2-0"
+  },
+  {
+   "claim": "Open SaaS, an open-source starter kit, placed #7 with about 400 upvotes in late April 2025. HN sent more than 3x the visitors Product Hunt did. The project reached global GitHub Trending and passed 2.5k stars about a week later. The founders received unsolicited offers to buy votes and declined them.",
+   "evidence": "Open SaaS blog post-mortem, May 7, 2025.",
+   "confidence": "verified",
+   "source_url": "https://docs.opensaas.sh/blog/2025-05-07-you-should-still-launch-your-product-on-ph/"
+  },
+  {
+   "claim": "Raycast, a Mac productivity tool, won #1 Product of the Day only once in the launches I found (API & Store, Nov 30, 2021, 528 upvotes). Raycast AI placed #5 with 599 upvotes (Feb 2023). Jan (44,973 stars) and Ollama (183,455 stars) grew mostly outside Product Hunt; I found no PH rank data for either.",
+   "evidence": "hunted.space Raycast pages, the GitHub API for janhq/jan and ollama/ollama, and a PH July 2026 newsletter mentioning Ollama's 2023 appearance.",
+   "confidence": "likely",
+   "source_url": "https://www.hunted.space/product/raycast/launches/raycast-api-and-store"
+  },
+  {
+   "claim": "Show HN rules: the project must be something people can try right away, with no signup pages, landing pages or fundraisers, and not a minor update. 'Do not ask friends to upvote or comment' is explicitly 'not ok on HN'. Titles start with 'Show HN'. Posts appear on /shownew and move to /show after a points threshold.",
+   "evidence": "HN Show HN guidelines page.",
+   "confidence": "verified",
+   "source_url": "https://news.ycombinator.com/showhn.html"
+  },
+  {
+   "claim": "HN ranking divides points by a power of the post's age, then applies flags, anti-abuse software, demotion of overheated threads and moderator action. Reposting is acceptable only if the story hasn't had significant attention in about a year. Deleting and resubmitting is not allowed. Soliciting votes can get the submission, account or site penalized.",
+   "evidence": "HN FAQ.",
+   "confidence": "verified",
+   "source_url": "https://news.ycombinator.com/newsfaq.html"
+  },
+  {
+   "claim": "For technical products on HN, link the GitHub repo (the README acts as the landing page, and stars spread to followers), use a plain specific title, and engage in comments. HN's voting-ring detection is strong, and upvotes from people sent a direct link to the post won't count. There is no single best posting time; guides commonly suggest Tuesday to Thursday mornings, US Eastern.",
+   "evidence": "Lucas F. Costa, 'How to do a successful Hacker News launch' (Aug 2023), plus several 2026 guides on timing.",
+   "confidence": "likely",
+   "source_url": "https://www.lucasfcosta.com/blog/hn-launch"
+  },
+  {
+   "claim": "GitHub does not publish its trending algorithm. Practitioners model it as star velocity relative to a repo's usual baseline, which argues for concentrating HN, Reddit, Product Hunt and newsletter traffic into a roughly 48-hour window.",
+   "evidence": "A DEV thread quotes a GitHub community manager saying stars aren't the only criterion. Layer5, OSSInsight and the AFFiNE-derived Gingiris playbook (a paid consultant) describe the velocity model.",
+   "confidence": "likely",
+   "source_url": "https://layer5.io/blog/community/on-the-importance-of-github-stars"
+  },
+  {
+   "claim": "r/macapps has a three-tier self-promotion system (Phase 3, Mar 19, 2026). Tier 1 (main feed) needs Mac App Store distribution, or an established GitHub repo (1+ year of history and 100+ stars), or developer flair, plus 10+ local karma; 'notarization alone doesn't count'. Tier 2 needs a real developer identity plus a website with a Privacy Policy and Terms of Service. Everyone else, and 'new dictation apps', post only in the monthly 'App Pile' megathread using the PCP format (Problem, Comparison, Pricing). Developers may self-promote once per 30 days, and open-source apps must prefix the title with [OS].",
+   "evidence": "Sidebar and pinned posts read through a Redlib mirror, since reddit.com could not be fetched. The 1-year/100-star wording conflicts between sections.",
+   "confidence": "likely",
+   "source_url": "https://redlib.groet-infra.nl/r/macapps"
+  },
+  {
+   "claim": "r/selfhosted: since 2026, projects younger than 3 months may only be shared in the weekly Friday 'New Project' megathread, and posts carry flairs disclosing AI involvement.",
+   "evidence": "Mod rules-update posts from Mar and Apr 2026 and a later megathread, read through Redlib mirrors.",
+   "confidence": "likely",
+   "source_url": "https://redlib.groet-infra.nl/r/selfhosted/comments/1rmt39o/rules_update_new_project_friday_here_to_stay/"
+  },
+  {
+   "claim": "r/LocalLLaMA: self-promotion should be no more than about 10% of your activity; you must disclose affiliation; engagement farming is banned; posting needs 5 subreddit karma and 10 Reddit karma. Mods revised the self-promotion rule (Rule 4) around late April 2026, and I could not retrieve the current text.",
+   "evidence": "Mirrored wiki text and a mod post found through search. reddit.com was not fetchable.",
+   "confidence": "likely",
+   "source_url": "https://r.datuan.dev/r/LocalLLaMA/wiki/index"
+  },
+  {
+   "claim": "In macOS Sequoia, users can no longer Control-click to override Gatekeeper for software that isn't signed correctly or notarized. They must go to System Settings > Privacy & Security. Apple recommends notarizing all software distributed outside the Mac App Store.",
+   "evidence": "Apple Developer News, Aug 6, 2024.",
+   "confidence": "verified",
+   "source_url": "https://developer.apple.com/news/?id=saqachfa"
+  },
+  {
+   "claim": "To open a blocked app, the user goes to System Settings > Privacy & Security, clicks Open, then Open Anyway, and enters their login password. The button is available for 'about an hour' after the failed launch. Apple's own page warns that overriding is 'the most common way that a Mac gets infected with malware' and tells users to look for an alternative app.",
+   "evidence": "Apple Support, 'Open a Mac app from an unknown developer'.",
+   "confidence": "verified",
+   "source_url": "https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac"
+  },
+  {
+   "claim": "Electron: unsigned builds trigger Gatekeeper's 'damaged' warning, and users need 'multiple advanced and manual steps' to run them. A signed, notarized app is needed for safeStorage, app.setLoginItemSettings(), the cookieEncryption fuse and autoUpdater (Squirrel.Mac).",
+   "evidence": "Electron code-signing documentation.",
+   "confidence": "verified",
+   "source_url": "https://www.electronjs.org/docs/latest/tutorial/code-signing"
+  },
+  {
+   "claim": "Homebrew deprecated casks that fail Gatekeeper checks (5.0.0, Nov 2025) and planned to disable them in the main homebrew-cask repo from Sept 1, 2026, a plan restated in 6.0.0 (Jun 2026). The --no-quarantine flag was also deprecated or removed, so an unsigned Cora can't be distributed through the official cask repo. A self-hosted tap remains possible.",
+   "evidence": "Homebrew 5.0.0 and 6.0.0 release posts and a Homebrew GitHub discussion stating the Sept 1, 2026 date.",
+   "confidence": "verified",
+   "source_url": "https://brew.sh/2025/11/12/homebrew-5.0.0/"
+  },
+  {
+   "claim": "Notarization requires the Apple Developer Program ($99 a year) and a Developer ID certificate. Every Mach-O file containing native code (.so, .dylib, .o, bundled python3 and helper binaries) must be signed with the hardened runtime and a secure timestamp, or notarization of the whole app fails.",
+   "evidence": "Apple membership comparison page (fee and Developer ID). Apple DTS posts on developer forums and the datasette-app issue show the .so files of a bundled Python failing with 'The binary is not signed.'",
+   "confidence": "likely",
+   "source_url": "https://developer.apple.com/forums/thread/129228"
+  },
+  {
+   "claim": "Code that is unsigned or ad-hoc signed has no stable code-signing identity, so macOS privacy permissions (microphone, screen recording) churn across updates. Apple DTS recommends a stable identity: Apple Development for day-to-day work and Developer ID for distribution.",
+   "evidence": "Apple Developer Forums reply by Quinn (DTS): 'Doing this will radically cut down on the amount of TCC thrash.' Other DTS threads say the system 'can't tell that version N+1 of your code is the same as version N'.",
+   "confidence": "likely",
+   "source_url": "https://developer.apple.com/forums/thread/730043"
+  },
+  {
+   "claim": "Under the hardened runtime, recording from the microphone needs the com.apple.security.device.audio-input entitlement in addition to NSMicrophoneUsageDescription.",
+   "evidence": "Apple entitlement documentation page; its body did not render, so this comes from general knowledge and needs confirming against the live page.",
+   "confidence": "likely",
+   "source_url": "https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.device.audio-input"
+  },
+  {
+   "claim": "The macOS 26 STIG (the DoD security baseline) requires Gatekeeper to allow only App Store or Developer ID-signed apps. On Macs managed to that baseline, an unsigned Cora may be blocked outright, which matters if Cora targets regulated or DoD-adjacent users.",
+   "evidence": "STIG Viewer entry V-277117 for Apple macOS 26 Tahoe (2026-02-11).",
+   "confidence": "likely",
+   "source_url": "https://www.stigviewer.com/stigs/apple_macos_26_tahoe/2026-02-11/finding/V-277117"
+  },
+  {
+   "claim": "Cora is currently unsigned and not notarized, and ships no DMG from electron-builder. package.json build.mac has identity: null, hardenedRuntime: false and target ['dir']. The README says 'the build is not notarized yet'. Building from source needs Xcode Command Line Tools and Homebrew. The public repo mkdsrt10/cora-ai-meeting-notes has 0 stars and was created 2026-09-26.",
+   "evidence": "Read-only inspection of package.json and README.md, plus the GitHub API.",
+   "confidence": "verified",
+   "source_url": "https://api.github.com/repos/mkdsrt10/cora-ai-meeting-notes"
+  },
+  {
+   "claim": "For dev tools and open-source projects, several 2026 guides recommend leading with Show HN and following with Product Hunt or DevHunt 1 to 4 days later, rather than the same morning. Product Hunt is best for its badge, an indexed listing and visibility to investors and press, not for direct signups.",
+   "evidence": "Setproduct comparison (Sept 2026; editorial scoring, not measured data) and other launch guides. The Coming Soon step in Setproduct's guide is out of date.",
+   "confidence": "likely",
+   "source_url": "https://www.setproduct.com/blog/where-to-launch-startup-2026"
+  },
+  {
+   "claim": "DevHunt is a weekly launchpad for developer tools where votes require a GitHub login. Paid tiers include a newsletter spot (newsletter on Tuesdays) and a dofollow link.",
+   "evidence": "DevHunt about page. The summary I got conflicted on whether the basic listing is free or $19.",
+   "confidence": "likely",
+   "source_url": "https://devhunt.org/about"
+  },
+  {
+   "claim": "Timely privacy hook: an HN story titled 'Tl;dv: Over 180k meetings left wide open' got 633 points (Aug 10, 2026). Meeting-data exposure at cloud notetakers is a live topic on HN.",
+   "evidence": "HN Algolia API, objectID 49242739. Only the title and points were checked, not the underlying article.",
+   "confidence": "verified",
+   "source_url": "https://hn.algolia.com/api/v1/search?query=meetily&tags=story"
+  },
+  {
+   "claim": "Product Hunt allows relaunching 'as often as you have new significant product iterations available'. Open SaaS relaunches about every 3 months, tied to its Launch Week.",
+   "evidence": "PH launch home page and the Open SaaS post-mortem.",
+   "confidence": "verified",
+   "source_url": "https://www.producthunt.com/launch"
+  }
+ ],
+ "implications_for_cora": [
+  "Positioning (Product Hunt's 'Novel' criterion): do not launch as 'open-source local AI meeting notes'. Hyprnote/Char, Meetily, Granola, Screenpipe and Humla already occupy that space, and Humla got 9 upvotes without being featured. Lead with the plugin platform and one memorable plugin, such as 'rehearse the hard conversation from your real meeting with an AI role-player'. Hyprnote's 'VSCode for Meeting Notes' Show HN got only 18 points, so claiming extensibility without a strong demo won't land.",
+  "Tagline options within the 60-character limit: 'Local-first meeting notes with a plugin platform' (48 characters) or 'Open-source meeting notes you can extend with plugins' (53). Test them with friends, as the PH CEO advises. Avoid hype words.",
+  "Messaging risk: making Gemini/Google ASR the default on the production branch sends meeting audio to Google. HN and r/LocalLLaMA readers will press on this. State 'local by default; optional bring-your-own-key Gemini for higher accuracy; enterprise_lockdown blocks all outbound traffic' in the README, first comments and privacy policy. Also flag it for SOC 2 and HIPAA purposes: cloud ASR must be clearly opt-in and documented, and covered by lockdown.",
+  "Launch blocker: notarize first. Steps: enroll in the Apple Developer Program ($99 a year); get a Developer ID Application certificate; in electron-builder set build.mac.identity, hardenedRuntime: true, entitlements (com.apple.security.device.audio-input, plus the JIT and library-validation entitlements Electron and the bundled Python need), notarize, and target dmg and zip; sign every Mach-O inside out (Python .so/.dylib files, the python binary, Swift capture helpers); staple the ticket. Without this, every Product Hunt and HN visitor hits the Privacy & Security 'Open Anyway' flow with a one-hour window, which Apple itself tells users not to follow. Updates would also re-trigger the mic and screen-recording permission prompts, the auto-updater won't work, and the official Homebrew cask route is closed.",
+  "SOC 2 control note: keep notarization credentials (an App Store Connect API key or a notarytool keychain profile) in CI secrets or Keychain, never in package.json or scripts. Keep the notarytool logs as evidence of code-integrity checks.",
+  "Channel choice: open-source peers got far more from HN, GitHub trending and Reddit than from Product Hunt (Screenpipe: 218-point HN post and #1 GitHub trending, but #14 and #9 on PH; Meetily: 31.8k stars with almost no HN or PH success; Open SaaS: HN sent 3x more visitors than PH). Treat Product Hunt as a scheduled launch moment and credibility badge, and HN plus GitHub as the main growth engine. Link HN to the GitHub repo and make the README the landing page.",
+  "Reddit fit: Cora's repo is under a month old with 0 stars, so it misses r/macapps Tier 1. Either qualify for Tier 2 (real identity plus a site with Privacy Policy and Terms of Service) or post in the monthly App Pile with the [OS] prefix; 'dictation' apps are routed to the megathread anyway. On r/selfhosted, projects under 3 months old can only go in the Friday megathread, and a desktop app is a weak fit there. On r/LocalLLaMA, lead with the local MLX/Qwen pipeline and an ASR benchmark write-up rather than a promotional post, disclose affiliation and stay under 10% self-promotion. Start building karma now.",
+  "Proposed dates: Show HN Tue Nov 17, 2026 (8-10am ET) and Product Hunt Thu Nov 19, 2026 at 12:01am PT, which keeps both inside about a 48-hour window for GitHub velocity. Avoid Thanksgiving week (Nov 23-27). If notarization slips, move to Tue Dec 1 for Show HN and Thu Dec 3 for Product Hunt. Weekday launches maximize traffic and newsletter inclusion; a Saturday has a lower top-5 bar (median 165 points against 235 on Thursday) if the badge matters more than traffic.",
+  "T-4 weeks (Oct 19-23): enroll in the Apple Developer Program and start the notarized-DMG pipeline; test on clean macOS 15 and 26 machines using a browser download so the app is quarantined. Create or warm up the Product Hunt personal account (1 week minimum; Product Hunt recommends 3+ months, so engage daily from now) and have co-makers create accounts. Start the Product Hunt product page as a draft to get its forum thread, which replaces 'Coming soon'. Publish a website with a data-flow diagram, Privacy Policy and Terms of Service. Freeze the plugin manifest/API and write plugin-SDK docs with an example plugin repo.",
+  "T-3 weeks (Oct 26-30): ship 3 first-party plugins (roleplay rehearsal, communication or storytelling coach, action-items to a todo app or shared knowledge base) and recruit 2-3 outside developers to build plugins. Run a closed beta of 20-50 real users on the notarized build and collect testimonials; ask them to set up and use their Product Hunt accounts now, since new or dormant accounts count for little. Record a 30-60 second YouTube demo that shows a real meeting turning into notes and a plugin within the first 3 seconds, with captions. Make 4-6 gallery images at 1270x760 and a 240x240 thumbnail. Rewrite the README with a GIF at the top, a one-click DMG link, a 'what leaves your machine' table and a plugin quickstart.",
+  "T-2 weeks (Nov 2-6): schedule the Product Hunt launch at least 10 days out with every field filled. Use the repo or site URL with no tracking links, pick 3 tags (e.g. Productivity, Open Source, Artificial Intelligence or Meetings), choose 'Free' pricing, and add shoutouts. Draft the maker first comment: story, who it's for, local vs cloud, a plugin call for developers, and a request for feedback, with no upvote language. Draft the Show HN title and first comment (why you built it, architecture, known limitations). Write an HN-friendly technical post, such as an ASR benchmark of Gemini against local models on real meetings using tools/. Draft the X thread, LinkedIn post and email.",
+  "T-1 week (Nov 9-13): cut the release (e.g. v0.3.0) as a notarized, stapled DMG on GitHub Releases and verify the auto-update path. Open GitHub Discussions and/or Discord for support. Add 'good first plugin' issues and an awesome-cora-plugins list. Prepare an FAQ covering privacy and Gemini data handling, recording consent, enterprise lockdown, Windows/Linux plans, how to build a plugin and the business model. Line up supporters with a message like 'check it out and tell us what's missing', and never ask for upvotes, run contests or buy votes.",
+  "Launch week: Tue Nov 17, post the Show HN and its first comment right away, then reply for 4-6 hours. The same day, post the X thread and LinkedIn story and publish the benchmark write-up. Wed Nov 18, post on r/LocalLLaMA and r/macapps according to their rules. Thu Nov 19 at 12:01am PT the Product Hunt launch goes live: post the first comment immediately, reply to every comment through the 24-hour Pacific day in shifts, share 'we're live, feedback welcome' on X, LinkedIn and email, and add the Product Hunt badge to the README and site. Fri Nov 20, optionally post in the r/selfhosted megathread.",
+  "T+1 week (Nov 20-27): claim the Product Hunt product page and embed the badge. Ship 1-2 fixes from launch feedback with a public changelog. Turn interested developers into plugin authors (bounties, office hours). List on DevHunt in a later week. Publish a post-mortem with numbers (stars, downloads, PH rank, HN traffic, plugin installs). Plan a Product Hunt relaunch when the plugin directory or marketplace ships, which Product Hunt allows for significant iterations; Open SaaS relaunches about every 3 months."
+ ],
+ "unverified_or_unknown": [
+  "Exact Product Hunt point weights (per-account multipliers, comment weight, a first-hour multiplier) are not published; every number in circulation is third-party.",
+  "Whether the hidden, randomized first 4 hours on the leaderboard still apply exactly as described in late 2026; it is reported by makers but not documented by Product Hunt.",
+  "The current featured rate and number of featured launches per day; the 10% and 16-per-day figures come from 2024 data via a single blog.",
+  "Whether a hunter's followers still get notified when they hunt something, after the Aug 2025 notification changes. Hyprnote's #2 with Garry Tan as hunter is confounded by the YC network.",
+  "The exact year of the 'Coming soon' retirement (most likely 2025) and of Randomized Leaderboard Day (most likely Mar 27, 2026), inferred from relative dates.",
+  "The current r/LocalLLaMA self-promotion rule after the April 2026 revision, and live r/macapps and r/selfhosted rules; reddit.com could not be fetched, so mirrors were used. Check each sidebar before posting.",
+  "How Meetily reached about 31.8k stars (presumably Reddit and GitHub trending); I found no Reddit thread or PH listing to confirm.",
+  "Product Hunt rank data for Jan, Ollama and AnythingLLM; none found.",
+  "Which hardened-runtime entitlements Cora's bundled Python, MLX and Swift helpers will need (likely disable-library-validation and allow-jit or unsigned-executable-memory); confirm by running notarytool and testing.",
+  "How long Apple Developer enrollment takes for an individual versus an organization (organizations need a D-U-N-S number); not checked.",
+  "Whether linking to the GitHub repo rather than a website affects Product Hunt featuring; Product Hunt accepts repo links as the URL, but its effect on featuring is unknown.",
+  "Whether 'Orbit Awards' replaced the Golden Kitty Awards; mentioned only in community replies.",
+  "DevHunt pricing (free versus $19 basic listing); the source summary was inconsistent."
+ ]
+}

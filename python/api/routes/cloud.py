@@ -1,19 +1,11 @@
-"""Opt-in cloud/dev features: VM sync, dataset export, legacy analysis endpoints."""
+"""Developer feature: training-dataset stats and export (used by tools/curate_training_data.py)."""
 from __future__ import annotations
 import json
 import time
 
 from api.router import route
 import db
-import json
 import paths
-import time
-
-
-@route("GET", '/api/cloud/sync-status')
-def get_api_cloud_sync_status(req, path: str, query: dict) -> None:
-    import vm_sync
-    return req.send_json({**vm_sync.get_sync_status(), "configured": vm_sync.configured_target() is not None})
 
 
 @route("GET", '/api/dataset/stats')
@@ -22,18 +14,6 @@ def get_api_dataset_stats(req, path: str, query: dict) -> None:
         "total_pairs": db.get_training_pairs_count(),
         "datasets": ["whisper-hinglish-v2", "cora-dpo-flywheel-v1"],
     })
-
-
-@route("POST", '/api/analyze', '/api/analyze-all', '/api/gemini-analyze', '/api/hermes-session', '/api/hermes-chat', '/api/hermes-weekly')
-def post_api_analyze(req, path: str, body: dict) -> None:
-    return req.send_json({"error": "Legacy analysis is disabled. Use neural speaker diarization, confirm identity, then run coaching."}, 410)
-
-
-@route("POST", '/api/cloud/sync-vm')
-def post_api_cloud_sync_vm(req, path: str, body: dict) -> None:
-    import vm_sync
-    res = vm_sync.sync_to_vm(include_audio=body.get("include_audio") is True)
-    return req.send_json(res)
 
 
 @route("POST", '/api/dataset/export')

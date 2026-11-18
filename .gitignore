@@ -56,3 +56,5 @@ coach_data.json
 # App build output (scripts/build-app.sh)
 build/
 dist/
+# Version stamp + beta receiver token; lives only inside the built app
+build-info.json

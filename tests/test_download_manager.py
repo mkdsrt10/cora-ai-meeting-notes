@@ -66,3 +66,45 @@ def test_failed_download_reports_error(monkeypatch):
     final = dm.status("org/will-fail")
     assert final["state"] == "error"
     assert "network is down" in final["error"]
+
+
+def _wait(repo_id, state):
+    for _ in range(100):
+        if dm.status(repo_id)["state"] == state:
+            return
+        time.sleep(0.02)
+
+
+def test_each_finished_download_records_model_downloaded(monkeypatch, tmp_path):
+    events = []
+    monkeypatch.setattr(dm, "_record", lambda name, payload: events.append((name, payload)))
+
+    def fake(repo_id):
+        (dm._cache_dir(repo_id) / "blobs").mkdir(parents=True, exist_ok=True)
+        (dm._cache_dir(repo_id) / "blobs" / "w").write_bytes(b"x" * 3 * 1024 * 1024)
+    monkeypatch.setattr("huggingface_hub.snapshot_download", fake)
+    monkeypatch.setattr(dm, "_repo_total_bytes", lambda repo_id: 0)
+    monkeypatch.setattr(dm, "_cache_dir", lambda repo_id: (tmp_path / repo_id.replace("/", "--")))
+    dm.start("mlx-community/whisper-large-v3-turbo")
+    _wait("mlx-community/whisper-large-v3-turbo", "done")
+    [(name, payload)] = events
+    assert name == "model_downloaded"
+    assert payload["kind"] == "whisper" and payload["model"] == "mlx-community/whisper-large-v3-turbo"
+    assert payload["size_mb"] == 3.0 and payload["outcome"] == "ok" and payload["seconds"] >= 0
+
+
+def test_a_failed_download_records_outcome_error_for_a_text_model(monkeypatch):
+    events = []
+    monkeypatch.setattr(dm, "_record", lambda name, payload: events.append((name, payload)))
+    monkeypatch.setattr("huggingface_hub.snapshot_download", lambda repo_id: (_ for _ in ()).throw(OSError("offline")))
+    monkeypatch.setattr(dm, "_repo_total_bytes", lambda repo_id: 0)
+    dm.start("mlx-community/Qwen3-4B-4bit")
+    _wait("mlx-community/Qwen3-4B-4bit", "error")
+    time.sleep(0.05)
+    assert [(p["kind"], p["outcome"]) for _, p in events] == [("text", "error")]
+
+
+def test_model_downloaded_is_in_the_catalog():
+    import usage_events
+    usage_events.validate("model_downloaded", {"kind": "whisper", "model": "m", "size_mb": 1.0,
+                                               "seconds": 2.0, "outcome": "ok"})

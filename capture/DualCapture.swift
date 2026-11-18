@@ -2,6 +2,85 @@ import Foundation
 import ScreenCaptureKit
 import AVFoundation
 import CoreMedia
+import CoreAudio
+
+// MARK: - Microphone resolution
+//
+// "System default" means the CoreAudio default input device
+// (kAudioHardwarePropertyDefaultInputDevice), mapped to its AVCaptureDevice by
+// unique ID (CoreAudio's device UID is AVFoundation's uniqueID for audio
+// devices). AVCaptureDevice.default(for: .audio) is deliberately not used: it
+// disagrees with the macOS default input on some Macs (see
+// docs/specs/microphone-selector.md).
+
+struct InputDeviceInfo: Encodable {
+    let name: String
+    let uniqueID: String
+    let isDefault: Bool
+}
+
+enum Microphones {
+    static func connected() -> [AVCaptureDevice] {
+        let types: [AVCaptureDevice.DeviceType]
+        if #available(macOS 14.0, *) {
+            types = [.microphone, .external]
+        } else {
+            types = [AVCaptureDevice.DeviceType(rawValue: "AVCaptureDeviceTypeBuiltInMicrophone"),
+                     AVCaptureDevice.DeviceType(rawValue: "AVCaptureDeviceTypeExternalUnknown")]
+        }
+        let found = AVCaptureDevice.DiscoverySession(deviceTypes: types, mediaType: .audio, position: .unspecified).devices
+        var seen = Set<String>()
+        return found.filter { $0.isConnected && seen.insert($0.uniqueID).inserted }
+    }
+
+    static func coreAudioDefaultInputUID() -> String? {
+        var deviceID = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &deviceID) == noErr,
+              deviceID != kAudioObjectUnknown else { return nil }
+
+        var uidAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var uid: Unmanaged<CFString>?
+        var uidSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        let status = withUnsafeMutablePointer(to: &uid) {
+            AudioObjectGetPropertyData(deviceID, &uidAddress, 0, nil, &uidSize, $0)
+        }
+        guard status == noErr, let value = uid else { return nil }
+        return value.takeRetainedValue() as String
+    }
+
+    /// The CoreAudio default input as a connected AVCaptureDevice, if it maps to one.
+    static func systemDefault() -> AVCaptureDevice? {
+        guard let uid = coreAudioDefaultInputUID(),
+              let device = AVCaptureDevice(uniqueID: uid),
+              device.isConnected else { return nil }
+        return device
+    }
+
+    /// One JSON line: [{"name","uniqueID","isDefault"}, ...].
+    static func listJSON() -> String {
+        var devices = connected()
+        let defaultUID = coreAudioDefaultInputUID()
+        if let uid = defaultUID, !devices.contains(where: { $0.uniqueID == uid }),
+           let device = AVCaptureDevice(uniqueID: uid), device.isConnected {
+            devices.insert(device, at: 0)
+        }
+        let infos = devices.map {
+            InputDeviceInfo(name: $0.localizedName, uniqueID: $0.uniqueID, isDefault: $0.uniqueID == defaultUID)
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+        guard let data = try? encoder.encode(infos), let line = String(data: data, encoding: .utf8) else { return "[]" }
+        return line
+    }
+}
 
 @available(macOS 13.0, *)
 class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBufferDelegate {
@@ -14,7 +93,129 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
     var captureSession: AVCaptureSession!
     var scStream: SCStream!
     var isMicMuted = false
-    
+
+    // Microphone in use. Session configuration and reconnect run on
+    // sessionQueue. `lock` guards the writer session (start, finish) for
+    // both delegate queues; mic-track appends and the reconnect padding run
+    // under `micLock` only, so a long silence pad never stalls the
+    // system-audio delegate. Lock order: lock, then micLock.
+    let requestedDeviceID: String?
+    let sessionQueue = DispatchQueue(label: "VoiceCoach.MicSessionQueue")
+    let micLock = NSLock()
+    var currentMicDevice: AVCaptureDevice?
+    var currentMicInput: AVCaptureDeviceInput?
+    var stopping = false
+    var reconnecting = false
+    var reattachedAfterErrorAt: Date?     // (sessionQueue) last same-device reattach on a session error
+    var inputsFinished = false            // (lock + micLock to write) writer inputs marked finished
+    var padNextMicBuffer = false          // (micLock) fill the reconnect gap with silence
+    var lastMicEnd = CMTime.invalid       // (micLock) end time of the last mic buffer written
+    var observers: [NSObjectProtocol] = []
+
+    init(requestedDeviceID: String?) {
+        self.requestedDeviceID = requestedDeviceID
+        super.init()
+    }
+
+    /// Opens `device` as the session's only mic input, replacing any current
+    /// one, and announces it. Call on sessionQueue.
+    @discardableResult
+    func attachMic(_ device: AVCaptureDevice) -> Bool {
+        guard let input = try? AVCaptureDeviceInput(device: device) else { return false }
+        captureSession.beginConfiguration()
+        if let old = currentMicInput { captureSession.removeInput(old) }
+        guard captureSession.canAddInput(input) else {
+            if let old = currentMicInput, captureSession.canAddInput(old) { captureSession.addInput(old) }
+            captureSession.commitConfiguration()
+            return false
+        }
+        captureSession.addInput(input)
+        captureSession.commitConfiguration()
+        currentMicInput = input
+        currentMicDevice = device
+        print("STATUS: MIC_DEVICE \(device.localizedName.replacingOccurrences(of: "\n", with: " "))")
+        fflush(stdout)
+        return true
+    }
+
+    /// Initial mic: the requested device, else the system default, else any
+    /// connected input. Returns false only when no input could be opened.
+    func openInitialMic() -> Bool {
+        if let id = requestedDeviceID {
+            if let device = AVCaptureDevice(uniqueID: id), device.isConnected, attachMic(device) { return true }
+            FileHandle.standardError.write(Data("dual-capture: requested microphone \(id) unavailable; using the system default input\n".utf8))
+        }
+        if let device = Microphones.systemDefault(), attachMic(device) { return true }
+        for device in Microphones.connected() where attachMic(device) {
+            let name = device.localizedName.replacingOccurrences(of: "\n", with: " ")
+            print("CAPTURE_WARNING: Using \(name) because the system default microphone could not be opened")
+            fflush(stdout)
+            return true
+        }
+        return false
+    }
+
+    /// The mic in use went away (unplugged, or the capture session failed).
+    /// After a session error the device in use is reattached first if it is
+    /// still connected; otherwise (and after a disconnect) the system default
+    /// is reopened. Either way into the same session, writing the same mic
+    /// track; the gap is padded with silence when audio resumes. Never exits
+    /// and never ends the Chunk. See docs/adr/0001-mic-reconnect-in-helper.md.
+    func handleMicLoss(reason: String, device: AVCaptureDevice? = nil, sessionError: Bool = false) {
+        sessionQueue.async { [self] in
+            guard !stopping, !reconnecting else { return }
+            if let device = device, device.uniqueID != currentMicDevice?.uniqueID { return }
+            // A device that errors again within 5 s of being reattached is
+            // not retried, so a failing device cannot loop forever.
+            var retry: AVCaptureDevice?
+            if sessionError, let current = currentMicDevice {
+                let recentlyReattached = reattachedAfterErrorAt.map { Date().timeIntervalSince($0) < 5 } ?? false
+                if !recentlyReattached { retry = current }
+            }
+            reconnecting = true
+            print("Microphone lost (\(reason)); reopening \(retry == nil ? "the system default input" : "it, else the system default input").")
+            fflush(stdout)
+            micLock.lock(); padNextMicBuffer = true; micLock.unlock()
+            reconnectMic(attempt: 0, retry: retry)
+        }
+    }
+
+    private func reconnectMic(attempt: Int, retry: AVCaptureDevice?) {
+        guard !stopping else { reconnecting = false; return }
+        // The device in use first when a session error left it connected.
+        // CoreAudio can take a moment to move its default off a device that
+        // just vanished: then prefer the default, and after ~3 s accept any input.
+        var candidates: [AVCaptureDevice] = []
+        if let device = retry, device.isConnected { candidates.append(device) }
+        if let device = Microphones.systemDefault() { candidates.append(device) }
+        if attempt >= 6 { candidates += Microphones.connected() }
+        for device in candidates where attachMic(device) {
+            reattachedAfterErrorAt = device.uniqueID == retry?.uniqueID ? Date() : nil
+            if !captureSession.isRunning { captureSession.startRunning() }
+            reconnecting = false
+            return
+        }
+        if attempt == 6 {
+            print("Microphone: no input device available yet; still retrying.")
+            fflush(stdout)
+        }
+        sessionQueue.asyncAfter(deadline: .now() + (attempt < 6 ? 0.5 : 1.0)) { [self] in
+            reconnectMic(attempt: attempt + 1, retry: retry)
+        }
+    }
+
+    func observeMicLoss() {
+        let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: nil) { [weak self] note in
+            guard let device = note.object as? AVCaptureDevice else { return }
+            self?.handleMicLoss(reason: "disconnected", device: device)
+        })
+        observers.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: captureSession, queue: nil) { [weak self] note in
+            let error = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
+            self?.handleMicLoss(reason: "session error \(error?.code ?? 0)", sessionError: true)
+        })
+    }
+
     func start(url: URL) async throws {
         // Use .mov because it handles multi-track audio much better than .m4a
         assetWriter = try AVAssetWriter(url: url, fileType: .mov)
@@ -40,17 +241,29 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
         
         // 1. Setup Mic via AVCaptureSession
         captureSession = AVCaptureSession()
-        guard let micDevice = AVCaptureDevice.default(for: .audio),
-              let micDeviceInput = try? AVCaptureDeviceInput(device: micDevice) else {
+        let micOpened = sessionQueue.sync { openInitialMic() }
+        guard micOpened else {
             print("Error: No microphone found.")
             exit(1)
         }
-        if captureSession.canAddInput(micDeviceInput) { captureSession.addInput(micDeviceInput) }
-        
+
         let micOutput = AVCaptureAudioDataOutput()
+        // One fixed PCM format whatever the device, so a reconnect to a mic
+        // with a different native format keeps feeding the same writer input,
+        // and the silence padding is built in that same format.
+        micOutput.audioSettings = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: 48000,
+            AVNumberOfChannelsKey: 2,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+            AVLinearPCMIsNonInterleaved: false,
+            AVLinearPCMIsBigEndianKey: false
+        ]
         micOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "VoiceCoach.MicQueue"))
         if captureSession.canAddOutput(micOutput) { captureSession.addOutput(micOutput) }
-        captureSession.startRunning()
+        observeMicLoss()
+        sessionQueue.sync { captureSession.startRunning() }
         
         // 2. Setup System Audio via SCK
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
@@ -95,6 +308,8 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
     }
     
     func stop() async {
+        sessionQueue.sync { stopping = true }
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
         captureSession?.stopRunning()
         // If stopCapture throws (SCStream can fail here for reasons unrelated
         // to whether we have data worth keeping — e.g. transient state
@@ -109,10 +324,13 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
             fflush(stdout)
         }
 
-        lock.lock()
-        micInput.markAsFinished()
-        sysInput.markAsFinished()
-        lock.unlock()
+        lock.withLock {
+            micLock.withLock {
+                inputsFinished = true
+                micInput.markAsFinished()
+                sysInput.markAsFinished()
+            }
+        }
 
         await assetWriter.finishWriting()
         print("Spike A: Recording stopped gracefully. Writer status: \(assetWriter.status.rawValue), error: \(String(describing: assetWriter.error))")
@@ -227,22 +445,92 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
     func writeBuffer(_ buffer: CMSampleBuffer, to input: AVAssetWriterInput, source: String) {
         checkAudioLevel(buffer, source: source)
         lock.lock()
-        defer { lock.unlock() }
-        
-        if assetWriter.status == .unknown { return }
-        
-        if assetWriter.status == .writing {
-            if !sessionStarted {
-                let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
-                assetWriter.startSession(atSourceTime: pts)
-                sessionStarted = true
-                print("Session timeline anchored by \(source) track.")
-                fflush(stdout)
-            }
-            if input.isReadyForMoreMediaData {
-                input.append(buffer)
-            }
+        guard assetWriter.status == .writing, !inputsFinished else { lock.unlock(); return }
+        if !sessionStarted {
+            let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
+            assetWriter.startSession(atSourceTime: pts)
+            sessionStarted = true
+            print("Session timeline anchored by \(source) track.")
+            fflush(stdout)
         }
+        guard source == "Mic" else {
+            if input.isReadyForMoreMediaData { input.append(buffer) }
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        writeMicBuffer(buffer)
+    }
+
+    /// Appends a mic buffer, first padding a reconnect gap with silence.
+    /// Runs on the mic delegate queue under `micLock` only: waiting for the
+    /// writer while padding delays mic buffers, never the system track.
+    private func writeMicBuffer(_ buffer: CMSampleBuffer) {
+        micLock.lock()
+        defer { micLock.unlock() }
+        guard !inputsFinished else { return }
+        let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
+        if padNextMicBuffer {
+            padNextMicBuffer = false
+            padMicGap(until: pts, like: buffer)
+        }
+        let duration = CMSampleBufferGetDuration(buffer)
+        lastMicEnd = duration.isValid ? CMTimeAdd(pts, duration) : pts
+        if micInput.isReadyForMoreMediaData {
+            micInput.append(buffer)
+        }
+    }
+
+    /// Writes zero PCM on the mic track from the end of the last mic buffer
+    /// up to `end`, in `template`'s format, so the mic and system tracks stay
+    /// time-aligned across a reconnect. Called with `micLock` held (never
+    /// `lock`), on the mic delegate queue.
+    private func padMicGap(until end: CMTime, like template: CMSampleBuffer) {
+        guard lastMicEnd.isValid, end.isValid,
+              let format = CMSampleBufferGetFormatDescription(template),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
+              asbd.mSampleRate > 0, asbd.mBytesPerFrame > 0 else { return }
+        let gapSeconds = CMTimeGetSeconds(CMTimeSubtract(end, lastMicEnd))
+        guard gapSeconds > 0.01 else { return }
+
+        let rate = asbd.mSampleRate
+        let nonInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
+        let bytesPerFrame = Int(asbd.mBytesPerFrame) * (nonInterleaved ? Int(asbd.mChannelsPerFrame) : 1)
+        var remaining = Int(gapSeconds * rate)
+        var written = 0
+        var cursor = lastMicEnd
+        while remaining > 0 {
+            let frames = min(remaining, Int(rate))   // at most 1 s per buffer
+            guard let silence = makeSilence(format: format, frames: frames, bytesPerFrame: bytesPerFrame, at: cursor) else { break }
+            // Real-time inputs drop buffers when not ready; give the writer a
+            // short while so the padding is not lost.
+            var waited = 0
+            while !micInput.isReadyForMoreMediaData && waited < 200 { usleep(1000); waited += 1 }
+            guard micInput.isReadyForMoreMediaData, micInput.append(silence) else { break }
+            written += frames
+            remaining -= frames
+            cursor = CMTimeAdd(cursor, CMTime(value: CMTimeValue(frames), timescale: CMTimeScale(rate)))
+        }
+        print(String(format: "Microphone gap padded with %.2fs of silence.", Double(written) / rate))
+        fflush(stdout)
+    }
+
+    private func makeSilence(format: CMAudioFormatDescription, frames: Int, bytesPerFrame: Int, at pts: CMTime) -> CMSampleBuffer? {
+        let length = frames * bytesPerFrame
+        var block: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: length,
+                                                 blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0,
+                                                 dataLength: length, flags: kCMBlockBufferAssureMemoryNowFlag,
+                                                 blockBufferOut: &block) == kCMBlockBufferNoErr,
+              let data = block,
+              CMBlockBufferFillDataBytes(with: 0, blockBuffer: data, offsetIntoDestination: 0, dataLength: length) == kCMBlockBufferNoErr
+        else { return nil }
+        var sample: CMSampleBuffer?
+        guard CMAudioSampleBufferCreateReadyWithPacketDescriptions(allocator: kCFAllocatorDefault, dataBuffer: data,
+                                                                   formatDescription: format, sampleCount: frames,
+                                                                   presentationTimeStamp: pts, packetDescriptions: nil,
+                                                                   sampleBufferOut: &sample) == noErr else { return nil }
+        return sample
     }
 }
 
@@ -251,12 +539,37 @@ guard #available(macOS 13.0, *) else {
     exit(1)
 }
 
+// Usage:
+//   dual-capture --list-devices                  one JSON line of input devices, exit 0
+//   dual-capture <outFile> [--device <uniqueID>] record; no or absent device = system default input
+var positionalArgs: [String] = []
+var deviceArg: String?
+var listDevicesMode = false
 let args = CommandLine.arguments
-let outputPath = args.count > 1 ? args[1] : "spike_dual_track.mov"
+var argIndex = 1
+while argIndex < args.count {
+    let arg = args[argIndex]
+    if arg == "--list-devices" {
+        listDevicesMode = true
+    } else if arg == "--device" {
+        if argIndex + 1 < args.count { deviceArg = args[argIndex + 1]; argIndex += 1 }
+    } else {
+        positionalArgs.append(arg)
+    }
+    argIndex += 1
+}
+
+if listDevicesMode {
+    print(Microphones.listJSON())
+    fflush(stdout)
+    exit(0)
+}
+
+let outputPath = positionalArgs.first ?? "spike_dual_track.mov"
 let url = URL(fileURLWithPath: outputPath)
 try? FileManager.default.removeItem(at: url)
 
-let recorder = DualRecorder()
+let recorder = DualRecorder(requestedDeviceID: (deviceArg?.isEmpty ?? true) ? nil : deviceArg)
 
 // NOTE: group.wait() here previously deadlocked on SIGINT — it blocks the
 // main thread synchronously, but the DispatchSource's handler is scheduled

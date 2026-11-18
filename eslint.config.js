@@ -3,9 +3,9 @@ const globals = require('globals');
 
 module.exports = [
   // Dashboard scripts share one global scope; scripts/lint-ui.js lints them together.
-  { ignores: ['src/ui/web/js/**', 'node_modules/**', 'dist/**'] },
+  { ignores: ['src/ui/web/js/**', 'src/ui/web/plugins/**', 'node_modules/**', 'dist/**'] },
   {
-    files: ['src/main.js', 'src/main/**/*.js', 'src/preload.js', 'src/meeting-detector.js', 'src/mic-watcher.js', 'eslint.config.js'],
+    files: ['src/main.js', 'src/main/**/*.js', 'src/recording/**/*.js', 'src/preload.js', 'src/meeting-detector.js', 'test/js/**/*.js', 'eslint.config.js'],
     languageOptions: { ecmaVersion: 2023, sourceType: 'commonjs', globals: { ...globals.node } },
     rules: {
       'no-undef': 'error',

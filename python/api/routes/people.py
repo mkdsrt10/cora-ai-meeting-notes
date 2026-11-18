@@ -2,15 +2,12 @@
 from __future__ import annotations
 import datetime as dt
 import re
+import uuid
 
 from api.router import route
-from diarization import confirm_speaker
-from diarization import label_speaker
-from diarization import reset_speaker
 import datetime as dt
 import db
 import re
-from api.core import safe_folder
 from api.views import RAW_ID_PATTERN
 
 
@@ -34,12 +31,15 @@ def get_api_person(req, path: str, query: dict) -> None:
 
 @route("POST", '/api/people/create')
 def post_api_people_create(req, path: str, body: dict) -> None:
-    name = str(body.get("name", "")).strip()
-    if not name:
+    raw_name = body.get('name')
+    if not isinstance(raw_name, str) or not raw_name.strip():
         raise ValueError("Name is required")
+    name = raw_name.strip()
+    if len(name) > 200:
+        raise ValueError('Name must be at most 200 characters')
     role = str(body.get("role", "")).strip()
     relationship = str(body.get("relationship", "")).strip()
-    person_id = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or dt.datetime.now().strftime("p%Y%m%d%H%M%S%f")
+    person_id = (re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "person") + "_" + uuid.uuid4().hex
     now = dt.datetime.now().astimezone().isoformat()
     db.upsert_person(
         person_id, name, role, str(body.get("organization", "")).strip(),
@@ -110,29 +110,3 @@ def post_api_recording_participant(req, path: str, body: dict) -> None:
     db.update_recording_data(rec_id, "metadata", metadata)
     return req.send_json({"ok": True})
 
-
-@route("POST", '/api/confirm-speaker')
-def post_api_confirm_speaker(req, path: str, body: dict) -> None:
-    folder = safe_folder(body.get("id", ""))
-    result = confirm_speaker(folder, str(body.get("speaker_id", "")))
-    return req.send_json({"ok": True, "identity": result})
-
-
-@route("POST", '/api/label-speaker')
-def post_api_label_speaker(req, path: str, body: dict) -> None:
-    folder = safe_folder(body.get("id", ""))
-    result = label_speaker(
-        folder,
-        str(body.get("speaker_id", "")),
-        str(body.get("name", "")),
-        str(body.get("role", "")),
-        str(body.get("organization", "")),
-    )
-    return req.send_json({"ok": True, "speaker": result})
-
-
-@route("POST", '/api/reset-speaker')
-def post_api_reset_speaker(req, path: str, body: dict) -> None:
-    folder = safe_folder(body.get("id", ""))
-    reset_speaker(folder)
-    return req.send_json({"ok": True})

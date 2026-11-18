@@ -1,16 +1,14 @@
-"""Local MLX Whisper transcription (pause-bounded chunks, cleanup, tracing)."""
+"""Local MLX Whisper transcription (pause-bounded chunks, cleanup, tracing).
+
+Callers go through pipeline.transcriber; this is its MlxWhisper implementation."""
 from __future__ import annotations
 
-import os
 import re
-import shutil
-import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 import ai_trace
-import db
-from .audio import _to_original_time, build_trimmed_audio, ensure_mixed_audio, extract_clip, find_speech_segments, probe_duration
+from .audio import extract_clip
 from .config import resolve_whisper_model
 
 
@@ -57,6 +55,7 @@ def transcribe_local_mlx(audio_path: Path, prompt: str = "") -> dict[str, Any]:
     decode_params = dict(language="en", condition_on_previous_text=False, temperature=(0.0, 0.2, 0.4),
                          compression_ratio_threshold=2.4, logprob_threshold=-1.0, no_speech_threshold=0.5,
                          word_timestamps=False)
+    _preload_whisper(model_id)
     audio_info = ai_trace.file_fingerprint(audio_path)
     with ai_trace.span("transcription", "whisper.local_pipeline", provider="mlx", model=model_id,
                        input={"audio": audio_info, "initial_prompt": prompt}, params=decode_params,
@@ -70,6 +69,25 @@ def transcribe_local_mlx(audio_path: Path, prompt: str = "") -> dict[str, Any]:
     if "text" in result:
         result["text"] = collapse_repetition_loops(result["text"])
     return result
+
+
+def _preload_whisper(model_id: str) -> None:
+    """Load the Whisper model under a model_load span (processing_finished
+    model_load_s), the same way mlx_whisper.transcribe would: its ModelHolder
+    keeps it, so the transcription itself does not load again. Skipped when it
+    is already loaded; a failure here only means transcribe loads it itself."""
+    try:
+        import mlx.core as mx
+        from mlx_whisper.transcribe import ModelHolder
+    except Exception:
+        return
+    if ModelHolder.model is not None and ModelHolder.model_path == model_id:
+        return
+    try:
+        with ai_trace.span("model_load", "whisper.load", provider="mlx", model=model_id):
+            ModelHolder.get_model(model_id, mx.float16)
+    except Exception as exc:
+        print(f"[Local MLX] Whisper preload failed, transcribe will load it: {exc}", flush=True)
 
 
 def _whisper_trace_output(result: dict[str, Any]) -> dict[str, Any]:
@@ -168,11 +186,6 @@ def plan_chunks(speech_segments: list[tuple[float, float]], target: float = CHUN
 
 
 def _transcribe_clip(clip: Path, prompt: str) -> dict[str, Any]:
-    """One chunk through the selected engine (local MLX unless the user
-    opted into a hosted one in Settings — see cloud_asr)."""
-    from . import cloud_asr
-    if cloud_asr.engine() != "local":
-        return cloud_asr.transcribe_clip(clip, prompt)
     return transcribe_local_mlx(clip, prompt=prompt)
 
 
@@ -191,84 +204,3 @@ def _transcribe_chunks(audio_path: Path, speech_segments: list[tuple[float, floa
             seg_end = min(end, start + float(seg.get("end", 0.0)))
             segments.append({**seg, "start": seg_start, "end": max(seg_end, seg_start)})
     return segments
-
-
-def transcribe_with_silence_removal(audio_path: Path, prompt: str, folder: Optional[Path] = None,
-                                    prompt_for: Optional[Callable[[float, float], str]] = None) -> tuple[list[dict[str, Any]], float, float]:
-    """Detect and drop dead air, transcribe the remaining speech in a single
-    Whisper pass, then shift segment timestamps back onto the original
-    recording's timeline. Returns (segments, audio_duration, speech_duration).
-
-    Speech is transcribed in pause-bounded chunks (see plan_chunks);
-    mlx_whisper caches the loaded model (ModelHolder), so many chunks cost
-    no reloads. The spliced single-pass audio is still built — as the
-    fallback path and as audio_transcribed.wav for debugging.
-
-    This also fixes a quality problem, not just a speed one: a long unbroken
-    pass over real dead air (waiting for a screen share, muted, thinking) is
-    exactly when Whisper's autoregressive decoder tends to hallucinate
-    repeated phrases — the phrase-looping the fine-tuned model's
-    anti-repetition setting is meant to prevent, but which a 70-minute
-    uninterrupted pass could still trigger during long true-silence stretches.
-    """
-    from . import cloud_asr
-    model_id = resolve_whisper_model()
-    model_label = Path(model_id).name if os.path.isabs(model_id) else model_id
-    if cloud_asr.engine() != "local":
-        model_label = f"cloud:{cloud_asr.engine()}"
-    duration = probe_duration(audio_path)
-    mixed_audio_path = ensure_mixed_audio(audio_path)
-    speech_segments = find_speech_segments(mixed_audio_path)
-    speech_duration = sum(end - start for start, end in speech_segments)
-    print(
-        f"[Local MLX] {model_label}: {len(speech_segments)} speech stretch(es), "
-        f"{speech_duration:.0f}s of {duration:.0f}s kept "
-        f"({100 * speech_duration / duration:.0f}% — {duration - speech_duration:.0f}s of silence skipped)",
-        flush=True,
-    )
-
-    trimmed_path, mapping = build_trimmed_audio(mixed_audio_path, speech_segments)
-    t0 = time.time()
-    chunked: Optional[list[dict[str, Any]]] = None
-    try:
-        # Pause-bounded chunks: models without timestamp tokens (most
-        # fine-tunes) emit one segment per 30s window, which lumps several
-        # speakers into one "turn". Transcribing each stretch between
-        # natural pauses gives turn-sized segments that speaker attribution
-        # can label individually. Falls back to the single spliced pass.
-        try:
-            chunked = _transcribe_chunks(mixed_audio_path, speech_segments, prompt, prompt_for)
-        except Exception as exc:
-            print(f"[Local MLX] Chunked transcription failed, using single pass: {exc}", flush=True)
-            result = transcribe_local_mlx(trimmed_path, prompt=prompt)
-    finally:
-        if mixed_audio_path != audio_path:
-            mixed_audio_path.unlink(missing_ok=True)
-        # The exact silence-stripped, spliced audio Whisper actually heard —
-        # useful for hearing what a hallucinated/garbled segment really
-        # sounded like, and for checking silence-removal didn't cut real
-        # speech. Kept alongside audio.mov, so it follows the same
-        # retain_audio opt-out rather than always persisting regardless of
-        # that choice. Saved even on a failed transcribe_local_mlx call,
-        # since that's exactly when it's most useful for debugging.
-        if folder and db.get_setting("retain_audio", True):
-            try:
-                shutil.copy2(trimmed_path, folder / f"audio_transcribed{trimmed_path.suffix}")
-            except Exception as exc:
-                print(f"[Local MLX] Failed to save post-processed transcription audio: {exc}", flush=True)
-        trimmed_path.unlink(missing_ok=True)
-    print(f"[Local MLX] STT completed in {time.time() - t0:.1f}s over {speech_duration:.0f}s of speech"
-          f" ({'pause-bounded chunks' if chunked is not None else 'single pass'})", flush=True)
-
-    if chunked is not None:
-        all_segments = chunked
-    else:
-        all_segments = [
-            {**seg,
-             "start": _to_original_time(float(seg.get("start", 0.0)), mapping),
-             "end": _to_original_time(float(seg.get("end", 0.0)), mapping)}
-            for seg in result.get("segments", [])
-        ]
-    all_segments.sort(key=lambda s: s["start"])
-    all_segments = clean_whisper_segments(all_segments)
-    return all_segments, duration, speech_duration

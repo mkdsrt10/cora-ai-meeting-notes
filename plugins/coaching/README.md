@@ -18,23 +18,31 @@ coaching layer only; your transcript and a re-encoded copy of the audio are sent
 to Gemini and the remote copy is deleted after analysis (see the `privacy_note`
 field on every coaching result).
 
-## Disabling it
+## Enabling / disabling it
 
-Two ways, either is enough on its own:
+Off by default. Set `plugins.coaching.enabled` to `true` in `config.json` to
+turn it on; `false` (or deleting this directory) turns it off. The flag is
+read on every call, so no restart is needed.
 
-1. Set `plugins.coaching.enabled` to `false` in `config.json`.
-2. Delete this directory (`plugins/coaching/`) entirely.
+Disabled, the plugin host (`python/plugin_host.py`) leaves it out entirely:
+- no `plugins.coaching` payload on a Recording, and the stage after speaker
+  confirmation is plain `ready` instead of `ready_for_coaching` / `coached`;
+- the `after_meeting` Hook never runs, so no audio goes to Gemini;
+- archetype tagging (`api.core.archetypes()`) becomes a no-op.
 
-Either way, `python/diarization.py` and `python/server.py` degrade gracefully:
-- Coaching endpoints (`/api/gemini-coach`, `/api/confirm-and-coach`) return a
-  clear 404 instead of crashing.
-- The auto-pilot hook inside `diarize()` still auto-confirms a recognized
-  speaker's identity, but skips generating a coaching report.
-- `ARCHETYPES` resolves to an empty dict, so archetype-selection endpoints
-  become no-ops rather than errors.
+Enabled, the `after_meeting` Hook scores the owner's turns only for a
+Recording diarized by Gemini (whose audio already went to Google in that
+run) with a confirmed owner speaker. Locally processed Recordings are never
+uploaded by this plugin. It coaches once per diarization: the report records
+`coached_against` (a fingerprint of the diarization model, analysis time and
+owner speaker id), and a later Hook call for the same diarization uploads
+nothing and keeps the report.
 
 ## Files
 
+- `__init__.py` — the Plugin declaration (payload, stages, Hooks).
+- `plugin.py` — its view model, stages and `after_meeting` Hook; light to
+  import (the engine loads only when a report is generated).
 - `engine.py` — archetype rubrics, coaching prompts/schemas, delivery-metrics
   signal processing (pace/pause/filler/pitch — this math itself is local, only
   the coaching prompt + archetype classification call the cloud).
@@ -43,5 +51,3 @@ Either way, `python/diarization.py` and `python/server.py` degrade gracefully:
   by `server.py`; kept as a reference implementation for a no-cloud-at-all
   coaching mode, and as a starting point if you want to port scoring to a
   local model instead of Gemini.
-- `backfill_delivery_metrics.py` — maintenance script to recompute delivery
-  metrics for already-coached recordings after a scoring-logic change.

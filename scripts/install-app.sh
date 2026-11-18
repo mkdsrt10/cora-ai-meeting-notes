@@ -14,6 +14,8 @@ fi
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 cp -R package.json config.example.json src "$stage/"
+# src/meeting-detector.js requires the live-call snippet shared with speaker-watch.
+mkdir -p "$stage/capture" && cp capture/live-call-snippet.js "$stage/capture/"
 cp "$ASAR" "$ASAR.bak"
 node -e "require('@electron/asar').createPackage(process.argv[1], process.argv[2])" "$stage" "$ASAR"
 echo "Updated $ASAR (previous copy: app.asar.bak). Open the app to use the new code."

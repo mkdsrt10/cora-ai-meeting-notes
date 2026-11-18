@@ -6,8 +6,8 @@ coaching plugin (plugins/coaching/) is installed or enabled — the Granola-equi
 "record it, transcribe it, summarize it, tell me who said what" pipeline.
 
 Executive coaching, delivery scoring, and archetype rubrics live in
-plugins/coaching/engine.py instead, and are reached only through
-plugin_registry.get_coaching_plugin() so this module never hard-depends on them.
+plugins/coaching/ instead; this module only fires the after_meeting Hook
+(post_processing.finish) and never depends on any plugin.
 """
 from __future__ import annotations
 
@@ -23,7 +23,6 @@ from typing import Any
 import db
 import credentials
 from people_matcher import extract_reference_clip, run_voice_match, PEOPLE_DIR
-from plugin_registry import get_coaching_plugin
 
 LATEST_AUDIO_MODEL = credentials.get_default_model()
 AUDIO_SUFFIXES = {".m4a", ".mp3", ".wav", ".aiff", ".aif", ".mp4", ".caf", ".mov"}
@@ -58,7 +57,8 @@ def read_json(path: Path, default: Any = None) -> Any:
 def find_audio(folder: Path) -> Path:
     candidates = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES)
     if not candidates:
-        raise FileNotFoundError("No archived audio file found")
+        from pipeline.errors import NoAudioError
+        raise NoAudioError()
     return candidates[0]
 
 
@@ -332,21 +332,17 @@ def clear_coaching_artifacts(folder: Path) -> None:
     db.update_recording_data(folder.name, "delivery_metrics", {})
 
 
-def reset_speaker(folder: Path) -> None:
-    """Clear identity and identity-dependent coaching, preserving diarization."""
-    (folder / "self_speaker.json").unlink(missing_ok=True)
-    clear_coaching_artifacts(folder)
-    db.update_recording_data(folder.name, "identity", {})
-
-
 def atomic_json(path: Path, value: Any) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
     temporary.replace(path)
 
 
-def client_for_key():
-    return credentials.get_client()
+def client_for_key(trace: str | None = None):
+    """Gemini client for whole-file audio work, traced under `trace`
+    (default: the calling function, gemini.<module>.<function>)."""
+    from pipeline import text_model
+    return text_model.gemini_client(trace or text_model.caller_trace_name())
 
 
 def prepare_audio_for_gemini(audio: Path) -> tuple[bytes, str, Path | None]:
@@ -387,39 +383,13 @@ def prepare_audio_for_gemini(audio: Path) -> tuple[bytes, str, Path | None]:
 
 
 def safe_json_loads(text: str) -> dict[str, Any]:
-    """Safely decode JSON from Gemini, with automatic recovery for truncated output."""
-    clean = text.strip()
-    if clean.startswith("```"):
-        clean = re.sub(r"^```(?:json)?\n?", "", clean)
-        clean = re.sub(r"\n?```$", "", clean)
-    try:
-        return json.loads(clean)
-    except Exception as exc:
-        try:
-            import json_repair
-            repaired = json_repair.repair_json(clean, return_objects=True)
-            if isinstance(repaired, dict):
-                print("[diarization] Recovered truncated JSON response cleanly using json-repair.")
-                return repaired
-        except Exception:
-            pass
-        # Fallback to structural closing
-        last_obj_end = clean.rfind("},")
-        if last_obj_end != -1:
-            candidate = clean[:last_obj_end + 1]
-            open_brackets = candidate.count("[") - candidate.count("]")
-            open_braces = candidate.count("{") - candidate.count("}")
-            candidate += "\n" + ("]" * max(0, open_brackets)) + ("}" * max(0, open_braces))
-            try:
-                print("[diarization] Recovered truncated JSON response cleanly.")
-                return json.loads(candidate)
-            except Exception:
-                pass
-        raise exc
+    """Gemini's JSON reply, recovering fenced or truncated output (pipeline.text_model.parse_json)."""
+    from pipeline.text_model import parse_json
+    return parse_json(text)
 
 
 def interact_with_audio(audio: Path, prompt: str, response_schema: dict[str, Any], model: str | None = None, client=None) -> dict[str, Any]:
-    client = client or client_for_key()
+    client = client or client_for_key("gemini.diarization.interact_with_audio")
     model = model or credentials.get_default_model()
     from google.genai import types
 
@@ -591,13 +561,17 @@ def render_call_summary_markdown(summary: dict[str, Any]) -> str:
 
 def diarize(folder: Path, model: str = LATEST_AUDIO_MODEL, client=None) -> dict[str, Any]:
     import ai_trace
+    import post_processing
+    source_audio = [find_audio(folder)]
     with ai_trace.run("gemini_diarization", recording_id=folder.name, model=model):
-        return _diarize(folder, model, client)
+        result = _diarize(folder, model, client)
+    post_processing.finish(folder.name, source_audio)
+    return result
 
 
 def _diarize(folder: Path, model: str = LATEST_AUDIO_MODEL, client=None) -> dict[str, Any]:
     audio = find_audio(folder)
-    client = client or client_for_key()
+    client = client or client_for_key("gemini.diarization.interact_with_audio")
 
     try:
         duration = probe_audio_duration(audio)
@@ -661,9 +635,7 @@ def _diarize(folder: Path, model: str = LATEST_AUDIO_MODEL, client=None) -> dict
         run_voice_match(folder.name, audio, result.get("segments", []), top_speakers, client)
 
         # AUTO-PILOT: if we found a high-confidence match for the user, auto-confirm
-        # identity — and, only when the coaching plugin is installed and enabled,
-        # auto-generate a coaching report. With the plugin absent/disabled this
-        # block still auto-confirms identity but never touches coaching.
+        # identity. Plugins (e.g. coaching) act on it in the after_meeting Hook.
         matches = db.get_speaker_matches(folder.name)
         for m in matches:
             if m.get("confidence") in ["high", "medium"]:
@@ -679,12 +651,6 @@ def _diarize(folder: Path, model: str = LATEST_AUDIO_MODEL, client=None) -> dict
                     }
                     atomic_json(folder / "self_speaker.json", identity_payload)
                     db.update_recording_data(folder.name, "identity", identity_payload)
-
-                    coaching_plugin = get_coaching_plugin()
-                    if coaching_plugin is not None:
-                        print("AUTO-PILOT: Coaching plugin enabled — auto-generating coaching report...")
-                        goals = db.get_setting("goals")
-                        coaching_plugin.coach(folder, mode="free", speaker_id=m["speaker_id"], model=model, client=client, goals=goals)
                     break
 
     except Exception as e:
