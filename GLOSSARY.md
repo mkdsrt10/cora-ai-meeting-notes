@@ -34,13 +34,13 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Stage**: where a Recording stands: recording, processing, paused, needs diarization, needs speaker confirmation, ready. A Plugin may refine "ready" into its own Stages (Coaching: ready to coach, coached). _Avoid_: status (that is only the capture/processing part).
 
-**Notes**: the document Cora writes for a Recording after processing: overview, Action items, decisions, open questions. Regenerated when the Recording is reprocessed. _Avoid_: summary (that is one short variant of it), enhanced notes.
+**Notes**: the document Cora writes for a Recording after processing (overview, Action items, decisions, open questions), which the user can then edit in place. Its Action items are records shown inside it, not text. Regenerating makes a new **Notes version**; a version the user edited is kept, never overwritten. _Avoid_: summary (that is one short variant of it), enhanced notes.
 
 **Notepad**: what you type yourself for a Recording, during the call or after it. Never generated or overwritten by Cora. _Avoid_: my notes, manual notes.
 
 **Export**: a file you save from one Recording, holding its Notes, its Notepad when it has text, and its transcript only when you ask for it. Under enterprise lockdown only the Notes and Notepad can be exported. _Avoid_: share (that sends to someone), download.
 
-**Action item**: a follow-up written into a Recording's notes. Todo/Planner keeps each as a To-do.
+**Action item**: a follow-up written into a Recording's notes: what is to be done, its owner (a Participant or Person, or unassigned) and a due date when one was said. It keeps its identity when reprocessing brings it back reworded but close enough. One the user added or edited is theirs: reprocessing never supersedes it, and an AI one the user deleted stays deleted. Todo/Planner keeps each as a To-do.
 
 **To-do**: an Action item as Todo/Planner tracks it: done or not. It keeps its identity (and done mark) when its Recording is reprocessed and the same Action item comes back; one that no longer appears is superseded, not listed. _Avoid_: task.
 
@@ -49,6 +49,22 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 **Window**: one clip of a Recording's audio sent to a cloud Transcriber call and validated as a unit; a Window that the cloud engine keeps rejecting is transcribed locally instead. _Avoid_: chunk (that is capture), segment (that is transcript).
 
 **Person**: someone Cora knows across Recordings: a People entry with a name, role, organization and optional voice reference, matched to speakers. _Avoid_: contact, user.
+
+**Account**: who a Person is in one Connection (their Slack user, their Notion user). Suggested by name, confirmed once by the user, then reused. _Avoid_: identity, handle.
+
+**Connection**: the user's own authorised link from their Install to one external workspace (their Slack, their Notion). It acts as the user and belongs to one person; it is never shared. _Avoid_: integration, connector.
+
+**Task**: an item in an external tracker, such as a Notion task. A To-do may be Linked to a Task; many Action items may share one Task when the user's Usage instructions say so. _Avoid_: ticket, card.
+
+**Proposal**: one external write a Plugin suggests for a Recording (create, link, update or comment on a Task; post or update a message), waiting for the user's click. Nothing reaches an external tool without that click. Shown in the app as "Suggested". _Avoid_: action, draft, suggestion.
+
+**Outbox**: every pending Proposal, across Recordings. A Proposal leaves it by being confirmed, dismissed, or retired (no longer valid, or 14 days without a decision).
+
+**Task comment**: what one Recording concluded about one Task it discussed (decisions, progress, blockers, open questions), as one comment. Each point is backed by a transcript quote that stays on the Mac. _Avoid_: task update (that changes the Task's fields).
+
+**Link**: the record that an Action item or Recording corresponds to an external Task or message, made when a Proposal is confirmed.
+
+**Usage instructions**: what a user writes, per Plugin, about how they use that external tool (how big a Task is, what a message looks like). The Plugin's Proposals follow them.
 
 **Call**: a live conversation in a meeting app or browser tab that Cora can notice, whether or not it is being recorded: Google Meet, Zoom, Microsoft Teams, a Slack huddle (expanded, collapsed to the mini-bar, or in the desktop app). "Call detected" is the moment Cora first notices one and offers to record; a Call exists only once you are in it (the page's own leave control or the app's meeting window is present), and ends when the app releases the microphone or its tab or window goes away. _Avoid_: meeting (that is the app, the Recording or the calendar event, depending on the sentence).
 
