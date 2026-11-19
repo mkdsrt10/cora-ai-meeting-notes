@@ -99,7 +99,7 @@ Capture helper ──► recording file (unchanged, canonical)
 **Cloud live (Google Cloud Speech-to-Text v2, Chirp streaming).**
 - Offered only when the Processing profile uses the Vertex backend; reuses its credentials.
 - Goes through the outbound policy check; refused under lockdown; not offered by default in the Team build.
-- Reconnects with overlap if the API limits stream length. Data logging off. To verify while building: regional availability, stream limits, code-switching support, BAA coverage.
+- Reconnects with overlap if the API limits stream length. Data logging off. To verify while building: regional availability, stream limits, code-switching support, whether the user's Google Cloud agreement covers Speech-to-Text.
 - Never falls back to on-device automatically, and on-device never upgrades to cloud.
 
 **Processing profile.** Gains a `live` field (`off` | `on_device` | `cloud_vertex`), independent of `transcription`. Default `off` for this spec.
