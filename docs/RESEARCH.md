@@ -301,6 +301,77 @@ local path, and grade precision in the next shootout. For transcription, the den
 the local tier needs either the larger Tara checkpoint with silence-aware chunking tuned for
 crosstalk, or a reference-scored WER before it is offered as the default to anyone.
 
+## Context for local notes: the plugin-harness checkpoint (November 2026)
+
+Spec `docs/specs/plugin-harness-local-proof.md`, design §13.4–§13.5. Question: does giving the
+local notes model context (People in the call, open Action items and decisions from earlier
+meetings with them, the user's Work context, smaller per-section budgets) close part of the gap
+to Gemini? Checkpoint rule: if arm B does not beat arm A on the gates, stop before building
+external writes.
+
+**Method.** [`tools/eval_notes_context.py`](../tools/eval_notes_context.py) reruns only the
+notes stage from saved transcripts of the four paired meetings above (M1–M4; the 59-minute one
+has no Gemini transcript). Arms: (A) Qwen3-4B on the local transcript, no context; (B) the same
+plus context from the harness (`python/notes_context.py`, local budgets); (C) Gemini 3.8-flash
+notes on the Gemini transcript, no context. A and B use the same template per meeting (chosen
+by A), and MLX decoding is greedy, so they differ only by context. All arms use the current
+notes code, which now asks for "(Owner: X, Due: Y)" on every Action item. A judge
+(Gemini 3.8-flash, which already processed these meetings in the 2026-11-06 rerun) writes one
+strict reference list per meeting from both transcripts, then labels each item of each arm
+supported / distorted / fabricated / duplicate, grades owners, and links follow-ups to earlier
+open items. The tool runs against a scratch copy of the database, never writes into Recording
+folders, keeps its notes, judge files and JSONL log under
+`<data dir>/research/notes-context-eval/`, and prints counts only.
+
+**What context there was.** Almost none. On all four meetings the transcripts (local and
+Gemini) name only the user; remote speakers are unnamed (finding 5 above: empty Accessibility
+speaker timelines), so no Person matched, no earlier meeting shared a Person or folder, and no
+Work context has been written yet. Arm B's context was one People block per section saying who
+the user is: 400 tokens in total across the four meetings and all sections.
+
+| | A local, no context | B local + context | C Gemini |
+|---|---|---|---|
+| Action items precision | 0/26 = 0% | 0/27 = 0% | 7/9 = 78% |
+| Action items recall | 0/8 = 0% | 0/8 = 0% | 7/8 = 88% |
+| Owner given | 17/26 = 65% | 27/27 = 100% | 8/9 = 89% |
+| Owner given and correct | 3/26 = 12% | 3/27 = 11% | 6/9 = 67% |
+| Decisions precision | 4/66 = 6% | 2/48 = 4% | 6/11 = 55% |
+| Decisions recall | 4/6 = 67% | 2/6 = 33% | 5/6 = 83% |
+| Open questions precision / recall | 0/45, 0/2 | 0/45, 0/2 | 2/4, 2/2 |
+| Fabricated items (all sections) | 1 | 11 | 0 |
+| Overview accuracy / usefulness (1–5) | 1.2 / 1.2 | 1.5 / 1.5 | 5.0 / 5.0 |
+| Notes stage, seconds (sum of 4) | 100 | 106 (+6%) | 95 |
+| Largest swap growth during one run | 48 MB | 1059 MB | 0 |
+
+Gates (B vs A): Action items precision ≥ 50% **fail** (0%); owners on ≥ 60% **fail** (given on
+100%, correct on 11%); decisions precision ≥ 60% **fail** (4%); recall not lower than A: Action
+items pass (both 0), decisions **fail** (33% vs 67%); latency ≤ +10% pass (+6%). Gap to cloud:
+Gemini is ahead on every quality row.
+
+**Go / no-go: NO-GO.** The harness does not move local notes on these meetings, so the track
+stops here, before the Outbox, Connections, Notion and Slack (T5–T10).
+
+How to read it:
+
+1. **This tests the plumbing, not the idea.** The sources had nothing to give: no remote names,
+   no People, no shared earlier meetings, no Work context. The only extra fact, "this speaker is
+   the user", made the 4B model put the user down as owner of every item (100% given, 11%
+   correct) and invent more (11 fabricated vs 1). On these Recordings, context cannot help until
+   Participants are named.
+2. **The judge is stricter than the one in the earlier section.** Its references are shorter
+   (8 Action items and 6 decisions over four meetings, against 17 and 14) and it graded the
+   local baseline 0% where the earlier judge gave 23%; Gemini's precision moved less (78% vs
+   82%). Compare arms within this table, not with the earlier one. One judge run, no repeats;
+   the judge is the same family as arm C, so B vs C may lean toward C (B vs A does not).
+3. **The swap row is a whole-Mac reading** (`sysctl vm.swapusage` before and after each run),
+   not the process alone; the 1 GB growth in one B run needs the 16 GB check on a quiet Mac
+   before it means anything.
+4. **What would make a rerun worth it:** named Participants (fix the empty speaker timeline, or
+   Gemini diarization naming remote speakers), People with roles for the regulars, a written
+   "About my work", and meetings that recur with the same people. Until then the local tier's
+   problem is the transcript and the 4B model, as the earlier section concluded, and context for
+   notes stays off by default (setting `notes_context_enabled`).
+
 ## Known limitations
 
 - **Cold start:** loading weights from disk into unified memory takes roughly 18–25 seconds on

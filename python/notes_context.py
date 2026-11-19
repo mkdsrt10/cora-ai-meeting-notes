@@ -77,6 +77,7 @@ class ContextRequest:
     participants: tuple[str, ...] = ()           # display names of the Recording's Participants / speakers
     person_ids: tuple[str, ...] = ()             # People matched to them
     deadline_s: float = DEADLINE_S
+    self_name: str | None = None                 # the user (who recorded), as named in this Recording
 
 
 class ContextSource(Protocol):
@@ -142,6 +143,7 @@ def request_for(recording_id: str, segments: Iterable[dict[str, Any]] = (), dead
     """What sources get to know about the Recording: its title, folder,
     Participants (roster and named speakers) and the People matched to them."""
     from participants import same_person_name
+    segments = list(segments)
     rec = db.get_recording(recording_id) or {}
     metadata = rec.get("metadata") or {}
     names: list[str] = []
@@ -171,7 +173,21 @@ def request_for(recording_id: str, segments: Iterable[dict[str, Any]] = (), dead
     return ContextRequest(recording_id=recording_id, title=metadata.get("recording_name") or rec.get("title") or "",
                           folder_id=metadata.get("folder_id"), recorded_at=rec.get("recorded_at"),
                           participants=tuple(names), person_ids=tuple(person_ids),
-                          deadline_s=DEADLINE_S if deadline_s is None else deadline_s)
+                          deadline_s=DEADLINE_S if deadline_s is None else deadline_s,
+                          self_name=_self_name(rec, segments))
+
+
+def _self_name(rec: dict[str, Any], segments: Iterable[dict[str, Any]]) -> str | None:
+    """The user's name in this Recording: the speaker its identity says is
+    the user, else the self Person, else the onboarding name."""
+    speaker = str((rec.get("identity") or {}).get("speaker_id") or "")
+    if speaker:
+        for seg in list(segments) or (rec.get("diarization") or {}).get("segments") or []:
+            if str(seg.get("speaker_id") or "") == speaker and seg.get("speaker_name"):
+                return str(seg["speaker_name"])
+    self_id = db.get_self_person_id()
+    name = (db.get_person(self_id) or {}).get("name") if self_id else None
+    return name or db.get_setting("pending_self_name") or None
 
 
 # ---- gathering ---------------------------------------------------------------
@@ -300,9 +316,11 @@ def _from_json(value: dict[str, Any]) -> ContextBlock:
 
 
 def gather(req: ContextRequest, *, provider: str, only: Iterable[str] | None = None,
-           kinds: Iterable[str] | None = None) -> Gathered:
+           kinds: Iterable[str] | None = None, use_cache: bool = True) -> Gathered:
     """Run every source (core + enabled Plugins) with the deadline. `only`
-    limits to source ids; `kinds` keeps only blocks of those kinds."""
+    limits to source ids; `kinds` keeps only blocks of those kinds;
+    `use_cache=False` neither reads nor writes the Recording's cache file
+    (the eval tool, which must not write into Recording folders)."""
     wanted = set(only) if only is not None else None
     keep_kinds = set(kinds) if kinds is not None else None
     found = [(owner, s) for owner, s in sources() if wanted is None or s.id in wanted]
@@ -322,7 +340,7 @@ def gather(req: ContextRequest, *, provider: str, only: Iterable[str] | None = N
     deadline = time.monotonic() + req.deadline_s
     for _, _, thread, _ in threads:
         thread.join(max(0.0, deadline - time.monotonic()))
-    cache = _read_cache(req.recording_id)
+    cache = _read_cache(req.recording_id) if use_cache else {}
     blocks: list[ContextBlock] = []
     report: dict[str, dict[str, Any]] = {}
     cache_changed = False
@@ -348,7 +366,7 @@ def gather(req: ContextRequest, *, provider: str, only: Iterable[str] | None = N
         report[source_id] = entry
         if status not in ("ok",):
             print(f"[notes_context] source {source_id} ({owner}): {status}", flush=True)
-    if cache_changed:
+    if cache_changed and use_cache:
         _write_cache(req.recording_id, cache)
     return Gathered(request=req, provider=provider, blocks=blocks, sources=report)
 
@@ -375,8 +393,12 @@ def _people_blocks(req: ContextRequest) -> list[ContextBlock]:
         detail = ", ".join(x for x in (person.get("role"), person.get("organization")) if x and str(x).strip())
         me = " — this is the user (the person recording)" if person.get("is_self") else ""
         lines.append(f"- {person['name']}" + (f" ({detail})" if detail else "") + me)
+    from participants import same_person_name
     named = {line.split(" (")[0][2:].split(" —")[0].lower() for line in lines}
-    others = [n for n in req.participants if n.lower() not in named]
+    if req.self_name and not any(same_person_name(req.self_name, n) for n in named):
+        lines.insert(0, f"- {req.self_name} — this is the user (the person recording); \"I\" in their turns is them")
+        named.add(req.self_name.lower())
+    others = [n for n in req.participants if n.lower() not in named and not same_person_name(n, req.self_name)]
     if others:
         lines.append("- Also in the call: " + ", ".join(others))
     if not lines:
@@ -459,9 +481,7 @@ def prior_meetings(req: ContextRequest) -> list[dict[str, Any]]:
     mine = set(req.person_ids)
     self_id = db.get_self_person_id()
     mine.discard(self_id)
-    self_name = (db.get_person(self_id) or {}).get("name") if self_id else None
-    self_name = self_name or db.get_setting("pending_self_name")
-    my_names = [n for n in req.participants if not same_person_name(n, self_name)]
+    my_names = [n for n in req.participants if not same_person_name(n, req.self_name)]
     scored = []
     for rec in db.get_all_recordings():
         at = str(rec.get("recorded_at") or "")
