@@ -84,6 +84,7 @@ def generate_notes(transcript, slides, segments, *, options, folder=None, user_n
                 schema = {k: 'string' for k in ('title', *FIELDS)}
                 instruction = ('Return ONLY a JSON object with exactly these string fields: ' + json.dumps(schema) +
                                '. title: 3–6 words. overview: concise prose. Other fields: Markdown bullet lists; use - None noted. if empty. '
+                               'action_items_md: end each bullet with "(Owner: <name>, Due: <date>)", owner "unassigned" when nobody was named, Due only when said. '
                                'timeline_md: chronological topics. key_entities_md: at most 8 names. '
                                'Every field must be a string, including key_entities_md. No arrays. Include only stated facts; do not invent owners, deadlines, tasks or questions. Do not add plausible follow-ups. Distinguish proposals from decisions, '
                                'and honor later reversals. Preserve names, numbers and evidence across chunks. Template: ' + guidance)

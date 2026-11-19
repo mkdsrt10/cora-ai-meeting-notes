@@ -491,6 +491,8 @@ def _re_summarize(req, path: str, body: dict, options: dict) -> None:
         db.update_recording_data(folder.name, "diarization", diar_data)
 
     db.update_recording_data(folder.name, "call_summary", call_summary_payload)
+    import action_items
+    action_items.sync(folder.name)
 
     return req.send_json({
         "ok": True,

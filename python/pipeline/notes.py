@@ -81,6 +81,15 @@ def generate_summary_variant(transcript_text: str, notes_text: str, slides_data:
     }
 
 
+# Each bullet ends with "(Owner: <name>, Due: <date>)" so core Action items
+# (action_items.parse_item) get an owner and due date like the Gemini path.
+ACTION_ITEMS_INSTRUCTION = (
+    "Extract ONLY the concrete action items/tasks from this meeting, as a Markdown bullet list. "
+    "End each bullet with \"(Owner: <name>, Due: <date>)\": the owner is the named speaker for first-person "
+    "commitments or the person asked to do it, \"unassigned\" if nobody was named; give a due date only if one "
+    "was actually mentioned, otherwise leave out \", Due: ...\".")
+
+
 def _extract(model: TextModel, instruction: str, transcript_chunk: str, max_tokens: int = 1200,
              grounded: bool = True, name: str = "llm_extract") -> str:
     """One narrow, single-purpose extraction call over one chunk."""
@@ -263,7 +272,7 @@ def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, An
     # transcript when mining finds too little to trust.
     commitment_text = _mine_commitment_turns(aligned_segments)
     action_items_md = run(
-        "Extract ONLY the concrete action items/tasks from this meeting, as a Markdown bullet list — include the named speaker as owner for first-person commitments, and a due date only if actually mentioned.",
+        ACTION_ITEMS_INSTRUCTION,
         section="Action Items",
         source_text=commitment_text or None,
     )
