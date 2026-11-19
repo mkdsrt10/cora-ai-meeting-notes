@@ -63,6 +63,9 @@ const { classifyMeeting, endedBy } = require('./usage');
 const { createLiveTranscript } = require('./live-transcript');
 
 const SPEAKER_DEBOUNCE_MS = 1500;
+// Draft notes from the Live transcript run before the hand-over to processing
+// (so they never compete with it for the notes model), for at most this long.
+const DRAFT_NOTES_TIMEOUT_MS = 90000;
 
 function recordingIdAt(ms) {
   return `meeting_${new Date(ms).toISOString().replace(/[:.]/g, '-')}`;
@@ -460,9 +463,19 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
       } catch (err) {
         log('helper stop')(err);
       }
-      // The engines' last lines are in: close the Live transcript file.
+      // The engines' last lines are in: close the Live transcript file, then
+      // draft notes from it (marked Draft until the full notes replace them).
+      let liveSummary = null;
       if (lt) {
-        try { lt.end(); } catch (err) { log('live end')(err); }
+        try { liveSummary = lt.end(); } catch (err) { log('live end')(err); }
+      }
+      if (liveSummary && liveSummary.finals > 0 && typeof api.draftNotes === 'function') {
+        let timer = null;
+        await Promise.race([
+          Promise.resolve().then(() => api.draftNotes(done[0])).catch(log('draft notes')),
+          new Promise((resolve) => { timer = clock.setTimeout(resolve, DRAFT_NOTES_TIMEOUT_MS); }),
+        ]);
+        clock.clearTimeout(timer);
       }
       // Not awaited: the roster is read while the hand-over goes on.
       if (u) reportParticipants(u, done);

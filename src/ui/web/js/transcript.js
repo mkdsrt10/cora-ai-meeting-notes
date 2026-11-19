@@ -65,12 +65,14 @@ function drawLiveTranscript(view, label){
         <span class="timeline-speaker">${esc(l.track === 'mic' ? 'You' : (l.speaker || 'Them'))}</span>
         <span class="timeline-time">${fmtDuration(l.start)}</span></div>
         <p class="timeline-text">${esc(l.text)}</p></div>`).join('');
-  host.innerHTML = `<p class="muted live-transcript-label">${esc(label)}</p>${rows || '<p class="muted">Captions appear here as people speak.</p>'}`;
+  const retryBtn = view.retry ? ` <button type="button" class="button secondary small" data-retry-processing="${esc(view.id)}">Retry</button>` : '';
+  host.innerHTML = `<p class="muted live-transcript-label">${esc(label)}${retryBtn}</p>${rows || '<p class="muted">Captions appear here as people speak.</p>'}`;
 }
 
-async function renderLiveTranscript(record, label = 'Live captions · a draft until processing finishes'){
+async function renderLiveTranscript(record, label = 'Live captions · a draft until processing finishes', retry = false){
   ['#editTranscriptBtn', '#saveTranscriptBtn', '#cancelTranscriptBtn', '#transcriptEditHint'].forEach(sel => { if($(sel)) $(sel).hidden = true; });
   const view = liveViewFor(record.id);
+  view.retry = retry;
   drawLiveTranscript(view, label);
   if(view.loading) return;
   view.loading = (async () => {
@@ -88,11 +90,17 @@ async function renderLiveTranscript(record, label = 'Live captions · a draft un
   })();
 }
 
+function liveLabel(tv){
+  return tv.label === 'Live captions' ? 'Live captions · a draft until processing finishes'
+    : `${tv.label} · from the live captions${tv.retry ? '; processing did not finish' : ''}`;
+}
+
 window.electronAPI?.onLiveCaption?.(c => {
   if(!liveView || !c || (c.recordingId !== liveView.id && c.chunkId !== liveView.id)) return;
   liveView.lines.set(liveKey(c), { recording_id: c.chunkId, track: c.track, seg: c.seg, speaker: c.speaker,
     start: c.start, end: c.end, text: c.text, final: c.final });
-  if(selectedRecording()?.id === liveView.id && ['recording', 'paused'].includes(selectedRecording()?.status)) drawLiveTranscript(liveView, 'Live captions · a draft until processing finishes');
+  const shown = selectedRecording();
+  if(shown?.id === liveView.id && shown.transcript_view?.source === 'live') drawLiveTranscript(liveView, liveLabel(shown.transcript_view));
 });
 
 function renderCleanTranscript(record){
@@ -100,7 +108,11 @@ function renderCleanTranscript(record){
   // range. Meeting Timeline stays the raw live-event log.
   const host = $('#notepadTranscript');
   if(!host) return;
-  if(['recording', 'paused'].includes(record?.status)) return renderLiveTranscript(record);
+  // Which transcript to show is the server's call (transcript_view): captions
+  // while recording, the full transcript once ready, else the Live transcript
+  // as "Draft transcript" (with Retry when processing failed). No toggle.
+  const tv = record?.transcript_view;
+  if(tv?.source === 'live') return renderLiveTranscript(record, liveLabel(tv), Boolean(tv.retry));
   if(transcriptEditingFor !== record?.id){ transcriptEditing = false; transcriptEditingFor = record?.id; }
   const segments = transcriptSegments(record);
   const editable = segments.length > 0 && segments[0].index !== null;

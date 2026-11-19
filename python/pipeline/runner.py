@@ -496,6 +496,9 @@ def _process_recording_local_inner(folder: Path, audio_file: Path, profile: dict
             )
             conn.commit()
 
+        import live_transcript
+        live_transcript.merge_into(folder, parent_folder, float(time_offset))
+
         ai_trace.reassign_recording(folder.name, parent_folder.name)
         if live_rec_id:
             ai_trace.reassign_recording(live_rec_id, parent_folder.name)

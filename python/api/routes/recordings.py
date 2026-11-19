@@ -61,6 +61,7 @@ def get_api_recording(req, path: str, query: dict) -> None:
         item["participants"] = participants_payload(rec_id, None)
         item["participant_capture"] = participant_capture_payload(rec_id, None)
         item["key_phrases"] = key_phrases_payload(rec_id)
+        item.update(_live_fields(rec_id, item["status"], has_full=False))
         return req.send_json(item)
     folder = safe_folder(rec_id)
     detailed_item = recording_item(folder, detailed=True)
@@ -68,7 +69,23 @@ def get_api_recording(req, path: str, query: dict) -> None:
     detailed_item["participants"] = participants_payload(rec_id, folder)
     detailed_item["participant_capture"] = participant_capture_payload(rec_id, folder)
     detailed_item["key_phrases"] = key_phrases_payload(rec_id)
+    has_full = bool(detailed_item.get("transcript_segments") or (detailed_item.get("transcript") or "").strip())
+    detailed_item.update(_live_fields(rec_id, detailed_item.get("analysis_stage"), has_full=has_full,
+                                      has_notes=bool((detailed_item.get("enhanced_notes") or "").strip())))
     return req.send_json(detailed_item)
+
+
+def _live_fields(rec_id: str, status, *, has_full: bool, has_notes: bool = False) -> dict:
+    """transcript_view: which transcript to show (live_transcript.transcript_view);
+    draft_notes: notes made from the Live transcript at stop, only until the
+    full notes exist."""
+    import live_transcript
+    import processing
+    has_live = live_transcript.path_for(rec_id) is not None
+    live_on = status in ("recording", "paused") and processing.preferences().get("live", "off") != "off"
+    view = live_transcript.transcript_view(status, has_full=has_full, has_live=has_live, live_on=live_on)
+    draft = None if has_notes else live_transcript.draft_notes(rec_id)
+    return {"transcript_view": view, "draft_notes": {"markdown": draft, "label": "Draft"} if draft else None}
 
 
 @route("GET", '/api/recording/export')

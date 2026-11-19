@@ -151,6 +151,7 @@ async function pollLiveFeedIfRecording(){
         return; // loadNotepad() reschedules this poll itself if still pending
       }
       renderMeetingTimeline(selectedDetail);
+      renderDraftNotes(selectedDetail);
       renderCleanTranscript(selectedDetail);
       renderProcessingStatus(selectedDetail);
       // Only re-render participants when the roster actually changed —
@@ -203,6 +204,7 @@ function loadNotepad(){
     if(notesEl) notesEl.style.display = '';
   }
 
+  renderDraftNotes(record);
   renderMeetingTimeline(record);
   lastPolledParticipantsKey = JSON.stringify([record?.participants || [], record?.participant_capture]);
   renderParticipants(record);
@@ -472,6 +474,17 @@ function renderMarkdownSubset(markdown){
   }
   closeList();
   return html;
+}
+
+// Draft notes (python/live_draft_notes.py): made from the Live transcript at
+// stop and shown, marked Draft, only until the full notes exist (the API drops
+// draft_notes once they do).
+function renderDraftNotes(record){
+  const host = $('#notepadDraftNotes');
+  if(!host) return;
+  const draft = !hasEnhancedNotes(record) && record?.draft_notes?.markdown;
+  host.hidden = !draft;
+  host.innerHTML = draft ? `<p class="muted"><span class="badge draft-badge">${esc(record.draft_notes.label || 'Draft')}</span> From the live captions. The full notes replace these when processing finishes.</p>${renderMarkdownSubset(draft)}` : '';
 }
 
 function renderEnhancedNotes(record){

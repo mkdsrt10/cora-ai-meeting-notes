@@ -131,3 +131,157 @@ def test_a_later_chunk_reads_the_sessions_file():
     db.create_pending_recording(child, source_stem=child, recorded_at="2026-11-20T12:10:00", status="recording",
                                 continues_recording_id=root)
     assert [x["recording_id"] for x in live_transcript.read_all(child)] == [root, child]
+
+
+# --- T3: which transcript to show, Draft transcript, draft notes -------------
+
+def make_folder(rec_id, *, transcript=False, live_lines=None, notes=None):
+    folder = paths.RECORDINGS_DIR / rec_id
+    folder.mkdir(parents=True, exist_ok=True)
+    diarization = {"segments": [{"start": "00:00", "end": "00:03", "speaker_id": "You", "text": "Full words."}]} if transcript else {}
+    db.create_recording(rec_id, str(folder), rec_id, "2026-11-20T09:00:00+00:00", 60, 1, {})
+    if transcript:
+        db.update_recording_data(rec_id, "diarization", diarization)
+        (folder / "transcript_diarized.md").write_text("**00:00–00:03 · You**\n\nFull words.\n")
+    if live_lines is not None:
+        (folder / "live_transcript.jsonl").write_text("".join(json.dumps(x) + "\n" for x in live_lines))
+    if notes:
+        (folder / "enhanced_notes.md").write_text(notes)
+    return folder
+
+
+def test_view_while_recording_is_the_live_transcript(port):
+    key = "meeting_2026-11-20T13-00-00-000Z"
+    db.create_pending_recording(key, source_stem=key, recorded_at="2026-11-20T13:00:00", status="recording")
+    # live off and nothing written: nothing to show yet
+    assert call(port, "GET", f"/api/recording?id={key}")[1]["transcript_view"]["source"] == "none"
+    db.set_setting("processing_preferences", processing.validate({"live": "on_device"}))
+    body = call(port, "GET", f"/api/recording?id={key}")[1]
+    assert body["transcript_view"] == {"source": "live", "label": "Live captions", "retry": False}
+    write_inbox(key, [line(key, "mic", 0, "Hello.")])
+    db.set_setting("processing_preferences", None)
+    assert call(port, "GET", f"/api/recording?id={key}")[1]["transcript_view"]["source"] == "live"
+
+
+def test_view_when_the_full_transcript_is_ready_is_the_full_one(port):
+    rec = "2026-11-20_ready_aaa111"
+    make_folder(rec, transcript=True, live_lines=[line(rec, "mic", 0, "Live words.")])
+    body = call(port, "GET", f"/api/recording?id={rec}")[1]
+    assert body["transcript_view"] == {"source": "full", "label": "Transcript", "retry": False}
+
+
+def test_view_when_processing_failed_is_the_draft_transcript_with_retry(port):
+    rec = "2026-11-20_failed_bbb222"
+    make_folder(rec, live_lines=[line(rec, "mic", 0, "Only the live words survived.")])
+    db.set_processing_failure(rec, {"code": "internal", "message": "boom"})
+    body = call(port, "GET", f"/api/recording?id={rec}")[1]
+    assert body["analysis_stage"] == "failed"
+    assert body["transcript_view"] == {"source": "live", "label": "Draft transcript", "retry": True}
+    lines = call(port, "GET", f"/api/recording/live-transcript?id={rec}&since=0")[1]["lines"]
+    assert [x["text"] for x in lines] == ["Only the live words survived."]
+    # without a Live transcript a failed Recording has nothing to show
+    plain = "2026-11-20_failed_ccc333"
+    make_folder(plain)
+    db.set_processing_failure(plain, {"code": "internal", "message": "boom"})
+    assert call(port, "GET", f"/api/recording?id={plain}")[1]["transcript_view"]["source"] == "none"
+
+
+def long_lines(key, n=12):
+    return [line(key, "mic" if i % 2 else "sys", i * 3, f"We agreed to ship the garden plan on Friday, item {i}.", seg=i)
+            for i in range(n)]
+
+
+def test_draft_notes_at_stop_then_replaced_by_full_notes(port, fake_text):
+    key = "meeting_2026-11-20T14-00-00-000Z"
+    db.create_pending_recording(key, source_stem=key, recorded_at="2026-11-20T14:00:00", status="processing")
+    write_inbox(key, long_lines(key))
+    fake_text.reply = "## Summary\nShip on Friday.\n## Decisions\n- Ship Friday\n## Action items\n- None noted."
+    status, body = call(port, "POST", "/api/recording/draft-notes", {"id": key})
+    assert (status, body["ok"]) == (200, True)
+    call_ = fake_text.calls[-1]
+    assert call_["max_tokens"] == 600 and call_["trace"] == "notes.draft_live"
+    assert "We agreed to ship the garden plan" in call_["prompt"]
+    pending = call(port, "GET", f"/api/recording?id={key}")[1]
+    assert pending["draft_notes"]["label"] == "Draft"
+    assert "Ship on Friday." in pending["draft_notes"]["markdown"]
+    assert pending["transcript_view"] == {"source": "live", "label": "Draft transcript", "retry": False}
+
+    # import: the draft and the Live transcript move into the Recording folder
+    rec = "2026-11-20_draft_ddd444"
+    folder = make_folder(rec)
+    assert live_transcript.adopt(key, folder)
+    assert (folder / "draft_notes.md").is_file() and not live_transcript.draft_inbox_path(key).exists()
+    assert call(port, "GET", f"/api/recording?id={rec}")[1]["draft_notes"]["markdown"].startswith("## Summary")
+    # full notes land: the draft is no longer shown (still on disk beside them)
+    (folder / "enhanced_notes.md").write_text("## Full notes\n- Real ones\n")
+    assert call(port, "GET", f"/api/recording?id={rec}")[1]["draft_notes"] is None
+
+
+def test_draft_notes_refusals_change_nothing(port, fake_text, monkeypatch):
+    key = "meeting_2026-11-20T15-00-00-000Z"
+    assert call(port, "POST", "/api/recording/draft-notes", {"id": key})[1] == {"ok": False, "reason": "no_live_transcript"}
+    write_inbox(key, [line(key, "mic", 0, "Too short.")])
+    assert call(port, "POST", "/api/recording/draft-notes", {"id": key})[1] == {"ok": False, "reason": "too_short"}
+    write_inbox(key, long_lines(key))
+
+    class Busy:
+        def __enter__(self):
+            raise processing.ProcessingBusyError()
+
+        def __exit__(self, *a):
+            return False
+    with monkeypatch.context() as m:
+        m.setattr(processing, "scope", lambda *a, **k: Busy())
+        assert call(port, "POST", "/api/recording/draft-notes", {"id": key})[1] == {"ok": False, "reason": "busy"}
+
+    def boom(*a, **k):
+        raise RuntimeError("provider down")
+    fake_text.reply = boom
+    assert call(port, "POST", "/api/recording/draft-notes", {"id": key})[1] == {"ok": False, "reason": "model_failed"}
+    assert not live_transcript.draft_inbox_path(key).exists()
+
+
+def test_export_never_includes_the_live_transcript():
+    import recording_export
+    rec = "2026-11-20_export_eee555"
+    make_folder(rec, transcript=True, notes="## Notes\n- Final\n",
+                live_lines=[line(rec, "mic", 0, "LIVE-ONLY-WORDS should never be exported.")])
+    out = recording_export.build(rec, include_transcript=True)
+    assert "Full words." in out["markdown"]
+    assert "LIVE-ONLY-WORDS" not in out["markdown"]
+
+
+def test_captured_recording_includes_the_live_transcript():
+    import tarfile
+    import capture
+    rec = "2026-11-20_capture_fff666"
+    folder = make_folder(rec, transcript=True, live_lines=[line(rec, "mic", 0, "Kept for review.")])
+    (folder / "audio.mov").write_bytes(b"\0")
+    archive = capture.build_archive(rec)
+    try:
+        with tarfile.open(archive) as tar:
+            assert "live_transcript.jsonl" in tar.getnames()
+    finally:
+        archive.unlink(missing_ok=True)
+
+
+def test_merged_continuation_keeps_one_live_record_and_deletes_the_child(fake_text, fake_transcriber, monkeypatch):
+    """A Continuation is the one place Cora deletes a Recording folder: its
+    Live transcript goes with it, its lines appended to the parent's."""
+    from pipeline import runner
+    parent = make_folder("live-parent", live_lines=[line("p", "mic", 0, "Parent words.")])
+    child = make_folder("live-child", live_lines=[line("c", "sys", 1, "Child words.")])
+    (child / "audio.wav").write_bytes(b"")
+    db.update_recording_data("live-child", "metadata", {"continues_recording_id": "live-parent"})
+    monkeypatch.setattr(runner, "guess_speaker_from_tracks", lambda *a: "You")
+    fake_transcriber.segments = [{"start": 0.0, "end": 3.0, "text": "Send the deck by Friday."}]
+    fake_text.reply = lambda prompt, trace, **kw: "general" if trace == "template.select" else json.dumps(dict(
+        title="Sync", overview="Deck.", action_items_md="- Send the deck", decisions_md="- None noted.",
+        timeline_md="- Deck", open_questions_md="- None noted.", key_entities_md="- Deck"))
+    result = runner.process_recording_local(child, dict(mode="local_light", transcription="local", provider="local_mlx",
+                                                        model="", template="general", live="off"))
+    assert result["recording_id"] == "live-parent"
+    assert not child.exists()
+    texts = [(x["text"], x["start"]) for x in live_transcript.read_all("live-parent")]
+    assert texts[0] == ("Parent words.", 0)
+    assert texts[1][0] == "Child words." and texts[1][1] >= 1

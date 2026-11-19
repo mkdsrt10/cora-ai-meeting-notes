@@ -259,3 +259,46 @@ test('real file adapter appends one JSON line per call', () => {
   f.close();
   assert.equal(fs.readFileSync(path.join(dir, 'meeting_k_live.jsonl'), 'utf8'), '{"a":1}\n{"b":"two"}\n');
 });
+
+test('draft notes are asked for at stop, before the hand-over, only when live text exists', async () => {
+  const { session, helpers, api, enqueued } = setup();
+  session.start({});
+  await flush();
+  const id = session.state().recordingId;
+  helpers.last().send(text('FINAL', { track: 'mic', start: 0, end: 1, text: 'We ship Friday.' }));
+  const order = [];
+  api.draftNotes = async (x) => { order.push(['draft', x, enqueued.length]); return { ok: true }; };
+  await session.stop('user');
+  assert.deepEqual(order, [['draft', id, 0]]);
+  assert.deepEqual(enqueued, [id]);
+
+  // no live text: no draft call
+  const s2 = setup();
+  let asked = 0;
+  s2.api.draftNotes = async () => { asked += 1; };
+  s2.session.start({});
+  await flush();
+  await s2.session.stop('user');
+  assert.equal(asked, 0);
+  assert.equal(s2.enqueued.length, 1);
+});
+
+test('a draft that hangs or fails never holds the Recording back for long', async () => {
+  const { session, helpers, api, enqueued, clock } = setup();
+  session.start({});
+  await flush();
+  helpers.last().send(text('FINAL', { track: 'mic', start: 0, end: 1, text: 'Hello.' }));
+  api.draftNotes = () => new Promise(() => {});
+  const stopped = session.stop('user');
+  await clock.advance(91000);
+  await stopped;
+  assert.equal(enqueued.length, 1);
+
+  const s2 = setup();
+  s2.session.start({});
+  await flush();
+  s2.helpers.last().send(text('FINAL', { track: 'mic', start: 0, end: 1, text: 'Hello.' }));
+  s2.api.draftNotes = async () => { throw new Error('server down'); };
+  await s2.session.stop('user');
+  assert.equal(s2.enqueued.length, 1);
+});

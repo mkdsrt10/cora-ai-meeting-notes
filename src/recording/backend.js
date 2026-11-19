@@ -52,6 +52,8 @@ function createBackendApi({ postJson, fetchJson }) {
     setCallState: (live) => postJson('/api/call-state', { live: Boolean(live) }),
     setCaptureNotice: (id, notice) => postJson('/api/recording/capture-notice', { id, notice }),
     addLiveEntry: (entry) => postJson('/api/recording/live-entry', entry),
+    // Draft notes from the Live transcript, at stop (python/live_draft_notes.py) -> { ok, reason? }.
+    draftNotes: (id) => postJson('/api/recording/draft-notes', { id }),
     // One Usage event (python/usage_events.py CATALOG); rejects on a 400.
     recordEvent: (name, payload) => postJson('/api/events', { name, payload }),
     // One counted action toward the day's Effort (python/activity.py ACTIONS).

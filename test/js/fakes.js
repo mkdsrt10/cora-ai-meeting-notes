@@ -69,6 +69,7 @@ function fakeApi() {
     setContinuationStatus: rec('setContinuationStatus'),
     appendNote: rec('appendNote'),
     setTitle: rec('setTitle'),
+    draftNotes: rec('draftNotes'),
     addLiveEntry: rec('addLiveEntry'),
     recordEvent: rec('recordEvent'),
     countAction: rec('countAction'),

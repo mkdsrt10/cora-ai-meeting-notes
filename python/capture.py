@@ -29,6 +29,7 @@ AUDIO_TRACKS = re.compile(r"audio\.(m4a|mp3|wav|aiff|aif|mp4|caf|mov)")  # the m
 ARCHIVED_FILES = (
     "transcript_diarized.md", "diarization.json", "gemini_diarization.json",  # transcript
     "speakers_timeline.json",                                                 # speaker timeline
+    "live_transcript.jsonl",                                                  # Live transcript (live vs full review)
     "participants.json",                                                      # Participants roster
     "enhanced_notes.md", "call_summary.json",                                 # generated notes
     "metadata.json",                                                          # Recording metadata

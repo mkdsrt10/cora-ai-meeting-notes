@@ -95,3 +95,12 @@ def get_api_recording_live_transcript(req, path: str, query: dict) -> None:
         raise ValueError("Invalid cursor") from None
     lines, cursor = live_transcript.read(live_transcript.path_for(rec_id), since)
     return req.send_json({"id": rec_id, "lines": lines, "cursor": cursor})
+
+
+@route("POST", '/api/recording/draft-notes')
+def post_api_recording_draft_notes(req, path: str, body: dict) -> None:
+    """Draft notes from the Live transcript, called by the Recording session
+    at stop before the Recording is handed to processing. {ok, reason?}."""
+    import live_draft_notes
+    rec_id = safe_id(str(body.get("id", "")))
+    return req.send_json(live_draft_notes.generate(rec_id))
