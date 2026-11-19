@@ -98,6 +98,32 @@ def resolve(overrides=None):
     return out
 
 
+def live_choices():
+    """What Settings offers for live captions: Cloud (Vertex) only on the
+    Vertex backend, never under lockdown, and in the Team build only when
+    config.json sets live_cloud_offered. Plus a one-line note on each."""
+    import live_cloud
+    offered = ['off', 'on_device'] + (['cloud_vertex'] if live_cloud.offered() else [])
+    note = ('On this Mac: captions stay on this Mac; English works best, mixed Hindi–English is weak.'
+            + (' Cloud (Vertex): your call audio streams to Google Speech-to-Text (Chirp) on your Vertex project'
+               ' for the whole call, badged "Live: Cloud"; better with mixed languages.' if 'cloud_vertex' in offered else '')
+            + ' The recording and the full transcript after stop are unaffected.')
+    return dict(offered=offered, note=note)
+
+
+def check_live(live):
+    """Saving Cloud live: refused under lockdown and off the Vertex backend."""
+    if live != 'cloud_vertex':
+        return
+    import live_cloud
+    code = live_cloud.refusal()
+    if code == 'lockdown':
+        raise policy.LockdownError('Cloud live captions are disabled by enterprise lockdown')
+    if code:
+        raise ValueError('Cloud live captions need the Vertex backend with a project and a service account or '
+                         'Application Default Credentials (not available on the AI Studio key path)')
+
+
 def _text_provider_allowed(provider):
     from pipeline.text_model import OPENAI_COMPATIBLE, resolve_base_url
     if provider not in OPENAI_COMPATIBLE:

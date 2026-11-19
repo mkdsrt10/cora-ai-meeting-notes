@@ -19,8 +19,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Cloud diarization / coaching via Gemini (opt-in; blocked under enterprise lockdown).
-cloud = ["google-genai>=2.20"]
+# Cloud diarization / coaching via Gemini, and cloud live captions via Speech-to-Text v2
+# Chirp streaming (python/live_cloud.py). Opt-in; blocked under enterprise lockdown.
+cloud = [
+    "google-cloud-speech>=2.30",
+    "google-genai>=2.20",
+]
 # Langfuse tracing (opt-in, bring your own project keys).
 tracing = ["langfuse>=4.15"]
 # Model conversion and dataset tools in tools/.

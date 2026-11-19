@@ -74,11 +74,11 @@ def test_live_is_independent_of_transcription_and_mode(port):
     assert processing.preferences()["transcription"] == "local"
     # choosing another mode keeps the live engine
     assert processing.resolve({"mode": "local_thorough"})["live"] == "on_device"
-    assert call(port, "GET", "/api/live/settings") == (200, {"mode": "on_device"})
+    assert call(port, "GET", "/api/live/settings") == (200, {"mode": "on_device", "refused": None})
 
 
 def test_live_settings_default_off(port):
-    assert call(port, "GET", "/api/live/settings") == (200, {"mode": "off"})
+    assert call(port, "GET", "/api/live/settings") == (200, {"mode": "off", "refused": None})
 
 
 # --- Reading the file (Transcript tab, MCP) ----------------------------------

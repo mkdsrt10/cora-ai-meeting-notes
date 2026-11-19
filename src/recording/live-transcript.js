@@ -12,8 +12,9 @@
 //   live.chunk(chunkId, offsetMs)   a Chunk starts, offsetMs after the session's first one
 //   live.event(ev)                  helper events: liveText, liveEngine, liveStatus
 //   live.speaker(name)              a remote speaker hint (SPEAKER_ACTIVE from the meeting app)
-//   live.status() -> { state, mode, engine, code }
+//   live.status() -> { state, mode, engine, code, cloud }
 //     state: 'starting' | 'running' | 'paused'
+//     cloud: audio is streaming to the cloud engine now ("Live: Cloud" badge)
 //   live.end() -> summary           counts for the live_transcript Usage event (no text, no names)
 //
 // JSONL line: { recording_id (the Chunk), track ('mic'|'sys'), speaker (hint or null), start, end
@@ -38,9 +39,9 @@ function createLiveTranscript({ key, mode, file = null, clock, selfName = () => 
   let remote = null;              // { name, at }
   let ended = false;
   const counts = { finals: 0, partials: 0, lags: [], droppedS: 0, failures: {}, lagPauses: 0, words: 0, writeErrors: 0 };
-  let status = { state: 'starting', mode, engine: null, code: null };
+  let status = { state: 'starting', mode, engine: null, code: null, cloud: mode === 'cloud_vertex' };
   let startTimer = clock.setTimeout(() => {
-    if (!tracks.mic.engine && !tracks.sys.engine) pause('engine_start_timeout');
+    if (!tracks.mic.engine && !tracks.sys.engine && status.state !== 'paused') pause('engine_start_timeout');
   }, ENGINE_START_MS);
 
   function newTrack() {
@@ -48,8 +49,10 @@ function createLiveTranscript({ key, mode, file = null, clock, selfName = () => 
   }
 
   function setStatus(next) {
-    const changed = ['state', 'engine', 'code'].some((k) => status[k] !== next[k]);
-    status = { ...status, ...next };
+    const merged = { ...status, ...next };
+    merged.cloud = mode === 'cloud_vertex' && merged.state !== 'paused';
+    const changed = ['state', 'engine', 'code', 'cloud'].some((k) => status[k] !== merged[k]);
+    status = merged;
     if (changed && !ended) onStatus({ ...status });
   }
 
@@ -209,4 +212,10 @@ function createLiveTranscriptFiles(dir) {
   };
 }
 
-module.exports = { createLiveTranscript, createLiveTranscriptFiles, LAG_PAUSE_MS, ENGINE_START_MS };
+// GET /api/live/settings -> whether a start now streams audio to the cloud
+// engine: the "Live: Cloud" badge on the Call prompt.
+function liveCloudWillRun(settings) {
+  return Boolean(settings && settings.mode === 'cloud_vertex' && !settings.refused);
+}
+
+module.exports = { createLiveTranscript, createLiveTranscriptFiles, liveCloudWillRun, LAG_PAUSE_MS, ENGINE_START_MS };

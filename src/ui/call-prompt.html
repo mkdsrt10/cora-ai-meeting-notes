@@ -28,12 +28,15 @@
     }
     button.primary { background: #ef4444; border-color: #ef4444; color: #fff; }
     button:hover { filter: brightness(1.15); }
-  </style>
+    .live-badge { font-size: 10px; font-weight: 600; border-radius: 999px; padding: 1px 7px; background: rgba(59, 130, 246, 0.3); color: #bfdbfe; white-space: nowrap; }
+  .live-badge[hidden] { display: none; }
+</style>
 </head>
 <body>
   <div class="wrap">
     <div class="panel">
       <div class="text" id="text">Call detected</div>
+      <span class="live-badge" id="liveCloud" title="Starting will stream call audio to Google Speech-to-Text on your Vertex project for live captions" hidden>Live: Cloud</span>
       <button id="btnDismiss" type="button">Dismiss</button>
       <button id="btnStart" type="button" class="primary">Start recording</button>
     </div>

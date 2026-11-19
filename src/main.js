@@ -15,7 +15,7 @@ const { createCallDetection } = require('./main/call-detection');
 const { createDetectHint } = require('./main/detect-hint');
 const { createCaptureHelperFactory, listAudioDevices, startMicWatch } = require('./recording/capture-helper');
 const { createRecordingSession } = require('./recording/session');
-const { createLiveTranscriptFiles } = require('./recording/live-transcript');
+const { createLiveTranscriptFiles, liveCloudWillRun } = require('./recording/live-transcript');
 const { createProcessingQueue, shouldDeferProcessing } = require('./recording/processing-queue');
 const { createResourceSampler } = require('./main/app-resources');
 const { createBackendApi, createArchiveStep } = require('./recording/backend');
@@ -110,6 +110,7 @@ function refreshMicDevices() {
   return micListing;
 }
 
+let lastLiveSettings = null;   // GET /api/live/settings at the last start
 const recording = createRecordingSession({
   startHelper: createCaptureHelperFactory(
     { captureBin: CAPTURE_BIN, speakerWatchBin: SPEAKER_WATCH_BIN },
@@ -129,9 +130,20 @@ const recording = createRecordingSession({
   // Live transcript (docs/specs/live-transcript.md): the engine the Processing
   // profile allows right now, read once per start; on-device runs live-engine
   // beside dual-capture. A failure to read it means off.
+  // Cloud runs python/live_cloud.py as the engine (same LIVE_* grammar); a
+  // refused cloud engine (lockdown, not Vertex) pauses captions with its code
+  // and is never swapped for the on-device one.
   live: {
-    mode: async () => JSON.parse(await fetchJson('/api/live/settings')).mode,
-    helperOptions: (mode) => (mode === 'on_device' ? { engine: 'on_device' } : null),
+    mode: async () => {
+      lastLiveSettings = JSON.parse(await fetchJson('/api/live/settings'));
+      return lastLiveSettings.mode;
+    },
+    helperOptions: (mode) => {
+      if (mode === 'on_device') return { engine: 'on_device' };
+      if (mode !== 'cloud_vertex') return null;
+      if (lastLiveSettings && lastLiveSettings.refused) return { blocked: `cloud_${lastLiveSettings.refused}` };
+      return { engine: 'cloud', command: [PYTHON_BIN, path.join(ROOT_DIR, 'python', 'live_cloud.py')], env: SERVER_ENV };
+    },
     files: createLiveTranscriptFiles(INBOX_DIR),
   },
   // Read at stop: a Call with no names while this is false gets a notice.
@@ -348,7 +360,15 @@ function showCallPrompt(call) {
     callPromptWindow.setBounds({ width, height, x, y });
   }
   const win = callPromptWindow;
-  const send = () => win.webContents.send('call-prompt-call', call.label);
+  const send = () => {
+    win.webContents.send('call-prompt-call', call.label);
+    win.webContents.send('call-prompt-live', false);
+    // Badge "Live: Cloud" when a start now would stream to the cloud engine.
+    fetchJson('/api/live/settings').then((text) => {
+      const live = JSON.parse(text);
+      if (!win.isDestroyed()) win.webContents.send('call-prompt-live', liveCloudWillRun(live));
+    }).catch(() => {});
+  };
   if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send); else send();
   win.showInactive();
 }

@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Call prompt panel: action is 'start' | 'dismiss'; the call label is shown in the text.
     callPromptAction: (action) => ipcRenderer.invoke('call-prompt-action', action),
     onCallPromptCall: (callback) => ipcRenderer.on('call-prompt-call', (_event, label) => callback(label)),
+    // true when starting this call would run Cloud live captions (badge "Live: Cloud").
+    onCallPromptLive: (callback) => ipcRenderer.on('call-prompt-live', (_event, cloud) => callback(cloud)),
     // Settings > Preferences > Open Cora at login (macOS login item) -> boolean.
     getOpenAtLogin: () => ipcRenderer.invoke('get-open-at-login'),
     setOpenAtLogin: (enabled) => ipcRenderer.invoke('set-open-at-login', enabled),

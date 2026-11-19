@@ -142,6 +142,9 @@ async function resolveLive(live) {
     console.warn('[Cora live] live engine not available:', err && err.message);
     return null;
   });
+  // Refused (e.g. cloud under lockdown): the Live transcript shows paused with
+  // the code; no engine runs, and none is swapped in.
+  if (helper && helper.blocked) return { mode, helper: null, blocked: String(helper.blocked) };
   return helper ? { mode, helper } : { mode: 'off', helper: null };
 }
 
@@ -352,6 +355,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
       });
       if (usage) usage.live = live;
       events.emit('liveStatus', live.status());
+      if (setting.blocked) live.event({ type: 'liveStatus', track: null, state: 'paused', code: setting.blocked });
     }
     live.chunk(chunkId, offsetMs);
     if (h) h.live = live;

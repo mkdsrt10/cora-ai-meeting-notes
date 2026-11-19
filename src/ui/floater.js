@@ -141,7 +141,7 @@ function showLiveStatus(status) {
   const paused = document.getElementById('livePaused');
   if (paused) paused.hidden = !(on && status.state === 'paused');
   const badge = document.getElementById('liveCloudBadge');
-  if (badge) badge.hidden = !(on && status.mode === 'cloud_vertex' && status.state !== 'paused');
+  if (badge) badge.hidden = !(on && status.cloud);
 }
 
 function addCaption(c) {

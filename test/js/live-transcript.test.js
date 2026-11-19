@@ -302,3 +302,77 @@ test('a draft that hangs or fails never holds the Recording back for long', asyn
   await s2.session.stop('user');
   assert.equal(s2.enqueued.length, 1);
 });
+
+// --- Cloud live (T5) ---
+const { liveCloudWillRun } = require('../../src/recording/live-transcript');
+
+const cloudOptions = (blockedCode) => (mode) => {
+  if (mode === 'on_device') return { engine: 'on_device' };
+  return blockedCode ? { blocked: blockedCode } : { engine: 'cloud', command: ['/py', '/live_cloud.py'] };
+};
+
+test('cloud refused at start (lockdown): no engine runs, captions show paused with the reason', async () => {
+  const { session, helpers, statuses } = setup({ mode: 'cloud_vertex', helperOptions: cloudOptions('cloud_lockdown') });
+  session.start({});
+  await flush();
+  assert.equal(helpers.started.length, 1);
+  assert.equal('live' in helpers.last().opts, false, 'never swapped for the on-device engine');
+  const live = session.state().live;
+  assert.deepEqual([live.mode, live.state, live.code, live.cloud], ['cloud_vertex', 'paused', 'cloud_lockdown', false]);
+  assert.equal(statuses.at(-1).state, 'paused');
+  assert.equal(session.state().phase, 'recording');
+  await session.stop('user');
+});
+
+test('a cloud engine that fails mid-call pauses captions and is never replaced', async () => {
+  const { session, helpers } = setup({ mode: 'cloud_vertex', helperOptions: cloudOptions(null) });
+  session.start({});
+  await flush();
+  const h = helpers.last();
+  assert.deepEqual(h.opts.live, { engine: 'cloud', command: ['/py', '/live_cloud.py'] });
+  h.send(line('LIVE_ENGINE {"track":"sys","engine":"chirp_2"}'));
+  h.send(text('FINAL', { track: 'sys', start: 0, end: 1, text: 'Streaming fine.' }));
+  // badge: audio is streaming to the cloud now
+  assert.deepEqual([session.state().live.state, session.state().live.cloud], ['running', true]);
+  h.send(line('LIVE_ERROR {"track":"sys","code":"stream_error_serviceunavailable"}'));
+  assert.deepEqual([session.state().live.state, session.state().live.code, session.state().live.cloud],
+    ['paused', 'stream_error_serviceunavailable', false]);
+  assert.equal(helpers.started.length, 1, 'no second helper, no on-device engine');
+  assert.equal(session.state().phase, 'recording');
+  await session.stop('user');
+});
+
+test('on-device live never shows the cloud badge', async () => {
+  const { session, helpers } = setup({ mode: 'on_device' });
+  session.start({});
+  await flush();
+  helpers.last().send(line('LIVE_ENGINE {"track":"mic","engine":"speech_transcriber"}'));
+  assert.equal(session.state().live.cloud, false);
+  await session.stop('user');
+});
+
+test('Call prompt badge: only when a start now would stream to the cloud engine', () => {
+  assert.equal(liveCloudWillRun({ mode: 'cloud_vertex', refused: null }), true);
+  assert.equal(liveCloudWillRun({ mode: 'cloud_vertex', refused: 'lockdown' }), false);
+  assert.equal(liveCloudWillRun({ mode: 'on_device', refused: null }), false);
+  assert.equal(liveCloudWillRun(null), false);
+});
+
+test('real adapter: live args and the cloud engine environment reach dual-capture', async () => {
+  const { createCaptureHelperFactory } = require('../../src/recording/capture-helper');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cora-live-helper-'));
+  const captureBin = path.join(dir, 'dual-capture');
+  fs.writeFileSync(captureBin, `#!${process.execPath}
+console.log('LIVE_ENGINE ' + JSON.stringify({ track: 'sys', engine: process.env.CORA_LIVE_TEST || 'none' }));
+console.log('LIVE_FINAL ' + JSON.stringify({ track: 'sys', seg: 0, start: 0, end: 1, text: process.argv.slice(3).join(' ') }));
+`, { mode: 0o700 });
+  const start = createCaptureHelperFactory({ captureBin, speakerWatchBin: path.join(dir, 'missing') }, { inboxDir: dir, logsDir: dir });
+  const handle = start({ recordingId: 'meeting_l', selfName: null,
+    live: { engine: 'cloud', command: ['/py', '/live_cloud.py'], env: { CORA_LIVE_TEST: 'server-env' } } });
+  const events = [];
+  handle.on('event', (ev) => events.push(ev));
+  await new Promise((resolve) => handle.on('exit', resolve));
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(events[0].engine, 'server-env');
+  assert.equal(events[1].text, '--live --live-engine /py --live-arg /live_cloud.py');
+});

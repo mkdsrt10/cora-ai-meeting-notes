@@ -376,7 +376,8 @@ def get_api_processing(req, path: str, query: dict) -> None:
     hardware = processing.hardware()
     return req.send_json(dict(preferences=processing.preferences(), hardware=hardware,
                               recommendation=processing.recommend(hardware),
-                              templates=[dict(id=k, name=v[0], description=v[1]) for k, v in processing.TEMPLATES.items()]))
+                              templates=[dict(id=k, name=v[0], description=v[1]) for k, v in processing.TEMPLATES.items()],
+                              live=processing.live_choices()))
 
 
 @route('POST', '/api/processing')
@@ -385,5 +386,10 @@ def post_api_processing(req, path: str, body: dict) -> None:
     selected = processing.validate(body)
     # Saving this explicit profile is consent to automatic use, unlike saving an API key.
     processing.resolve(selected)
+    import policy
+    try:
+        processing.check_live(selected["live"])
+    except policy.LockdownError as exc:
+        return req.send_json({"error": str(exc)}, 403)
     db.set_setting('processing_preferences', selected)
     return req.send_json(dict(ok=True, preferences=selected))

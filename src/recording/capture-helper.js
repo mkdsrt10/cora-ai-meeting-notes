@@ -128,7 +128,9 @@ function createCaptureHelperFactory(bins, dirs, { exitTimeoutMs = EXIT_TIMEOUT_M
       handle.emit('exit', { code, signal });
     };
     const args = deviceId ? [outFile, '--device', deviceId] : [outFile];
-    const capture = spawn(bins.captureBin, live ? [...args, ...liveArgs(live)] : args);
+    // A cloud engine is a Python child of dual-capture: it needs the server's environment.
+    const capture = spawn(bins.captureBin, live ? [...args, ...liveArgs(live)] : args,
+      live && live.env ? { env: { ...process.env, ...live.env } } : undefined);
     capture.on('error', (err) => {
       handle.emit('event', { type: 'error', message: err.message });
       if (!capture.pid) emitExit(-1, null);
