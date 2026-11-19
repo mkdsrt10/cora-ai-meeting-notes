@@ -190,7 +190,7 @@ def _reconcile_decisions(decisions_md: str, reversals_md: str, overlap_threshold
     return "\n".join(kept) if kept else "- None noted."
 
 
-def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, Any]], aligned_segments: list[dict[str, Any]], model: TextModel, folder: Optional[Path] = None, *, template_instruction: str = "", user_notes: str = "") -> dict[str, Any]:
+def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, Any]], aligned_segments: list[dict[str, Any]], model: TextModel, folder: Optional[Path] = None, *, template_instruction: str = "", user_notes: str = "", context: Any = None) -> dict[str, Any]:
     """Six narrow, single-purpose Text model calls (see _extract) instead
     of one big structured-JSON ask — sized for a small local model. Long transcripts are chunked
     with overlap (_chunk_transcript) and each section's per-chunk results
@@ -229,6 +229,10 @@ def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, An
     t0 = time.time()
     tokens_before = model.stats["output_tokens"]
 
+    SECTION_KEYS = {
+        "Overview": "overview", "Action Items": "action_items", "Key Discussion & Decisions": "decisions",
+        "Timeline": "timeline", "Open Questions": "open_questions", "Key Entities": "entities", "Title": "title",
+    }
     SECTION_PROGRESS = {
         "Overview": ("Generating Executive Overview", 60),
         "Action Items": ("Extracting Action Items & Tasks", 68),
@@ -240,6 +244,8 @@ def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, An
 
     def run(instruction: str, max_tokens: int = 1600, grounded: bool = True, section: str = "", source_text: Optional[str] = None) -> str:
         instruction += "\nTemplate guidance: " + template_instruction
+        if context is not None:  # notes_context.Gathered: this section's tagged context
+            instruction = context.assemble(SECTION_KEYS.get(section, "*")).apply(instruction)
         results = []
         run_chunks = _chunk_transcript(source_text) if source_text is not None else chunks
         label, pct = SECTION_PROGRESS.get(section, (f"Generating {section}", 70))

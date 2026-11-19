@@ -341,6 +341,17 @@ def _true_or_false(key: str):
     return validate
 
 
+WORK_CONTEXT_MAX = 4000
+
+
+def _text_up_to(key: str, limit: int):
+    def validate(value):
+        if not isinstance(value, str) or len(value) > limit:
+            raise ValueError(f"{key} must be text of at most {limit} characters")
+        return value.strip()
+    return validate
+
+
 def _whole_number_at_least(key: str, minimum: int):
     def validate(value):
         if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
@@ -359,6 +370,10 @@ _VALIDATORS = {
     "menu_bar_notice_shown": _true_or_false("menu_bar_notice_shown"),
     "audio_retention_days": _whole_number_at_least("audio_retention_days", 1),
     "audio_cap_mb": _whole_number_at_least("audio_cap_mb", 50),
+    # Context for notes (notes_context.py): off until the eval gates pass (Q27).
+    "notes_context_enabled": _true_or_false("notes_context_enabled"),
+    # Settings › Profile "About my work" (Work context, GLOSSARY).
+    "work_context": _text_up_to("work_context", WORK_CONTEXT_MAX),
 }
 
 
