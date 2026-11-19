@@ -120,7 +120,7 @@ test('JSONL: finals in order with Chunk ids, continuing across pause/resume', as
     [second, 'sys', 16, 17, 'Half a', false],
   ]);
   assert.equal(f.lines[0].engine, 'speech_transcriber');
-  for (const l of f.lines) assert.deepEqual(Object.keys(l).sort(), ['end', 'engine', 'final', 'recording_id', 'seg', 'speaker', 'start', 'text', 'track']);
+  for (const l of f.lines) assert.deepEqual(Object.keys(l).sort(), ['end', 'engine', 'final', 'lag_ms', 'recording_id', 'seg', 'speaker', 'start', 'text', 'track']);
   assert.deepEqual(enqueued, [first, second]);
 });
 
@@ -375,4 +375,59 @@ console.log('LIVE_FINAL ' + JSON.stringify({ track: 'sys', seg: 0, start: 0, end
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(events[0].engine, 'server-env');
   assert.equal(events[1].text, '--live --live-engine /py --live-arg /live_cloud.py');
+});
+
+// --- Usage event (T6): counts only ---
+const { liveUsagePayload, lagBucket } = require('../../src/recording/live-transcript');
+const { sampleOf } = require('../../src/main/app-resources');
+
+test('live_transcript Usage event: counts, delay buckets, failures; never text or names', async () => {
+  const { session, helpers, api, clock } = setup();
+  session.start({});
+  await flush();
+  const id = session.state().recordingId;
+  const h = helpers.last();
+  h.send({ type: 'speakerActive', name: 'Priya Rao', app: 'Zoom' });
+  h.send(line('LIVE_ENGINE {"track":"mic","engine":"speech_transcriber","fallback_from":"whisperkit","reason":"not_built"}'));
+  [400, 900, 1200, 1800, 7000].forEach((lag, i) =>
+    h.send(text('FINAL', { track: i % 2 ? 'sys' : 'mic', seg: i, start: i, end: i + 0.5, text: `secret words ${i}`, lag_ms: lag })));
+  h.send(line('LIVE_STATUS {"track":"sys","state":"paused","code":"engine_exit_9"}'));
+  h.send(line('LIVE_STATUS {"state":"stopped","dropped_s":1.5}'));
+  await clock.advance(1000);
+  await session.stop('user');
+  await flush();
+  const [ev] = api.events('live_transcript');
+  assert.deepEqual(ev, {
+    recording_id: id, mode: 'on_device', engine: 'speech_transcriber', finals: 5, words: 15,
+    lag_p50_ms: 1500, lag_p95_ms: 10000, lag_pauses: 1, dropped_s: 1.5,
+    failures: 'fallback_whisperkit:1,engine_exit_9:1', write_errors: 0,
+  });
+  const flat = JSON.stringify(ev);
+  assert.ok(!/secret|Priya/.test(flat));
+});
+
+test('no live_transcript event when live is off', async () => {
+  const { session, api } = setup({ mode: 'off' });
+  session.start({});
+  await flush();
+  await session.stop('user');
+  assert.deepEqual(api.events('live_transcript'), []);
+});
+
+test('lag buckets and an empty summary', () => {
+  assert.deepEqual([0, 250, 251, 1999, 2000, 2001, 60000].map(lagBucket), [250, 250, 500, 2000, 2000, 3000, 99999]);
+  assert.equal(lagBucket(undefined), null);
+  const p = liveUsagePayload('r', { mode: 'cloud_vertex', engine: null, finals: 0, words: 0, lags: [], lagPauses: 0, droppedS: 0, failures: {}, writeErrors: 0 });
+  assert.deepEqual([p.engine, p.lag_p50_ms, p.failures], ['none', null, '']);
+});
+
+test('helper costs include live engines running under dual-capture', () => {
+  const s = sampleOf({ metrics: [], mainPid: 100, pythonPid: 300, processes: [
+    { pid: 201, ppid: 100, cpu: 5, rssKb: 10240, name: 'dual-capture' },
+    { pid: 210, ppid: 201, cpu: 20, rssKb: 102400, name: 'live-engine' },
+    { pid: 211, ppid: 201, cpu: 3, rssKb: 51200, name: 'python3.12' },
+    { pid: 212, ppid: 999, cpu: 50, rssKb: 999999, name: 'live-engine' },
+    { pid: 300, ppid: 100, cpu: 1, rssKb: 2048, name: 'python3' },
+  ] });
+  assert.deepEqual([s.helpersCpu, s.helpersRssKb], [28, 10240 + 102400 + 51200]);
 });

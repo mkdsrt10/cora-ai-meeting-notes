@@ -29,6 +29,10 @@ CATALOG: dict[str, frozenset[str]] = {name: frozenset(keys.split()) for name, ke
     "recording_stopped": "recording_id meeting_app surface duration_s chunks pauses mic_reconnects ended_by"
                          " app_cpu_avg app_cpu_max app_rss_max_mb helpers_cpu_avg helpers_rss_max_mb python_rss_max_mb",
     "participants_captured": "recording_id count method warnings linked_people",
+    # Live transcript of one Recording session (docs/specs/live-transcript.md): counts only,
+    # never text or names. failures: "code:count,..." of fixed engine codes.
+    "live_transcript": "recording_id mode engine finals words lag_p50_ms lag_p95_ms lag_pauses dropped_s"
+                       " failures write_errors",
     "processing_finished": "recording_id status error_code transcriber_provider transcriber_model text_provider"
                            " text_model transcription_s summarization_s total_s tokens_in tokens_out"
                            " window_fallbacks speech_s silence_s retries peak_rss_mb duration_s"

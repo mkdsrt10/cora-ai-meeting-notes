@@ -18,7 +18,8 @@
 //   live.end() -> summary           counts for the live_transcript Usage event (no text, no names)
 //
 // JSONL line: { recording_id (the Chunk), track ('mic'|'sys'), speaker (hint or null), start, end
-// (seconds since the Recording session started), text, final, engine, seg }. Finals as they come;
+// (seconds since the Recording session started), text, final, engine, seg, lag_ms (the engine's
+// caption delay for the line, for the eval) }. Finals as they come;
 // a partial only when its segment never got a final (engine stopped mid-sentence). Lines continue
 // across Chunks; times never go backwards per track.
 
@@ -99,6 +100,7 @@ function createLiveTranscript({ key, mode, file = null, clock, selfName = () => 
       final,
       engine: t.engine || engine,
       seg: ev.seg,
+      lag_ms: typeof ev.lagMs === 'number' ? ev.lagMs : null,
     };
   }
 
@@ -212,10 +214,42 @@ function createLiveTranscriptFiles(dir) {
   };
 }
 
+// Caption delay buckets for the live_transcript Usage event (ms upper edges).
+const LAG_BUCKETS = [250, 500, 1000, 1500, 2000, 3000, 5000, 10000];
+function lagBucket(ms) {
+  if (typeof ms !== 'number') return null;
+  return LAG_BUCKETS.find((edge) => ms <= edge) || 99999;
+}
+function percentile(values, p) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)];
+}
+
+// summary (live.end()) -> the live_transcript Usage event payload: counts only.
+function liveUsagePayload(recordingId, summary) {
+  const failures = Object.entries(summary.failures || {})
+    .map(([code, n]) => `${String(code).replace(/[^a-z0-9_]/gi, '').slice(0, 40)}:${n}`).join(',').slice(0, 200);
+  return {
+    recording_id: recordingId,
+    mode: summary.mode,
+    engine: summary.engine || 'none',
+    finals: summary.finals,
+    words: summary.words,
+    lag_p50_ms: lagBucket(percentile(summary.lags, 50)),
+    lag_p95_ms: lagBucket(percentile(summary.lags, 95)),
+    lag_pauses: summary.lagPauses,
+    dropped_s: Math.round((summary.droppedS || 0) * 10) / 10,
+    failures,
+    write_errors: summary.writeErrors,
+  };
+}
+
 // GET /api/live/settings -> whether a start now streams audio to the cloud
 // engine: the "Live: Cloud" badge on the Call prompt.
 function liveCloudWillRun(settings) {
   return Boolean(settings && settings.mode === 'cloud_vertex' && !settings.refused);
 }
 
-module.exports = { createLiveTranscript, createLiveTranscriptFiles, liveCloudWillRun, LAG_PAUSE_MS, ENGINE_START_MS };
+module.exports = { createLiveTranscript, createLiveTranscriptFiles, liveCloudWillRun, liveUsagePayload, lagBucket,
+  LAG_PAUSE_MS, ENGINE_START_MS };

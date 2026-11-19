@@ -11,7 +11,7 @@ Not to be confused with ``views.live_transcript_payload``: that is the
 Speaker timeline feed (speaker changes, screenshots), which predates this.
 
 Each line: {recording_id (the Chunk), track ('mic'|'sys'), speaker, start, end,
-text, final, engine, seg}. Readers take only complete lines (the writer may be
+text, final, engine, seg, lag_ms}. Readers take only complete lines (the writer may be
 mid-append), so a cursor is a byte offset just past the last line returned.
 """
 from __future__ import annotations

@@ -35,6 +35,7 @@
 //     never changes the phase.
 //
 // Usage events (through the optional api.recordEvent, fire and forget):
+// live_transcript once per stop with the Live transcript on (counts only),
 // recording_started once the Microphone is resolved, recording_stopped and,
 // once the helpers exit, participants_captured per stop (pause/resume
 // chunks count as one Recording, under its first chunk id), error
@@ -60,7 +61,7 @@
 // order they were stopped.
 const { EventEmitter } = require('events');
 const { classifyMeeting, endedBy } = require('./usage');
-const { createLiveTranscript } = require('./live-transcript');
+const { createLiveTranscript, liveUsagePayload } = require('./live-transcript');
 
 const SPEAKER_DEBOUNCE_MS = 1500;
 // Draft notes from the Live transcript run before the hand-over to processing
@@ -472,6 +473,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
       let liveSummary = null;
       if (lt) {
         try { liveSummary = lt.end(); } catch (err) { log('live end')(err); }
+        if (liveSummary) track('live_transcript', liveUsagePayload(done[0], liveSummary));
       }
       if (liveSummary && liveSummary.finals > 0 && typeof api.draftNotes === 'function') {
         let timer = null;

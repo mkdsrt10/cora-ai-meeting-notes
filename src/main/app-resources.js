@@ -13,6 +13,9 @@
 const { execFile } = require('child_process');
 
 const HELPERS = new Set(['dual-capture', 'speaker-watch', 'mic-watch']);
+// Live transcript engines run as children of dual-capture (capture/live-engine, or
+// the Python cloud engine): counted with the helpers.
+const LIVE_ENGINES = new Set(['live-engine']);
 const INTERVAL_MS = 10000;
 
 // `ps -A -o pid=,ppid=,pcpu=,rss=,comm=` -> [{ pid, ppid, cpu, rssKb, name }]
@@ -48,9 +51,17 @@ function sampleOf({ metrics, processes, mainPid, pythonPid }) {
   let helpersCpu = 0;
   let helpersRssKb = 0;
   let pythonRssKb = null;
+  const helperPids = new Set();
   for (const p of processes || []) {
     if (pythonPid && p.pid === pythonPid) { pythonRssKb = p.rssKb; continue; }
     if (p.ppid === mainPid && HELPERS.has(p.name)) {
+      helpersCpu += p.cpu;
+      helpersRssKb += p.rssKb;
+      if (p.name === 'dual-capture') helperPids.add(p.pid);
+    }
+  }
+  for (const p of processes || []) {
+    if (helperPids.has(p.ppid) && (LIVE_ENGINES.has(p.name) || /^python/.test(p.name))) {
       helpersCpu += p.cpu;
       helpersRssKb += p.rssKb;
     }

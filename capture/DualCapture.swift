@@ -836,15 +836,28 @@ if liveTestMode {
         if feed.start(enginePath: liveConfig!.enginePath, extraArgs: liveConfig!.engineArgs) { files.append((feed, file)) }
     }
     // 100 ms blocks per track, paced at real time, as capture would deliver them.
-    var active = files
-    while !active.isEmpty {
-        active = active.filter { feed, file in
+    // A track whose WAV ended gets silence until every WAV ended plus 2 s, as a
+    // quiet track does in a real call (an engine finalizes on silence, not EOF).
+    var ended = Set<Int>()
+    var tail = 20
+    while tail > 0 {
+        for (index, (feed, file)) in files.enumerated() {
             let frames = AVAudioFrameCount(file.processingFormat.sampleRate / 10)
-            guard let pcm = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frames),
-                  (try? file.read(into: pcm, frameCount: frames)) != nil, pcm.frameLength > 0 else { return false }
+            guard let pcm = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frames) else { continue }
+            if !ended.contains(index), (try? file.read(into: pcm, frameCount: frames)) != nil, pcm.frameLength > 0 {
+                feed.push(pcm)
+                continue
+            }
+            ended.insert(index)
+            pcm.frameLength = frames   // AVAudioPCMBuffer starts zeroed: silence
+            if let channels = pcm.floatChannelData {
+                for c in 0..<Int(pcm.format.channelCount) { memset(channels[c], 0, Int(frames) * 4) }
+            } else if let channels = pcm.int16ChannelData {
+                for c in 0..<Int(pcm.format.channelCount) { memset(channels[c], 0, Int(frames) * 2) }
+            }
             feed.push(pcm)
-            return true
         }
+        if ended.count == files.count { tail -= 1 }
         usleep(100_000)
     }
     let group = DispatchGroup()
