@@ -66,6 +66,8 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Usage instructions**: what a user writes, per Plugin, about how they use that external tool (how big a Task is, what a message looks like). The Plugin's Proposals follow them.
 
+**Work context**: what a user writes once about their work (role, team, projects, Areas, internal terms), in Settings › Profile as "About my work". Notes generation and every Plugin may read it. Not Usage instructions (those are per Plugin, about one tool). _Avoid_: Playbook.
+
 **Call**: a live conversation in a meeting app or browser tab that Cora can notice, whether or not it is being recorded: Google Meet, Zoom, Microsoft Teams, a Slack huddle (expanded, collapsed to the mini-bar, or in the desktop app). "Call detected" is the moment Cora first notices one and offers to record; a Call exists only once you are in it (the page's own leave control or the app's meeting window is present), and ends when the app releases the microphone or its tab or window goes away. _Avoid_: meeting (that is the app, the Recording or the calendar event, depending on the sentence).
 
 **Green room**: the pre-join screen of a meeting app (Meet's "Ready to join?"). The tab and often the microphone are already open, but it is not a Call.
@@ -76,7 +78,9 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Participant**: a name captured from the meeting app during one Recording (the roster). A Participant may be linked to a Person, renamed, hidden, or turned into a new Person from the Participants tab. _Avoid_: attendee (that is the calendar list).
 
-**Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript.
+**Speaker timeline**: who spoke when during a Recording, from the meeting app's accessibility tree and browser tabs. Not a transcript, live or otherwise.
+
+**Live transcript**: the draft text Cora writes while a Recording session runs, from each track as it is captured, on this Mac or through a cloud engine the user chose. Once processing finishes, the Recording's transcript is the one shown; the Live transcript is kept beside it as data (for comparison and analysis) and deleted with the Recording. **Captions** are how it is shown, not a separate thing. _Avoid_: realtime transcript, streaming transcript.
 
 **Menu bar**: where Cora lives when its window is not open: the menu bar icon, from which you start or stop a Recording, open Cora or quit it. Closing the window, ⌘Q and Dock > Quit leave Cora in the menu bar, still watching for Calls, with no Dock icon; only the icon's "Quit Cora" (or a macOS shutdown or logout) ends it. Cora opens at login straight into the menu bar unless you turn that off in Settings. _Avoid_: tray (that is the Electron API), background mode.
 
