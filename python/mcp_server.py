@@ -105,6 +105,60 @@ def cora_get_live_status() -> dict[str, Any]:
     }
 
 
+def _active_recording_id() -> Optional[str]:
+    """The Recording being captured right now (its current chunk), if any."""
+    for rec in db.get_all_recordings():
+        if rec.get("status") in {"recording", "paused"}:
+            return rec["id"]
+    return None
+
+
+@mcp.tool()
+def cora_get_live_transcript(recording_id: str = "", since_cursor: str = "") -> dict[str, Any]:
+    """Read the Live transcript of a meeting while it is happening (captions from
+    "You" on the microphone and "Them" on system audio, a second or two behind
+    speech; a draft, replaced by the full transcript after the meeting).
+
+    Returns only the lines after `since_cursor` and a new `cursor` to pass next
+    time, so repeated calls return just what was said since the last read.
+
+    Args:
+        recording_id: The recording ID. Empty = the meeting being recorded now.
+        since_cursor: The `cursor` from your previous call ("" = from the start).
+    """
+    import live_transcript
+    rec_id = (recording_id or "").strip() or _active_recording_id()
+    if not rec_id:
+        raise ValueError("No meeting is being recorded right now; pass a recording_id.")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", rec_id):
+        raise ValueError(f"Recording not found: {rec_id}")
+    rec = db.get_recording(rec_id) or db.get_recording_by_live_id(rec_id)
+    path = live_transcript.path_for(rec_id)
+    if not rec and path is None:
+        raise ValueError(f"Recording not found: {rec_id}")
+    # A cursor is "<recording id>@<byte offset>"; one from another recording starts over.
+    since = 0
+    cursor_id, _, offset = (since_cursor or "").rpartition("@")
+    if cursor_id == rec_id and offset.isdigit():
+        since = int(offset)
+    lines, cursor = live_transcript.read(path, since)
+    status = (rec or {}).get("status")
+    return {
+        "recording_id": rec_id,
+        "recording": status in {"recording", "paused"},
+        "lines": [{
+            "speaker": "You" if line.get("track") == "mic" else (line.get("speaker") or "Them"),
+            "track": line.get("track"),
+            "start": line.get("start"),
+            "end": line.get("end"),
+            "text": line.get("text"),
+            "final": bool(line.get("final")),
+        } for line in lines],
+        "cursor": f"{rec_id}@{cursor}",
+        "note": None if path else "No Live transcript for this meeting (live captions are off, or nothing was said yet).",
+    }
+
+
 @mcp.tool()
 def cora_list_recordings(
     limit: int = 20,
