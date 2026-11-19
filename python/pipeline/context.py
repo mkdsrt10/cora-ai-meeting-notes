@@ -15,6 +15,8 @@ and turns it into a short, prose-like prompt per transcription chunk:
                              or a similar title
   curated         0.40       curated domain vocabulary (your data dir, or the example)
   learned         0.30       vocabulary learned from past transcripts
+  context_sources 0.70       `terms` blocks from Context sources (notes_context.py),
+                             when context for notes is on
 
 Terms found in more than one source get a boost. Terms are packed into the
 prompt by score until the token budget is used (Whisper only keeps the last
@@ -43,7 +45,7 @@ MAX_TERMS_PER_SCREENSHOT = 12
 
 WEIGHTS = {
     "attendees": 1.00, "nearby_ocr": 0.95, "title": 0.90, "notes": 0.80, "ocr": 0.60,
-    "past_meetings": 0.50, "curated": 0.40, "learned": 0.30,
+    "past_meetings": 0.50, "curated": 0.40, "learned": 0.30, "context_sources": 0.70,
 }
 MULTI_SOURCE_BOOST = 0.10
 
@@ -332,6 +334,17 @@ def _curated_terms() -> list[str]:
     return [t for cat, items in data.items() if isinstance(items, list) for t in items]
 
 
+def _context_source_terms(recording_id: str) -> list[str]:
+    """`terms` blocks from Context sources (notes_context.py): Work context
+    terms, plugin terms such as task titles. Never fails the ASR prompt."""
+    try:
+        import notes_context
+        return notes_context.asr_terms(recording_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[context] Context source terms skipped ({type(exc).__name__})", flush=True)
+        return []
+
+
 def build_context(folder: Path, title: str = "") -> MeetingContext:
     """Everything known about this meeting, ranked for Whisper's prompt."""
     recording_id = folder.name
@@ -357,6 +370,8 @@ def build_context(folder: Path, title: str = "") -> MeetingContext:
                 ctx.timed.append(Term(term, WEIGHTS["nearby_ocr"], {"nearby_ocr"}, at))
     for term, weight in _past_meeting_keywords(recording_id, ctx.attendees, title):
         ctx.add(term, "past_meetings", weight)
+    for term in _context_source_terms(recording_id):
+        ctx.add(term, "context_sources")
     for row in db.get_vocabulary_terms(40):
         ctx.add(row.get("term", ""), "learned", WEIGHTS["learned"] * min(1.0, 0.5 + (row.get("weight") or 1) / 20))
     for term in _curated_terms():

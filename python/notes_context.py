@@ -386,3 +386,149 @@ def _people_blocks(req: ContextRequest) -> list[ContextBlock]:
 
 
 register_core(FunctionSource("people", _people_blocks))
+
+
+# ---- core source: Work context -------------------------------------------------
+
+WORK_CONTEXT_SETTING = "work_context"
+
+
+def _work_context_blocks(req: ContextRequest) -> list[ContextBlock]:
+    """What the user wrote once about their work (Settings › Profile "About
+    my work"), as instructions for every section, plus its internal terms for
+    the ASR prompt."""
+    text = str(db.get_setting(WORK_CONTEXT_SETTING, "") or "").strip()
+    if not text:
+        return []
+    from pipeline.context import extract_terms
+    blocks = [ContextBlock(source="work_context", text=text, priority=1.0, sections=frozenset({"*"}),
+                           kind="instructions")]
+    terms = extract_terms(text, limit=30)
+    if terms:
+        blocks.append(ContextBlock(source="work_context", text="\n".join(terms), priority=1.0,
+                                   sections=frozenset({"asr"}), kind="terms"))
+    return blocks
+
+
+register_core(FunctionSource("work_context", _work_context_blocks))
+
+
+# ---- core source: Prior meetings -----------------------------------------------
+
+PRIOR_LOOKBACK_DAYS = 45
+PRIOR_MEETINGS = 4
+PRIOR_ITEMS_PER_MEETING = 6
+PRIOR_DECISIONS_PER_MEETING = 3
+
+
+def _names_of(rec: dict[str, Any]) -> set[str]:
+    folder = Path(rec["folder_path"]) if rec.get("folder_path") else None
+    names: set[str] = set()
+    try:
+        raw = json.loads((folder / "participants.json").read_text()) if folder else []
+        names |= {str(n).strip().lower() for n in raw if str(n).strip()} if isinstance(raw, list) else set()
+    except (OSError, ValueError):
+        pass
+    for seg in ((rec.get("diarization") or {}).get("segments") or [])[:400]:
+        name = str(seg.get("speaker_name") or "").strip().lower()
+        if name and not re.match(r"^(speaker|unknown|me|them|remote|participant)\b", name):
+            names.add(name)
+    return names
+
+
+def _when(value: Any) -> str:
+    return str(value or "")[:10]
+
+
+def prior_meetings(req: ContextRequest) -> list[dict[str, Any]]:
+    """Earlier Recordings (within PRIOR_LOOKBACK_DAYS before this one) that
+    share a Person or the folder with it, most related and most recent first."""
+    import datetime as dt
+    from participants import same_person_name
+    import action_items
+    this_at = req.recorded_at or ""
+    try:
+        floor = (dt.datetime.fromisoformat(this_at) - dt.timedelta(days=PRIOR_LOOKBACK_DAYS)).isoformat() if this_at else ""
+    except ValueError:
+        floor = ""
+    matches = db.get_speaker_matches(None)
+    persons_by_rec: dict[str, set[str]] = {}
+    for m in matches:
+        if m.get("person_id"):
+            persons_by_rec.setdefault(m["recording_id"], set()).add(m["person_id"])
+    mine = set(req.person_ids)
+    self_id = db.get_self_person_id()
+    mine.discard(self_id)
+    self_name = (db.get_person(self_id) or {}).get("name") if self_id else None
+    self_name = self_name or db.get_setting("pending_self_name")
+    my_names = [n for n in req.participants if not same_person_name(n, self_name)]
+    scored = []
+    for rec in db.get_all_recordings():
+        at = str(rec.get("recorded_at") or "")
+        if rec["id"] == req.recording_id or not action_items.eligible(rec) or (this_at and at >= this_at) or \
+                (floor and at < floor):
+            continue
+        shared_people = len(mine & (persons_by_rec.get(rec["id"], set()) - {self_id}))
+        their_names = _names_of(rec)
+        shared_names = sum(1 for n in my_names if any(same_person_name(n, t) for t in their_names))
+        same_folder = bool(req.folder_id) and (rec.get("metadata") or {}).get("folder_id") == req.folder_id
+        score = max(shared_people, shared_names) + (2 if same_folder else 0)
+        if score:
+            scored.append((score, at, rec))
+    scored.sort(key=lambda s: (s[0], s[1]), reverse=True)
+    return [rec for _, _, rec in scored[:PRIOR_MEETINGS]]
+
+
+def _prior_meeting_blocks(req: ContextRequest) -> list[ContextBlock]:
+    """Open Action items and recent decisions from earlier meetings with the
+    same People or folder, so notes can say "follow-up on X" instead of
+    inventing a near-duplicate."""
+    import action_items
+    open_lines: list[str] = []
+    decision_lines: list[str] = []
+    for rec in prior_meetings(req):
+        title = (rec.get("metadata") or {}).get("recording_name") or rec.get("title") or "Earlier meeting"
+        head = f'{_when(rec.get("recorded_at"))} "{title}"'
+        items = [i for i in action_items.for_recording(rec["id"]) if not i["done"]][:PRIOR_ITEMS_PER_MEETING]
+        for item in items:
+            owner = f" (Owner: {item['owner']})" if item.get("owner") else ""
+            open_lines.append(f"- [{head}] {item['text']}{owner}")
+        summary = rec.get("call_summary") or (rec.get("diarization") or {}).get("call_summary") or {}
+        for decision in (summary.get("decisions") or [])[:PRIOR_DECISIONS_PER_MEETING]:
+            text = decision.get("decision") if isinstance(decision, dict) else decision
+            if str(text or "").strip():
+                decision_lines.append(f"- [{head}] {str(text).strip()}")
+    blocks = []
+    if open_lines:
+        blocks.append(ContextBlock(
+            source="prior_meetings",
+            text="Open Action items from earlier meetings with these people (an Action item here that continues "
+                 "one of these is a follow-up, not a new item; mark it \"Follow-up:\"):\n" + "\n".join(open_lines),
+            priority=0.8, sections=frozenset({"action_items", "all"})))
+    if decision_lines:
+        blocks.append(ContextBlock(
+            source="prior_meetings",
+            text="Decisions already made in earlier meetings with these people (do not repeat them as new "
+                 "decisions unless this meeting changed them):\n" + "\n".join(decision_lines),
+            priority=0.7, sections=frozenset({"decisions", "all"})))
+    return blocks
+
+
+register_core(FunctionSource("prior_meetings", _prior_meeting_blocks))
+
+
+# ---- ASR: terms blocks -----------------------------------------------------------
+
+def asr_terms(recording_id: str, deadline_s: float = 1.0) -> list[str]:
+    """Terms from every source's `terms` blocks, for the ASR prompt
+    (pipeline/context.py). Empty when context for notes is off."""
+    if not enabled() or db.get_recording(recording_id) is None:
+        return []
+    gathered = gather(request_for(recording_id, deadline_s=deadline_s), provider="local", kinds=("terms",))
+    terms: list[str] = []
+    for block in sorted(gathered.blocks, key=lambda b: -b.priority):
+        for term in re.split(r"[\n,;]+", block.text):
+            term = term.strip()
+            if term and term.lower() not in {t.lower() for t in terms}:
+                terms.append(term)
+    return terms

@@ -494,6 +494,11 @@
             <p class="settings-sub">Used to auto-confirm your voice on recordings, and as context for summaries.</p>
             <div class="settings-field"><label for="settingsName">Name</label><input type="text" id="settingsName" placeholder="Your name"></div>
             <div class="settings-field"><label for="settingsProfession">Profession or role</label><input type="text" id="settingsProfession" placeholder="e.g. Engineering Manager"></div>
+            <div class="settings-field"><label for="settingsWorkContext">About my work</label><textarea id="settingsWorkContext" rows="6" maxlength="4000" placeholder="Your role and team, current projects, Areas, internal terms and how you like Action items written. Stays on this Mac; sent to a cloud notes model only if you pick one."></textarea></div>
+            <div class="settings-row">
+              <div><strong>Context for notes</strong><small>Experimental. Before writing notes, Cora adds who is in the call, open Action items and decisions from earlier meetings with them, and About my work. Off until it is shown to help.</small></div>
+              <label class="switch"><input type="checkbox" id="settingsNotesContext"><span class="slider"></span></label>
+            </div>
             <button class="button primary" id="settingsProfileSave" style="align-self:flex-start">Save</button>
           </div>
 
