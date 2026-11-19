@@ -4,7 +4,7 @@ SWIFTC ?= swiftc
 # against the build Mac's OS and the helper aborts at load on any older macOS (dyld "Symbol not found").
 MACOS_MIN ?= 14.0
 SWIFT_FLAGS ?= -O -target arm64-apple-macos$(MACOS_MIN)
-NATIVE := capture/dual-capture capture/mic-watch capture/speaker-watch bin/mac-ocr
+NATIVE := capture/dual-capture capture/live-engine capture/mic-watch capture/speaker-watch bin/mac-ocr
 
 .PHONY: setup build-native dev lint test clean install-app app
 
@@ -14,6 +14,7 @@ setup:
 build-native: $(NATIVE)
 
 capture/dual-capture: capture/DualCapture.swift
+capture/live-engine: capture/LiveEngine.swift
 capture/mic-watch: capture/MicWatcher.swift
 capture/speaker-watch: capture/SpeakerWatcher.swift
 # The live-call snippet shared with src/meeting-detector.js is generated into

@@ -82,6 +82,218 @@ enum Microphones {
     }
 }
 
+// MARK: - Live transcript feed (docs/specs/live-transcript.md)
+//
+// One per track when started with --live: a PCM tap (16 kHz mono Float32)
+// piped into a `live-engine` child process, whose LIVE_* lines are relayed to
+// stdout unchanged. Nothing here can stop or delay the recording: capture
+// queues only retain the buffer and hand it to this feed's own queue
+// (conversion and pipe writes happen there); more than `maxBacklog` seconds
+// waiting is dropped and counted; a dead engine is reported once as
+// LIVE_STATUS {"state":"paused"} and the tap goes quiet. SIGPIPE is ignored
+// process-wide, and writes use write(2), so a closed pipe is an error code,
+// never a crash.
+
+let stdoutLock = NSLock()
+func printLine(_ line: String) {
+    stdoutLock.lock()
+    print(line)
+    fflush(stdout)
+    stdoutLock.unlock()
+}
+
+func liveStatus(_ payload: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+          let json = String(data: data, encoding: .utf8) else { return }
+    printLine("LIVE_STATUS \(json)")
+}
+
+final class LiveFeed {
+    let track: String
+    static let maxBacklog = 3.0                  // seconds of audio waiting before new audio is dropped
+    private let queue: DispatchQueue
+    private let process = Process()
+    private var stdinFD: Int32 = -1
+    private var converter: AVAudioConverter?
+    private var converterInput: AVAudioFormat?
+    private let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
+    private let lock = NSLock()
+    private var backlog = 0.0                    // (lock) seconds queued, not yet written
+    private var dead = false                     // (lock)
+    private var closing = false                  // (lock)
+    private var dropping = false                 // (lock) inside a drop episode
+    private(set) var droppedSeconds = 0.0        // (lock)
+    private var pendingLine = Data()
+
+    init(track: String) {
+        self.track = track
+        queue = DispatchQueue(label: "Cora.LiveFeed.\(track)", qos: .utility)
+    }
+
+    /// Spawns the engine. Returns false (and reports paused) when it cannot start.
+    func start(enginePath: String, extraArgs: [String]) -> Bool {
+        guard FileManager.default.isExecutableFile(atPath: enginePath) else {
+            markDead(code: "engine_missing")
+            return false
+        }
+        process.executableURL = URL(fileURLWithPath: enginePath)
+        process.arguments = extraArgs + ["--track", track]   // extraArgs may start with a script for an interpreter
+        let input = Pipe(), output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.standardError
+        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard let self = self, !data.isEmpty else { handle.readabilityHandler = nil; return }
+            self.relay(data)
+        }
+        process.terminationHandler = { [weak self] proc in
+            guard let self = self else { return }
+            let expected = self.lock.withLock { self.closing }
+            if !expected || proc.terminationStatus != 0 {
+                self.markDead(code: proc.terminationReason == .uncaughtSignal ? "engine_killed" : "engine_exit_\(proc.terminationStatus)")
+            }
+        }
+        do { try process.run() } catch {
+            markDead(code: "engine_spawn_failed")
+            return false
+        }
+        stdinFD = input.fileHandleForWriting.fileDescriptor
+        return true
+    }
+
+    private func relay(_ data: Data) {
+        pendingLine.append(data)
+        while let nl = pendingLine.firstIndex(of: 0x0A) {
+            let lineData = pendingLine[pendingLine.startIndex..<nl]
+            pendingLine.removeSubrange(pendingLine.startIndex...nl)
+            if let line = String(data: lineData, encoding: .utf8), line.hasPrefix("LIVE_") { printLine(line) }
+        }
+    }
+
+    private func markDead(code: String) {
+        let first: Bool = lock.withLock { let was = dead; dead = true; return !was }
+        if first { liveStatus(["track": track, "state": "paused", "code": code]) }
+    }
+
+    /// Capture queues: retain and hand over; never blocks.
+    func push(_ sampleBuffer: CMSampleBuffer) {
+        let frames = CMSampleBufferGetNumSamples(sampleBuffer)
+        guard frames > 0, let desc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc)?.pointee, asbd.mSampleRate > 0 else { return }
+        let seconds = Double(frames) / asbd.mSampleRate
+        guard admit(seconds) else { return }
+        queue.async { [self] in
+            defer { lock.withLock { backlog -= seconds } }
+            guard let pcm = Self.pcmBuffer(sampleBuffer, frames: frames) else { return }
+            write(convert(pcm))
+        }
+    }
+
+    /// --live-test: PCM already decoded from a WAV.
+    func push(_ pcm: AVAudioPCMBuffer) {
+        let seconds = Double(pcm.frameLength) / pcm.format.sampleRate
+        guard admit(seconds) else { return }
+        queue.async { [self] in
+            defer { lock.withLock { backlog -= seconds } }
+            write(convert(pcm))
+        }
+    }
+
+    private func admit(_ seconds: Double) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !dead, !closing else { return false }
+        if backlog + seconds > Self.maxBacklog {
+            droppedSeconds += seconds
+            if !dropping {
+                dropping = true
+                DispatchQueue.global().async { [track] in liveStatus(["track": track, "state": "lagging", "code": "backlog"]) }
+            }
+            return false
+        }
+        if dropping {
+            dropping = false
+            let dropped = droppedSeconds
+            DispatchQueue.global().async { [track] in
+                liveStatus(["track": track, "state": "running", "dropped_s": (dropped * 10).rounded() / 10])
+            }
+        }
+        backlog += seconds
+        return true
+    }
+
+    private static func pcmBuffer(_ sampleBuffer: CMSampleBuffer, frames: Int) -> AVAudioPCMBuffer? {
+        guard let desc = CMSampleBufferGetFormatDescription(sampleBuffer),
+              let asbdPtr = CMAudioFormatDescriptionGetStreamBasicDescription(desc),
+              let format = AVAudioFormat(streamDescription: asbdPtr),
+              let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else { return nil }
+        pcm.frameLength = AVAudioFrameCount(frames)
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(sampleBuffer, at: 0, frameCount: Int32(frames),
+                                                                  into: pcm.mutableAudioBufferList)
+        return status == noErr ? pcm : nil
+    }
+
+    /// Feed queue only. Any input format -> 16 kHz mono Float32 samples.
+    private func convert(_ pcm: AVAudioPCMBuffer) -> [Float] {
+        if converter == nil || converterInput != pcm.format {
+            converter = AVAudioConverter(from: pcm.format, to: target)
+            converter?.downmix = true
+            converterInput = pcm.format
+        }
+        guard let converter = converter else { return [] }
+        let capacity = AVAudioFrameCount(Double(pcm.frameLength) * 16000 / pcm.format.sampleRate) + 64
+        guard let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return [] }
+        var fed = false
+        var error: NSError?
+        converter.convert(to: out, error: &error) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true
+            status.pointee = .haveData
+            return pcm
+        }
+        guard error == nil, let channel = out.floatChannelData else { return [] }
+        return Array(UnsafeBufferPointer(start: channel[0], count: Int(out.frameLength)))
+    }
+
+    /// Feed queue only. write(2): EPIPE from a dead engine is an error code, not SIGPIPE.
+    private func write(_ samples: [Float]) {
+        guard !samples.isEmpty, stdinFD >= 0, !lock.withLock({ dead }) else { return }
+        samples.withUnsafeBytes { raw in
+            var offset = 0
+            while offset < raw.count {
+                let n = Darwin.write(stdinFD, raw.baseAddress! + offset, raw.count - offset)
+                if n < 0 {
+                    if errno == EINTR { continue }
+                    markDead(code: "engine_pipe_closed")
+                    return
+                }
+                offset += n
+            }
+        }
+    }
+
+    /// End of input: the engine finalizes and exits. Waits at most `timeout`.
+    func close(timeout: TimeInterval) {
+        lock.withLock { closing = true }
+        queue.sync {
+            if stdinFD >= 0 { Darwin.close(stdinFD); stdinFD = -1 }
+        }
+        guard process.isRunning else { return }
+        let deadline = Date().addingTimeInterval(timeout)
+        while process.isRunning && Date() < deadline { usleep(20_000) }
+        if process.isRunning {
+            process.terminate()
+            liveStatus(["track": track, "state": "paused", "code": "engine_stop_timeout"])
+        }
+    }
+}
+
+struct LiveConfig {
+    var enginePath: String
+    var engineArgs: [String]
+}
+
 @available(macOS 13.0, *)
 class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBufferDelegate {
     var assetWriter: AVAssetWriter!
@@ -112,9 +324,19 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
     var lastMicEnd = CMTime.invalid       // (micLock) end time of the last mic buffer written
     var observers: [NSObjectProtocol] = []
 
-    init(requestedDeviceID: String?) {
+    // Live transcript taps (nil unless --live). See LiveFeed.
+    var liveMic: LiveFeed?
+    var liveSys: LiveFeed?
+
+    init(requestedDeviceID: String?, live: LiveConfig? = nil) {
         self.requestedDeviceID = requestedDeviceID
         super.init()
+        if let live = live {
+            liveMic = LiveFeed(track: "mic")
+            liveSys = LiveFeed(track: "sys")
+            _ = liveMic?.start(enginePath: live.enginePath, extraArgs: live.engineArgs)
+            _ = liveSys?.start(enginePath: live.enginePath, extraArgs: live.engineArgs)
+        }
     }
 
     /// Opens `device` as the session's only mic input, replacing any current
@@ -335,6 +557,19 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
         await assetWriter.finishWriting()
         print("Spike A: Recording stopped gracefully. Writer status: \(assetWriter.status.rawValue), error: \(String(describing: assetWriter.error))")
         fflush(stdout)
+        // The file is final before the live engines get their last words out.
+        closeLive()
+    }
+
+    func closeLive() {
+        let feeds = [liveMic, liveSys].compactMap { $0 }
+        let group = DispatchGroup()
+        for feed in feeds {
+            DispatchQueue.global().async(group: group) { feed.close(timeout: 3) }
+        }
+        group.wait()
+        let dropped = feeds.reduce(0) { $0 + $1.droppedSeconds }
+        if !feeds.isEmpty { liveStatus(["state": "stopped", "dropped_s": (dropped * 10).rounded() / 10]) }
     }
     
     // AVCaptureSession (Mic) Delegate
@@ -343,6 +578,7 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
             silenceBuffer(sampleBuffer)
         }
         writeBuffer(sampleBuffer, to: micInput, source: "Mic")
+        liveMic?.push(sampleBuffer)
     }
 
     func silenceBuffer(_ buffer: CMSampleBuffer) {
@@ -359,6 +595,7 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio else { return }
         writeBuffer(sampleBuffer, to: sysInput, source: "Sys")
+        liveSys?.push(sampleBuffer)
     }
     
     var lastEmittedSpeaker: String = ""
@@ -542,9 +779,20 @@ guard #available(macOS 13.0, *) else {
 // Usage:
 //   dual-capture --list-devices                  one JSON line of input devices, exit 0
 //   dual-capture <outFile> [--device <uniqueID>] record; no or absent device = system default input
+//     [--live [--live-engine <path>] [--live-arg <arg>]...]
+//                                                also run the Live transcript: one live-engine per
+//                                                track (default: live-engine beside this binary,
+//                                                --live-arg passed through) and relay its LIVE_* lines
+//   dual-capture --live-test <mic.wav> [<sys.wav>] [--live-engine <path>] [--live-arg <arg>]...
+//                                                no capture: push the WAVs through the same taps at
+//                                                real time (test seam), then exit 0
 var positionalArgs: [String] = []
 var deviceArg: String?
 var listDevicesMode = false
+var liveMode = false
+var liveTestMode = false
+var liveEnginePath: String?
+var liveEngineArgs: [String] = []
 let args = CommandLine.arguments
 var argIndex = 1
 while argIndex < args.count {
@@ -553,10 +801,57 @@ while argIndex < args.count {
         listDevicesMode = true
     } else if arg == "--device" {
         if argIndex + 1 < args.count { deviceArg = args[argIndex + 1]; argIndex += 1 }
+    } else if arg == "--live" {
+        liveMode = true
+    } else if arg == "--live-test" {
+        liveMode = true
+        liveTestMode = true
+    } else if arg == "--live-engine" {
+        if argIndex + 1 < args.count { liveEnginePath = args[argIndex + 1]; argIndex += 1 }
+    } else if arg == "--live-arg" {
+        if argIndex + 1 < args.count { liveEngineArgs.append(args[argIndex + 1]); argIndex += 1 }
     } else {
         positionalArgs.append(arg)
     }
     argIndex += 1
+}
+
+// A dead live engine must not kill the recorder through its stdin pipe.
+signal(SIGPIPE, SIG_IGN)
+
+let liveConfig: LiveConfig? = liveMode ? LiveConfig(
+    enginePath: liveEnginePath ?? URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        .deletingLastPathComponent().appendingPathComponent("live-engine").path,
+    engineArgs: liveEngineArgs) : nil
+
+if liveTestMode {
+    // Test seam: the WAVs stand in for the mic and system tracks.
+    let feeds = [LiveFeed(track: "mic"), LiveFeed(track: "sys")]
+    var files: [(LiveFeed, AVAudioFile)] = []
+    for (feed, path) in zip(feeds, positionalArgs) {
+        guard let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else {
+            print("Error: cannot read \(path)")
+            exit(1)
+        }
+        if feed.start(enginePath: liveConfig!.enginePath, extraArgs: liveConfig!.engineArgs) { files.append((feed, file)) }
+    }
+    // 100 ms blocks per track, paced at real time, as capture would deliver them.
+    var active = files
+    while !active.isEmpty {
+        active = active.filter { feed, file in
+            let frames = AVAudioFrameCount(file.processingFormat.sampleRate / 10)
+            guard let pcm = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frames),
+                  (try? file.read(into: pcm, frameCount: frames)) != nil, pcm.frameLength > 0 else { return false }
+            feed.push(pcm)
+            return true
+        }
+        usleep(100_000)
+    }
+    let group = DispatchGroup()
+    for feed in feeds { DispatchQueue.global().async(group: group) { feed.close(timeout: 5) } }
+    group.wait()
+    liveStatus(["state": "stopped", "dropped_s": (feeds.reduce(0) { $0 + $1.droppedSeconds } * 10).rounded() / 10])
+    exit(0)
 }
 
 if listDevicesMode {
@@ -569,7 +864,7 @@ let outputPath = positionalArgs.first ?? "spike_dual_track.mov"
 let url = URL(fileURLWithPath: outputPath)
 try? FileManager.default.removeItem(at: url)
 
-let recorder = DualRecorder(requestedDeviceID: (deviceArg?.isEmpty ?? true) ? nil : deviceArg)
+let recorder = DualRecorder(requestedDeviceID: (deviceArg?.isEmpty ?? true) ? nil : deviceArg, live: liveConfig)
 
 // NOTE: group.wait() here previously deadlocked on SIGINT — it blocks the
 // main thread synchronously, but the DispatchSource's handler is scheduled
