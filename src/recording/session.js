@@ -1,13 +1,15 @@
 // Recording session: the live capture of a Recording, from start to stop.
 //
 // Interface
-//   session.state() -> { phase, recordingId, rootId, startedAt, elapsedMs, muted, meeting, finishing, micDevice }
+//   session.state() -> { phase, recordingId, rootId, startedAt, elapsedMs, muted, meeting, finishing, micDevice, live }
 //     phase: 'idle' | 'recording' | 'paused'
 //     recordingId: the chunk being captured (or the paused chunk); null when idle
 //     rootId: the Recording this one continues (pause/resume chain or "Continue meeting"), else null
 //     finishing: ids of stopped Recordings still being finalized in the background
 //     micDevice: name of the Microphone the helper reports it opened; null
 //       until it does, and when idle
+//     live: { state, mode, engine, code } of the Live transcript while one
+//       runs (state 'starting' | 'running' | 'paused'), else null
 //   session.start({ meeting, continues, startedFrom }) -> { ok, id } | { ok: false, error }
 //     startedFrom: new_note | tray | call_prompt | continue (STARTED_FROM);
 //     anything else is reported as other
@@ -24,6 +26,9 @@
 //   'state' event: emitted with state() on every change (mute included)
 //   'level' event: { mic, sys } meter readings, not state
 //   'stopped' event: { recordingId, reason, warning } once per stop
+//   'caption' event: one line of the Live transcript (live-transcript.js onCaption),
+//     partial or final, for the floater and the Transcript tab only
+//   'liveStatus' event: live state changes ({ state, mode, engine, code })
 //   'device' event: { name, recordingId, notice } on every MIC_DEVICE line;
 //     notice is user-facing text when the device opened at start is not the
 //     chosen one, or the device changed since the last line; else null. It
@@ -35,7 +40,12 @@
 // chunks count as one Recording, under its first chunk id), error
 // {scope: capture} when a helper dies, manual_notes_written per floater note.
 //
-// Adapters: startHelper({ recordingId, selfName, deviceId }) -> helper handle;
+// Adapters: startHelper({ recordingId, selfName, deviceId, live? }) -> helper handle;
+// optional live = { mode() -> 'off' | 'on_device' | 'cloud_vertex' (may be a
+// promise; read once per start, like the Microphone), helperOptions(mode) ->
+// what startHelper gets as `live` (null: no live engine), files: { open(key) ->
+// { append, close } } }. Without it, or with mode off, no Live transcript.
+// A live failure never touches capture: the Recording goes on, captions pause.
 // optional microphone = { chosen() -> { unique_id, name } | null (may be a
 // promise), devices() -> [{ name, uniqueID, isDefault }], the last known
 // device list, read synchronously (anything else counts as no list) }.
@@ -50,6 +60,7 @@
 // order they were stopped.
 const { EventEmitter } = require('events');
 const { classifyMeeting, endedBy } = require('./usage');
+const { createLiveTranscript } = require('./live-transcript');
 
 const SPEAKER_DEBOUNCE_MS = 1500;
 
@@ -119,7 +130,21 @@ function deferredHelper(startHelper, optsPromise) {
 // Where a Recording was started from, as recording_started reports it.
 const STARTED_FROM = new Set(['new_note', 'tray', 'call_prompt', 'continue']);
 
-function createRecordingSession({ startHelper, api, clock, queue, people = {}, microphone = null, newRecordingId = recordingIdAt, permissions = {}, resources = null }) {
+// The live setting for a start -> { mode, helper } (helper: startHelper's
+// `live`, null when off). Never rejects: an unreadable setting is off.
+async function resolveLive(live) {
+  const mode = await Promise.resolve().then(() => live.mode()).catch(() => 'off');
+  if (mode !== 'on_device' && mode !== 'cloud_vertex') return { mode: 'off', helper: null };
+  const helper = await Promise.resolve().then(() => live.helperOptions(mode)).catch((err) => {
+    console.warn('[Cora live] live engine not available:', err && err.message);
+    return null;
+  });
+  return helper ? { mode, helper } : { mode: 'off', helper: null };
+}
+
+const LIVE_MODES = new Set(['on_device', 'cloud_vertex']);
+
+function createRecordingSession({ startHelper, api, clock, queue, people = {}, microphone = null, live: liveAdapter = null, newRecordingId = recordingIdAt, permissions = {}, resources = null }) {
   const events = new EventEmitter();
   const selfName = people.selfName || (() => null);
   const labelSpeaker = people.labelSpeaker || ((name) => name);
@@ -143,6 +168,11 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
   let micPending = null;    // Promise of the resolution, while it runs
   let mic = null;           // { chosenName, deviceId } once resolved
   let micDevice = null;     // name the helper last reported opening
+  // Live transcript, resolved once per start like the Microphone.
+  let livePending = null;   // Promise of { mode, helper }, while it resolves
+  let liveSetting = null;   // { mode, helper } once resolved
+  let live = null;          // createLiveTranscript of this Recording session, when on
+  let sessionStartedAt = null; // ms, start of the first chunk (live line times)
 
   const log = (label) => (err) => console.error(`[Cora session] ${label}:`, err && err.message);
 
@@ -180,6 +210,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
       meeting,
       finishing: [...finishing.keys()],
       micDevice,
+      live: live ? live.status() : null,
     };
   }
 
@@ -188,7 +219,13 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
   }
 
   function onHelperEvent(h, ev) {
-    if (h !== helper) return;
+    const liveEvent = ev.type === 'liveText' || ev.type === 'liveEngine' || ev.type === 'liveStatus';
+    // A stopping helper still delivers its engines' last words to its own
+    // Live transcript; nothing else from it counts any more.
+    if (h !== helper) {
+      if (liveEvent && h.live) feedLive(h.live, ev);
+      return;
+    }
     if (ev.type === 'level') {
       events.emit('level', { mic: ev.mic, sys: ev.sys });
     } else if (ev.type === 'error') {
@@ -198,7 +235,10 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
       api.setTitle(recordingId, ev.title).catch(log('title'));
     } else if (ev.type === 'speakerActive') {
       if (usage && ev.app) usage.apps.add(ev.app);
+      if (live) live.speaker(labelSpeaker(ev.name, recordingId));
       onSpeaker(ev.name);
+    } else if (liveEvent) {
+      if (h.live) feedLive(h.live, ev);
     } else if (ev.type === 'device') {
       // A helper prints MIC_DEVICE when it opens the mic; every later line
       // from the same helper is a reopen (unplugged, switched): a reconnect.
@@ -231,12 +271,13 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     if (name === lastSpeaker || now - lastSpeakerAt < SPEAKER_DEBOUNCE_MS) return;
     lastSpeaker = name;
     lastSpeakerAt = now;
+    // Speaker timeline only: who spoke when, never text (that is the Live transcript).
     api.addLiveEntry({
       id: recordingId,
       type: 'speaker_change',
       speaker_id: name,
       at_seconds: (now - startedAt) / 1000,
-      text: 'Transcribing...',
+      text: null,
     }).catch(log('live entry'));
   }
 
@@ -270,15 +311,48 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     if (continues) api.setContinuationStatus(rootId, 'recording', id).catch(log('continuation status'));
 
     const opts = { recordingId: id, selfName: selfName() };
-    const h = mic || !micPending
-      ? startHelper({ ...opts, deviceId: mic ? mic.deviceId : null })
-      : deferredHelper(startHelper, micPending.then((m) => ({ ...opts, deviceId: m.deviceId })));
+    if (sessionStartedAt == null) sessionStartedAt = startedAt;
+    const withLive = (o, l) => (l && l.helper ? { ...o, live: l.helper } : o);
+    const chunkOffset = startedAt - sessionStartedAt;
+    const ready = (mic || !micPending) && (liveSetting || !livePending);
+    const h = ready
+      ? startHelper(withLive({ ...opts, deviceId: mic ? mic.deviceId : null }, liveSetting))
+      : deferredHelper(startHelper, Promise.all([micPending, livePending]).then(([m, l]) => {
+        onLiveResolved(l, id, chunkOffset, h);
+        return withLive({ ...opts, deviceId: m ? m.deviceId : null }, l);
+      }));
+    if (ready) onLiveResolved(liveSetting, id, chunkOffset, h);
     helper = h;
     h.on('event', (ev) => onHelperEvent(h, ev));
     h.on('exit', (info) => onHelperExit(h, info || {}));
     if (muted) h.setMuted(true);
     phase = 'recording';
     return id;
+  }
+
+  function feedLive(lt, ev) {
+    try { lt.event(ev); } catch (err) { log('live event')(err); }
+  }
+
+  // The live setting is known for this chunk: open the Live transcript at the
+  // first chunk of a session that has it on, and tell it where each chunk starts.
+  function onLiveResolved(setting, chunkId, offsetMs, h) {
+    if (!setting || !LIVE_MODES.has(setting.mode) || !chunks.includes(chunkId)) return;
+    if (!live) {
+      const key = chunks[0];
+      let file = null;
+      try { file = liveAdapter.files ? liveAdapter.files.open(key) : null; } catch (err) { log('live file')(err); }
+      live = createLiveTranscript({
+        key, mode: setting.mode, file, clock, selfName,
+        onCaption: (c) => events.emit('caption', c),
+        onStatus: (st) => { events.emit('liveStatus', st); emit(); },
+      });
+      if (usage) usage.live = live;
+      events.emit('liveStatus', live.status());
+    }
+    live.chunk(chunkId, offsetMs);
+    if (h) h.live = live;
+    emit();
   }
 
   function start({ meeting: tool = null, continues = null, startedFrom = null } = {}) {
@@ -291,6 +365,16 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     micDevice = null;
     mic = null;
     micPending = null;
+    live = null;
+    liveSetting = null;
+    livePending = null;
+    sessionStartedAt = null;
+    if (liveAdapter) {
+      const gen = generation;
+      const pending = resolveLive(liveAdapter);
+      livePending = pending;
+      pending.then((l) => { if (gen === generation) liveSetting = l; });
+    }
     if (microphone) {
       const gen = generation;
       const pending = resolveMicrophone(microphone);
@@ -367,7 +451,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
   // Finalize a stopped Recording in the background: wait for its helpers,
   // mark it processing, then hand its chunks to the queue after every
   // Recording stopped before it.
-  function finish({ h, pending, done, root, u }) {
+  function finish({ h, pending, done, root, u, live: lt }) {
     const before = handedOver;
     return (async () => {
       try {
@@ -375,6 +459,10 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
         if (pending) await pending;
       } catch (err) {
         log('helper stop')(err);
+      }
+      // The engines' last lines are in: close the Live transcript file.
+      if (lt) {
+        try { lt.end(); } catch (err) { log('live end')(err); }
       }
       // Not awaited: the roster is read while the hand-over goes on.
       if (u) reportParticipants(u, done);
@@ -392,7 +480,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     if (COUNTED_STOPS.has(reason)) countAction('stop_recording');
     const h = helper;
     if (h) h.expectedExit = true;
-    const job = { h, pending: flushing, done: chunks.slice(), root: rootId, u: usage };
+    const job = { h, pending: flushing, done: chunks.slice(), root: rootId, u: usage, live };
     const key = job.done[0];
     helper = null;
     flushing = null;
@@ -403,6 +491,7 @@ function createRecordingSession({ startHelper, api, clock, queue, people = {}, m
     meeting = null;
     muted = false;
     micDevice = null;
+    live = null;
     phase = 'idle';
     const u = usage;
     usage = null;

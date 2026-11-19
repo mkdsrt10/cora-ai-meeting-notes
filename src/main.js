@@ -15,6 +15,7 @@ const { createCallDetection } = require('./main/call-detection');
 const { createDetectHint } = require('./main/detect-hint');
 const { createCaptureHelperFactory, listAudioDevices, startMicWatch } = require('./recording/capture-helper');
 const { createRecordingSession } = require('./recording/session');
+const { createLiveTranscriptFiles } = require('./recording/live-transcript');
 const { createProcessingQueue, shouldDeferProcessing } = require('./recording/processing-queue');
 const { createResourceSampler } = require('./main/app-resources');
 const { createBackendApi, createArchiveStep } = require('./recording/backend');
@@ -124,6 +125,14 @@ const recording = createRecordingSession({
   microphone: {
     chosen: () => fetchSetting('microphone'),
     devices: () => knownMicDevices,
+  },
+  // Live transcript (docs/specs/live-transcript.md): the engine the Processing
+  // profile allows right now, read once per start; on-device runs live-engine
+  // beside dual-capture. A failure to read it means off.
+  live: {
+    mode: async () => JSON.parse(await fetchJson('/api/live/settings')).mode,
+    helperOptions: (mode) => (mode === 'on_device' ? { engine: 'on_device' } : null),
+    files: createLiveTranscriptFiles(INBOX_DIR),
   },
   // Read at stop: a Call with no names while this is false gets a notice.
   // snapshot: perm_* on recording_started.
@@ -477,6 +486,22 @@ recording.on('device', ({ recordingId, notice }) => {
   if (notice) notify({ title: 'Cora', body: notice, icon: ICON_PATH }, { level: 'warning', recordingId });
   refreshMicDevices();
 });
+
+// Captions go only to the floater and the main window (the meeting's
+// Transcript tab), never to notifications, the tray or Home.
+function sendLive(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+  if (floaterWindow && !floaterWindow.isDestroyed()) floaterWindow.webContents.send(channel, payload);
+}
+recording.on('caption', (caption) => sendLive('live-caption', caption));
+let publishedLive = null;
+recording.on('state', (s) => {
+  const live = s.live ? JSON.stringify(s.live) : null;
+  if (live === publishedLive) return;
+  publishedLive = live;
+  sendLive('live-status', s.live);
+});
+handleTrusted('get-live-status', () => recording.state().live);
 
 recording.on('level', (levels) => {
   // Disposable, moment-to-moment UI state — straight to the renderer over

@@ -61,6 +61,18 @@ function applyProcessingMode(host, mode){
   host.querySelector('[data-processing="model"]').value = '';
 }
 
+// Live captions (Live transcript) while recording: its own choice, separate
+// from the transcription engine used after stop. `live` (GET /api/processing)
+// says which engines this install may offer; unknown means on-device only.
+function liveField(pref, live){
+  const option = (id, name) => `<option value="${esc(id)}" ${id === (pref.live || 'off') ? 'selected' : ''}>${esc(name)}</option>`;
+  const offered = live?.offered || ['off', 'on_device'];
+  const names = { off: 'Off', on_device: 'On this Mac', cloud_vertex: 'Cloud · Google Chirp (Vertex)' };
+  const options = offered.concat(offered.includes(pref.live) || !pref.live ? [] : [pref.live]).map(id => option(id, names[id] || id)).join('');
+  return `<label>Live captions while recording<select class="recording-select" data-processing="live">${options}</select></label>
+    <p class="muted">${esc(live?.note || 'On this Mac: captions stay on this Mac; English works best, mixed Hindi–English is weak. The recording and the full transcript after stop are unaffected.')}</p>`;
+}
+
 // Returns the recommendation, for a caller (onboarding) that draws more from it.
 // embedded: inside onboarding, whose Finish setup saves (no Save button, no
 // banner here; onboarding shows its own above the cards).
@@ -81,6 +93,7 @@ async function loadProcessingControls(hostId, { manual = false, embedded = false
     <p class="muted">${esc(hw.memory_gb || 'Unknown')} GB memory · ${esc(hw.architecture)}${rec ? ` · Best for this Mac: ${esc(PROCESSING_MODE_NAMES[rec.recommended_mode])}. ${esc(rec.modes[rec.recommended_mode]?.reason || '')}` : ''}</p>
     ${field('mode', 'Processing mode', modeOptions)}
     ${field('template', 'Notes template', option('auto','Auto-select with AI',pref.template) + data.templates.map(t=>option(t.id,t.name,pref.template)).join(''))}
+    ${liveField(pref, data.live)}
     <details ${manual ? 'open' : ''}><summary>Models and engine overrides</summary>
     ${field('transcription','Transcription',option('local','Local MLX Whisper',pref.transcription)+option('gemini','Cloud · Google Gemini',pref.transcription)+option('openai_compatible','Cloud · OpenAI-compatible (notes provider endpoint)',pref.transcription))}
     ${field('provider','Notes provider',[['local_mlx','Local MLX'],['gemini','Google Gemini'],['openai','OpenAI'],['anthropic','Anthropic'],['openrouter','OpenRouter'],['groq','Groq'],['ollama','Ollama (this Mac)'],['lmstudio','LM Studio (this Mac)'],['custom','Custom endpoint']].map(([id,name])=>option(id,name,pref.provider)).join(''))}

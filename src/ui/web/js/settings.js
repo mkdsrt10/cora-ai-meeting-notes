@@ -212,8 +212,8 @@ async function renderSettingsModels(){
         <div class="settings-model-icon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
         </div>
-        <div><div class="model-title">Live transcription (streaming)</div><div class="model-sub">Coming soon — will use the transcription model above, in short chunks</div></div>
-        <span class="badge">Coming soon</span>
+        <div><div class="model-title">Live captions (Live transcript)</div><div class="model-sub">Off, on this Mac, or Cloud (Vertex): choose it under Processing → Live captions</div></div>
+        <span class="badge">Processing</span>
       </div>
     `;
     $('#settingsWhisperModel').value = currentWhisper;

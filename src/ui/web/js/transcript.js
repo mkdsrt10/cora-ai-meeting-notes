@@ -43,11 +43,64 @@ function transcriptAsText(segments){
 const isShownTurn = s => s.engine === 'gap' || (s.text && s.text !== '!');
 const gapText = s => `[not transcribed: ${s.reason || 'unknown reason'}]`;
 
+// --- Live transcript (captions while recording) ---
+// GLOSSARY "Live transcript". Read from GET /api/recording/live-transcript
+// with a byte cursor (the 2 s detail poll calls renderCleanTranscript), and
+// topped up by live-caption IPC from main for partials between polls.
+let liveView = null;   // { id, cursor, lines: Map key -> line, loading }
+
+const liveKey = l => `${l.recording_id || l.chunkId}:${l.track}:${l.seg}`;
+
+function liveViewFor(id){
+  if(!liveView || liveView.id !== id) liveView = { id, cursor: 0, lines: new Map(), loading: null };
+  return liveView;
+}
+
+function drawLiveTranscript(view, label){
+  const host = $('#notepadTranscript');
+  if(!host || !liveView || liveView !== view) return;
+  const lines = [...view.lines.values()].sort((a, b) => (a.start - b.start) || (a.track === 'mic' ? -1 : 1));
+  const rows = lines.map(l => `
+      <div class="timeline-turn live-turn${l.final ? '' : ' live-partial'}"><div class="timeline-turn-head">
+        <span class="timeline-speaker">${esc(l.track === 'mic' ? 'You' : (l.speaker || 'Them'))}</span>
+        <span class="timeline-time">${fmtDuration(l.start)}</span></div>
+        <p class="timeline-text">${esc(l.text)}</p></div>`).join('');
+  host.innerHTML = `<p class="muted live-transcript-label">${esc(label)}</p>${rows || '<p class="muted">Captions appear here as people speak.</p>'}`;
+}
+
+async function renderLiveTranscript(record, label = 'Live captions · a draft until processing finishes'){
+  ['#editTranscriptBtn', '#saveTranscriptBtn', '#cancelTranscriptBtn', '#transcriptEditHint'].forEach(sel => { if($(sel)) $(sel).hidden = true; });
+  const view = liveViewFor(record.id);
+  drawLiveTranscript(view, label);
+  if(view.loading) return;
+  view.loading = (async () => {
+    try{
+      for(let i = 0; i < 20; i++){
+        const res = await api(`/api/recording/live-transcript?id=${encodeURIComponent(record.id)}&since=${view.cursor}`);
+        res.lines.forEach(l => view.lines.set(liveKey(l), l));
+        const done = res.cursor === view.cursor;
+        view.cursor = res.cursor;
+        if(done || !res.lines.length) break;
+      }
+    }catch{ /* captions are best effort */ }
+    view.loading = null;
+    drawLiveTranscript(view, label);
+  })();
+}
+
+window.electronAPI?.onLiveCaption?.(c => {
+  if(!liveView || !c || (c.recordingId !== liveView.id && c.chunkId !== liveView.id)) return;
+  liveView.lines.set(liveKey(c), { recording_id: c.chunkId, track: c.track, seg: c.seg, speaker: c.speaker,
+    start: c.start, end: c.end, text: c.text, final: c.final });
+  if(selectedRecording()?.id === liveView.id && ['recording', 'paused'].includes(selectedRecording()?.status)) drawLiveTranscript(liveView, 'Live captions · a draft until processing finishes');
+});
+
 function renderCleanTranscript(record){
   // The final, processed transcript — one row per turn with speaker and time
   // range. Meeting Timeline stays the raw live-event log.
   const host = $('#notepadTranscript');
   if(!host) return;
+  if(['recording', 'paused'].includes(record?.status)) return renderLiveTranscript(record);
   if(transcriptEditingFor !== record?.id){ transcriptEditing = false; transcriptEditingFor = record?.id; }
   const segments = transcriptSegments(record);
   const editable = segments.length > 0 && segments[0].index !== null;

@@ -1,0 +1,261 @@
+// Live transcript (docs/specs/live-transcript.md, T2), driven through the
+// Recording session with scripted helper events: the JSONL record, captions,
+// the paused notice, and a Recording that carries on whatever live does.
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { createRecordingSession } = require('../../src/recording/session');
+const { createLiveTranscriptFiles, LAG_PAUSE_MS, ENGINE_START_MS } = require('../../src/recording/live-transcript');
+const { parseHelperLine, liveArgs } = require('../../src/recording/capture-helper');
+const { fakeClock, fakeHelpers, fakeApi, flush } = require('./fakes');
+
+function fakeFiles({ failAppend = false } = {}) {
+  const files = {};
+  return {
+    files,
+    open(key) {
+      const f = { key, lines: [], closed: false };
+      files[key] = f;
+      return {
+        append(obj) { if (failAppend) throw new Error('disk full'); f.lines.push(obj); },
+        close() { f.closed = true; },
+      };
+    },
+  };
+}
+
+function setup({ mode = 'on_device', files = fakeFiles(), helperOptions = (m) => ({ engine: m }) } = {}) {
+  const clock = fakeClock();
+  const helpers = fakeHelpers();
+  const api = fakeApi();
+  const enqueued = [];
+  const queue = { enqueue: (id) => enqueued.push(id) };
+  const live = { mode: async () => mode, helperOptions, files };
+  const session = createRecordingSession({ startHelper: helpers.startHelper, api, clock, queue, live,
+    people: { selfName: () => 'Me Myself' } });
+  const captions = [];
+  const statuses = [];
+  session.on('caption', (c) => captions.push(c));
+  session.on('liveStatus', (s) => statuses.push(s));
+  return { clock, helpers, api, enqueued, session, files, captions, statuses };
+}
+
+const line = (raw) => parseHelperLine(raw);
+const text = (kind, p) => line(`LIVE_${kind} ${JSON.stringify({ lag_ms: 400, seg: 0, ...p })}`);
+
+test('LIVE lines parse into typed events; malformed ones are chatter', () => {
+  assert.deepEqual(line('LIVE_FINAL {"track":"sys","seg":2,"start":1.5,"end":3,"text":" Hello there. ","lag_ms":900}'),
+    { type: 'liveText', final: true, track: 'sys', seg: 2, start: 1.5, end: 3, text: 'Hello there.', lagMs: 900 });
+  assert.deepEqual(line('LIVE_ENGINE {"track":"mic","engine":"speech_transcriber","fallback_from":"whisperkit","reason":"not_built"}'),
+    { type: 'liveEngine', track: 'mic', engine: 'speech_transcriber', fallbackFrom: 'whisperkit', reason: 'not_built' });
+  assert.deepEqual(line('LIVE_STATUS {"track":"sys","state":"paused","code":"engine_exit_9"}'),
+    { type: 'liveStatus', track: 'sys', state: 'paused', code: 'engine_exit_9', droppedS: null });
+  assert.deepEqual(line('LIVE_ERROR {"track":"mic","code":"no_engine"}'),
+    { type: 'liveStatus', track: 'mic', state: 'paused', code: 'no_engine' });
+  for (const bad of [
+    'LIVE_FINAL {"track":"sys","start":1,"end":2,"text":"cut off',
+    'LIVE_FINAL {"track":"both","start":1,"end":2,"text":"x"}',
+    'LIVE_PARTIAL {"track":"mic","start":"1","end":2,"text":"x"}',
+    'LIVE_PARTIAL {"track":"mic","start":1,"end":2,"text":"   "}',
+    'LIVE_STATUS {"state":"exploded"}',
+    'LIVE_FINAL',
+    'LIVE_NONSENSE {}',
+  ]) assert.equal(line(bad), null, bad);
+});
+
+test('liveArgs: on-device uses the engine beside the helper; cloud passes its command through', () => {
+  assert.deepEqual(liveArgs({ engine: 'on_device' }), ['--live']);
+  assert.deepEqual(liveArgs({ engine: 'on_device', locale: 'en-IN' }), ['--live', '--live-arg', '--locale', '--live-arg', 'en-IN']);
+  assert.deepEqual(liveArgs({ engine: 'cloud', command: ['/py', '/live_cloud.py', '--x'] }),
+    ['--live', '--live-engine', '/py', '--live-arg', '/live_cloud.py', '--live-arg', '--x']);
+});
+
+test('live off: the helper gets no live option and no file is opened', async () => {
+  const { session, helpers, files } = setup({ mode: 'off' });
+  session.start({});
+  await flush();
+  assert.equal('live' in helpers.last().opts, false);
+  assert.equal(session.state().live, null);
+  helpers.last().send(text('FINAL', { track: 'mic', start: 0, end: 1, text: 'ignored' }));
+  await session.stop('user');
+  assert.deepEqual(files.files, {});
+});
+
+test('JSONL: finals in order with Chunk ids, continuing across pause/resume', async () => {
+  const { session, helpers, files, clock, enqueued } = setup();
+  session.start({});
+  await flush();
+  const first = session.state().recordingId;
+  assert.deepEqual(helpers.last().opts.live, { engine: 'on_device' });
+  const h1 = helpers.last();
+  h1.send(line('LIVE_ENGINE {"track":"mic","engine":"speech_transcriber"}'));
+  h1.send(text('PARTIAL', { track: 'mic', start: 0.5, end: 1, text: 'Good' }));
+  h1.send(text('FINAL', { track: 'mic', start: 0.5, end: 1.4, text: 'Good morning.' }));
+  h1.send(text('FINAL', { track: 'sys', start: 1.6, end: 3, text: 'Morning to you.' }));
+  await clock.advance(10000);
+  session.pause();
+  await clock.advance(5000);
+  await session.resume();
+  await flush();
+  const second = session.state().recordingId;
+  assert.notEqual(second, first);
+  const h2 = helpers.last();
+  h2.send(text('FINAL', { track: 'mic', start: 0.2, end: 1, text: 'Back again.' }));
+  h2.send(text('PARTIAL', { track: 'sys', start: 1, end: 2, text: 'Half a' }));
+  await session.stop('user');
+  await flush();
+
+  const f = files.files[first];
+  assert.ok(f, 'one file per Recording session, keyed by its first Chunk');
+  assert.equal(Object.keys(files.files).length, 1);
+  assert.equal(f.closed, true);
+  assert.deepEqual(f.lines.map((l) => [l.recording_id, l.track, l.start, l.end, l.text, l.final]), [
+    [first, 'mic', 0.5, 1.4, 'Good morning.', true],
+    [first, 'sys', 1.6, 3, 'Morning to you.', true],
+    // second Chunk started 15 s into the session (10 s recorded + 5 s paused)
+    [second, 'mic', 15.2, 16, 'Back again.', true],
+    // a partial whose segment never got a final is kept, marked not final
+    [second, 'sys', 16, 17, 'Half a', false],
+  ]);
+  assert.equal(f.lines[0].engine, 'speech_transcriber');
+  for (const l of f.lines) assert.deepEqual(Object.keys(l).sort(), ['end', 'engine', 'final', 'recording_id', 'seg', 'speaker', 'start', 'text', 'track']);
+  assert.deepEqual(enqueued, [first, second]);
+});
+
+test('the engines\' last lines after stop still reach the file', async () => {
+  const { session, helpers, files } = setup();
+  session.start({});
+  await flush();
+  const id = session.state().recordingId;
+  const h = helpers.last();
+  let finishStop;
+  h.stop = () => new Promise((resolve) => { finishStop = resolve; });
+  const stopped = session.stop('user');
+  await flush();
+  h.send(text('FINAL', { track: 'sys', start: 2, end: 3, text: 'Last words.' }));
+  finishStop();
+  await stopped;
+  await flush();
+  assert.deepEqual(files.files[id].lines.map((l) => l.text), ['Last words.']);
+});
+
+test('captions: You on the mic, Them or the remote speaker hint on system audio', async () => {
+  const { session, helpers, captions, clock } = setup();
+  session.start({});
+  await flush();
+  const id = session.state().recordingId;
+  const h = helpers.last();
+  h.send(text('PARTIAL', { track: 'mic', start: 0, end: 1, text: 'So the' }));
+  h.send(text('FINAL', { track: 'sys', start: 1, end: 2, text: 'Agreed.' }));
+  h.send({ type: 'speakerActive', name: 'Participant', app: 'Sys' });   // dual-capture's own label: no name
+  h.send({ type: 'speakerActive', name: 'Me Myself', app: 'Zoom' });    // the user: not a remote hint
+  h.send({ type: 'speakerActive', name: 'Priya Rao', app: 'Zoom' });
+  h.send(text('FINAL', { track: 'sys', start: 2, end: 3, text: 'Ship it Friday.' }));
+  await clock.advance(11000);
+  h.send(text('FINAL', { track: 'sys', start: 13, end: 14, text: 'Bye.' }));  // the hint went stale
+  assert.deepEqual(captions.map((c) => [c.recordingId, c.who, c.text, c.final]), [
+    [id, 'You', 'So the', false],
+    [id, 'Them', 'Agreed.', true],
+    [id, 'Priya Rao', 'Ship it Friday.', true],
+    [id, 'Them', 'Bye.', true],
+  ]);
+  await session.stop('user');
+});
+
+test('paused notice: engine failure, lag, or no engine at all; captions resume', async () => {
+  const { session, helpers, statuses, clock } = setup();
+  session.start({});
+  await flush();
+  const h = helpers.last();
+  assert.equal(session.state().live.state, 'starting');
+  h.send(line('LIVE_ENGINE {"track":"mic","engine":"speech_transcriber"}'));
+  assert.equal(session.state().live.state, 'running');
+  h.send(line('LIVE_STATUS {"track":"sys","state":"paused","code":"engine_exit_9"}'));
+  assert.deepEqual([session.state().live.state, session.state().live.code], ['paused', 'engine_exit_9']);
+  // the recording itself is untouched
+  assert.equal(session.state().phase, 'recording');
+  await session.stop('user');
+
+  // lag beyond the limit pauses; a caught-up line resumes
+  const s2 = setup();
+  s2.session.start({});
+  await flush();
+  const h2 = s2.helpers.last();
+  h2.send(text('FINAL', { track: 'mic', start: 0, end: 1, text: 'Hi.', lag_ms: LAG_PAUSE_MS + 1000 }));
+  assert.deepEqual([s2.session.state().live.state, s2.session.state().live.code], ['paused', 'lagging']);
+  h2.send(text('FINAL', { track: 'mic', start: 1, end: 2, text: 'Hello.', lag_ms: 500 }));
+  assert.equal(s2.session.state().live.state, 'running');
+  assert.deepEqual(s2.statuses.map((s) => s.state), ['starting', 'paused', 'running']);
+  await s2.session.stop('user');
+
+  // an engine that never starts
+  const s3 = setup();
+  s3.session.start({});
+  await flush();
+  await s3.clock.advance(ENGINE_START_MS + 1);
+  assert.deepEqual([s3.session.state().live.state, s3.session.state().live.code], ['paused', 'engine_start_timeout']);
+  assert.equal(s3.session.state().phase, 'recording');
+  await s3.session.stop('user');
+  void statuses; void clock;
+});
+
+test('recording unaffected: a failing file, garbage events and a dead live setting', async () => {
+  const files = fakeFiles({ failAppend: true });
+  const { session, helpers, enqueued, captions } = setup({ files });
+  session.start({});
+  await flush();
+  const id = session.state().recordingId;
+  const h = helpers.last();
+  h.send(text('FINAL', { track: 'mic', start: 0, end: 1, text: 'Still captioned.' }));
+  h.send({ type: 'liveText', track: 'nope', start: 0, end: 1, text: 'x' });
+  h.send({ type: 'liveStatus' });
+  h.send({ type: 'level', mic: -20, sys: -30 });
+  assert.equal(session.state().phase, 'recording');
+  assert.deepEqual(captions.map((c) => c.text), ['Still captioned.']);
+  await session.stop('user');
+  assert.deepEqual(enqueued, [id]);
+
+  // a live setting that cannot be read is off, never a failed start
+  const clock = fakeClock();
+  const hs = fakeHelpers();
+  const enq = [];
+  const s = createRecordingSession({ startHelper: hs.startHelper, api: fakeApi(), clock, queue: { enqueue: (x) => enq.push(x) },
+    live: { mode: async () => { throw new Error('server down'); }, helperOptions: () => ({}), files: fakeFiles() } });
+  assert.equal(s.start({}).ok, true);
+  await flush();
+  assert.equal('live' in hs.last().opts, false);
+  await s.stop('user');
+  assert.equal(enq.length, 1);
+
+  // a helperOptions that throws (e.g. cloud refused) also means no live engine
+  const s4 = setup({ helperOptions: () => { throw new Error('refused'); } });
+  s4.session.start({});
+  await flush();
+  assert.equal('live' in s4.helpers.last().opts, false);
+  assert.equal(s4.session.state().live, null);
+  await s4.session.stop('user');
+});
+
+test('speaker timeline entries carry no fake transcript text', async () => {
+  const { session, helpers, api, clock } = setup({ mode: 'off' });
+  session.start({});
+  await flush();
+  await clock.advance(2000);
+  helpers.last().send({ type: 'speakerActive', name: 'Alex', app: 'Zoom' });
+  await flush();
+  const entries = api.named('addLiveEntry').map((c) => c[1]);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].text, null);
+  await session.stop('user');
+});
+
+test('real file adapter appends one JSON line per call', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cora-live-'));
+  const f = createLiveTranscriptFiles(dir).open('meeting_k');
+  f.append({ a: 1 });
+  f.append({ b: 'two' });
+  f.close();
+  assert.equal(fs.readFileSync(path.join(dir, 'meeting_k_live.jsonl'), 'utf8'), '{"a":1}\n{"b":"two"}\n');
+});

@@ -451,6 +451,11 @@ def process(path: Path, key: str, config: dict) -> Path:
             except Exception:
                 pass
 
+        # Live transcript of the Recording session (first chunk only): kept
+        # beside the full transcript, see live_transcript.py.
+        import live_transcript
+        live_transcript.adopt(path.stem, importing)
+
         # Companion participant roster (names only — Zoom exposes no
         # "who's speaking" text, but does expose this) from speaker-watch
         participants_source = path.parent / (path.stem + "_participants.json")

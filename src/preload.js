@@ -25,6 +25,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Export: save dialog for a Recording's Markdown -> { outcome: saved|cancelled|failed, name?, error? }.
     saveMarkdown: (request) => ipcRenderer.invoke('save-markdown', request),
     onMicDevice: (callback) => ipcRenderer.on('mic-device', (_event, name) => callback(name)),
+    // Live transcript captions while recording (floater and the meeting's Transcript tab only):
+    // { recordingId, chunkId, track, who, speaker, seg, start, end, text, final }.
+    onLiveCaption: (callback) => ipcRenderer.on('live-caption', (_event, caption) => callback(caption)),
+    // Live transcript status: null when off, else { state: starting|running|paused, mode, engine, code }.
+    onLiveStatus: (callback) => ipcRenderer.on('live-status', (_event, status) => callback(status)),
+    getLiveStatus: () => ipcRenderer.invoke('get-live-status'),
     // In-app update banner (src/updater.js state; Update / Later).
     getUpdateState: () => ipcRenderer.invoke('get-update-state'),
     onUpdateState: (callback) => ipcRenderer.on('update-state', (_event, state) => callback(state)),

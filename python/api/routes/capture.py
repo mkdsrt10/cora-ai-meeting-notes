@@ -72,3 +72,26 @@ def post_api_recording_live_entry(req, path: str, body: dict) -> None:
         image_path=Path(str(body.get("image_path", ""))).name or None,
     )
     return req.send_json({"ok": True})
+
+
+@route("GET", '/api/live/settings')
+def get_api_live_settings(req, path: str, query: dict) -> None:
+    """The Live transcript engine a Recording starting now would use (read by
+    Electron at each start): {mode: off | on_device | cloud_vertex}."""
+    import processing
+    return req.send_json({"mode": processing.preferences().get("live", "off")})
+
+
+@route("GET", '/api/recording/live-transcript')
+def get_api_recording_live_transcript(req, path: str, query: dict) -> None:
+    """Live transcript lines after `since` (a byte cursor from the previous
+    read; 0 = from the start) and the new cursor. Local only: the file never
+    leaves this Mac through this route."""
+    import live_transcript
+    rec_id = safe_id(str(query.get("id", [""])[0]))
+    try:
+        since = int(query.get("since", ["0"])[0] or 0)
+    except ValueError:
+        raise ValueError("Invalid cursor") from None
+    lines, cursor = live_transcript.read(live_transcript.path_for(rec_id), since)
+    return req.send_json({"id": rec_id, "lines": lines, "cursor": cursor})

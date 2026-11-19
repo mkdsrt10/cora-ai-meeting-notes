@@ -51,7 +51,8 @@ function renderMeetingTimeline(record){
       return `<div class="feed-screenshot">${e.image_url ? `<img src="${esc(e.image_url)}" alt="Meeting screenshot">` : ''}${e.text ? `<p class="feed-screenshot-ocr">${esc(e.text)}</p>` : ''}<small>${fmtDuration(e.start_seconds)}</small></div>`;
     }
     if(e.type === 'speaker_change'){
-      return `<div class="feed-speaker-change"><small>${fmtDuration(e.start_seconds)} · <strong>${esc(e.speaker_id || 'Someone')}</strong> speaking → <em>${esc(e.text || 'Transcribing...')}</em></small></div>`;
+      // Speaker timeline: who spoke when. Text lives in the Live transcript, not here.
+      return `<div class="feed-speaker-change"><small>${fmtDuration(e.start_seconds)} · <strong>${esc(e.speaker_id || 'Someone')}</strong> speaking</small></div>`;
     }
     return `<div class="timeline-turn"><div class="timeline-turn-head"><span class="timeline-speaker">${esc(e.speaker_id || 'Speaker')}</span><span class="timeline-time">${fmtDuration(e.start_seconds)}</span></div><p class="timeline-text">${esc(e.text || '')}</p></div>`;
   }).join('');

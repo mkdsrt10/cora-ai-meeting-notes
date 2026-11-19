@@ -3,9 +3,11 @@
 // detection), parses their stdout grammar into typed events, and writes
 // their stdin commands. The Recording session only ever sees a handle:
 //
-//   const helper = startCaptureHelper({ recordingId, selfName, deviceId });
+//   const helper = startCaptureHelper({ recordingId, selfName, deviceId, live });
 //                                    // deviceId: Microphone uniqueID -> --device;
 //                                    // null = System default (no argument)
+//                                    // live: null = no Live transcript; else the
+//                                    // engine args for dual-capture (liveArgs)
 //   helper.on('event', (ev) => ...)   // see parseHelperLine for event shapes
 //   helper.on('exit', ({ code, signal }) => ...)  // dual-capture exited
 //   helper.setMuted(true)            // MUTE_MIC / UNMUTE_MIC over stdin
@@ -23,6 +25,33 @@ const LEVEL = /^AUDIO_LEVEL mic=(-?[\d.]+) sys=(-?[\d.]+)/;
 const SPEAKER = /^SPEAKER_ACTIVE:\s*(.+?)\s*\(([^)]*)\)\s*$/;
 // The Microphone the helper actually opened, printed on every (re)open.
 const MIC_DEVICE = /^STATUS: MIC_DEVICE (.+)$/;
+// Live transcript lines (capture/LiveEngine.swift, relayed by dual-capture):
+// `LIVE_<KIND> {json}`. A line whose JSON does not parse, or lacks what its
+// kind needs, is chatter (null): a bad live line never reaches the session.
+const LIVE = /^LIVE_(PARTIAL|FINAL|ENGINE|STATUS|ERROR) (\{.*\})$/;
+const TRACKS = new Set(['mic', 'sys']);
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+function parseLiveLine(kind, json) {
+  let p;
+  try { p = JSON.parse(json); } catch { return null; }
+  if (!p || typeof p !== 'object') return null;
+  const track = TRACKS.has(p.track) ? p.track : null;
+  if (kind === 'PARTIAL' || kind === 'FINAL') {
+    const start = num(p.start);
+    const end = num(p.end);
+    if (!track || start == null || end == null || typeof p.text !== 'string' || !p.text.trim()) return null;
+    return { type: 'liveText', final: kind === 'FINAL', track, seg: num(p.seg) ?? 0, start, end: Math.max(start, end),
+      text: p.text.trim(), lagMs: num(p.lag_ms) };
+  }
+  if (kind === 'ENGINE') {
+    if (!track || typeof p.engine !== 'string') return null;
+    return { type: 'liveEngine', track, engine: p.engine, fallbackFrom: p.fallback_from || null, reason: p.reason || null };
+  }
+  if (kind === 'ERROR') return { type: 'liveStatus', track, state: 'paused', code: String(p.code || 'engine_error') };
+  if (!['running', 'lagging', 'paused', 'stopped'].includes(p.state)) return null;
+  return { type: 'liveStatus', track, state: p.state, code: p.code ? String(p.code) : null, droppedS: num(p.dropped_s) };
+}
 
 // One line of helper stdout -> a typed event, or null for chatter.
 function parseHelperLine(raw) {
@@ -39,6 +68,8 @@ function parseHelperLine(raw) {
   if (line.startsWith('CAPTURE_WARNING:')) return { type: 'warning', message: line.slice('CAPTURE_WARNING:'.length).trim() };
   if (line.startsWith('Error:')) return { type: 'error', message: line.slice('Error:'.length).trim() };
   if (line.startsWith('Failed:')) return { type: 'error', message: line.slice('Failed:'.length).trim() };
+  m = LIVE.exec(line);
+  if (m) return parseLiveLine(m[1], m[2]);
   m = MIC_DEVICE.exec(line);
   if (m) return { type: 'device', name: m[1] };
   if (line === 'STATUS: MIC_MUTED') return { type: 'muteStatus', muted: true };
@@ -72,7 +103,7 @@ function waitForExit(proc, label, timeoutMs) {
 // Audio goes to <inbox>/<recordingId>.mov, the Speaker timeline to
 // <inbox>/<recordingId>_speakers.json.
 function createCaptureHelperFactory(bins, dirs, { exitTimeoutMs = EXIT_TIMEOUT_MS } = {}) {
-  return function startCaptureHelper({ recordingId, selfName, deviceId = null }) {
+  return function startCaptureHelper({ recordingId, selfName, deviceId = null, live = null }) {
     fs.mkdirSync(dirs.inboxDir, { recursive: true });
     fs.mkdirSync(dirs.logsDir, { recursive: true });
     const outFile = path.join(dirs.inboxDir, `${recordingId}.mov`);
@@ -96,7 +127,8 @@ function createCaptureHelperFactory(bins, dirs, { exitTimeoutMs = EXIT_TIMEOUT_M
       exited = true;
       handle.emit('exit', { code, signal });
     };
-    const capture = spawn(bins.captureBin, deviceId ? [outFile, '--device', deviceId] : [outFile]);
+    const args = deviceId ? [outFile, '--device', deviceId] : [outFile];
+    const capture = spawn(bins.captureBin, live ? [...args, ...liveArgs(live)] : args);
     capture.on('error', (err) => {
       handle.emit('event', { type: 'error', message: err.message });
       if (!capture.pid) emitExit(-1, null);
@@ -138,6 +170,21 @@ function createCaptureHelperFactory(bins, dirs, { exitTimeoutMs = EXIT_TIMEOUT_M
     };
     return handle;
   };
+}
+
+// dual-capture arguments for a Live transcript engine (docs/specs/live-transcript.md):
+//   { engine: 'on_device', locale? }        live-engine beside dual-capture
+//   { engine: 'cloud', command: [exe, ...] } a streaming adapter speaking the same
+//                                            LIVE_* grammar (python/live_cloud.py)
+function liveArgs(live) {
+  const out = ['--live'];
+  if (live.engine === 'cloud' && Array.isArray(live.command) && live.command.length) {
+    out.push('--live-engine', live.command[0]);
+    for (const arg of live.command.slice(1)) out.push('--live-arg', String(arg));
+  } else if (live.locale) {
+    out.push('--live-arg', '--locale', '--live-arg', String(live.locale));
+  }
+  return out;
 }
 
 const LIST_TIMEOUT_MS = 5000;
@@ -186,4 +233,4 @@ function startMicWatch(binPath, { onMicOn, onMicOff }) {
   };
 }
 
-module.exports = { parseHelperLine, createCaptureHelperFactory, listAudioDevices, startMicWatch };
+module.exports = { parseHelperLine, createCaptureHelperFactory, listAudioDevices, startMicWatch, liveArgs };

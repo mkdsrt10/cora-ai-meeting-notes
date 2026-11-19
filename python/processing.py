@@ -15,6 +15,9 @@ from pipeline.text_model import PRESETS
 from pipeline.transcriber import ENGINES
 
 MODES = ('local_light', 'local_thorough', 'cloud')
+# Live transcript engine (docs/specs/live-transcript.md), independent of
+# `transcription`: off, on this Mac, or Google Chirp streaming on Vertex.
+LIVE_MODES = ('off', 'on_device', 'cloud_vertex')
 PROVIDERS = PRESETS  # Text model provider presets
 TEMPLATES = {
     'general': ('General meeting', 'Capture outcomes, discussion, decisions and unresolved questions.'),
@@ -40,7 +43,7 @@ def preferences():
         return validate(dict(mode=default_mode))
     # Preserve existing users' ASR choice until they explicitly choose a profile.
     return dict(mode='local_light', transcription=db.get_setting('transcription_engine', 'local'),
-                provider='local_mlx', model='', template='auto')
+                provider='local_mlx', model='', template='auto', live='off')
 
 
 def _config():
@@ -59,9 +62,12 @@ def validate(raw):
         raise ValueError('Unknown processing mode')
     out = dict(mode=mode, transcription=raw.get('transcription') or ('gemini' if mode == 'cloud' else 'local'),
                provider=raw.get('provider') or ('gemini' if mode == 'cloud' else 'local_mlx'),
-               model=str(raw.get('model') or '').strip(), template=raw.get('template', 'auto'))
+               model=str(raw.get('model') or '').strip(), template=raw.get('template', 'auto'),
+               live=raw.get('live') or 'off')
     if out['transcription'] not in ENGINES or out['provider'] not in PROVIDERS:
         raise ValueError('Unknown transcription engine or notes provider')
+    if out['live'] not in LIVE_MODES:
+        raise ValueError('Unknown live transcript engine')
     if out['template'] not in (*TEMPLATES, 'auto'):
         raise ValueError('Unknown notes template')
     if len(out['model']) > 512:
@@ -75,8 +81,9 @@ def resolve(overrides=None):
         if not isinstance(overrides, dict):
             raise ValueError('Processing options must be an object')
         # Selecting a mode resets engine defaults; explicit overrides then win.
+        # The live engine is its own choice: a mode never changes it.
         if 'mode' in overrides:
-            base = dict(mode=overrides['mode'], template=base['template'])
+            base = dict(mode=overrides['mode'], template=base['template'], live=base.get('live', 'off'))
         base.update(overrides)
     out = validate(base)
     if policy.lockdown_enabled():

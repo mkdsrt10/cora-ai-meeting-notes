@@ -95,6 +95,69 @@ if (window.electronAPI) {
   }
 }
 
+// Live transcript captions: the last few lines, a partial replaced in place
+// by the next partial or the final of its segment. Shown only while the Live
+// transcript is on; the recording never depends on them.
+const CAPTIONS_HEIGHT = 58;
+const CAPTION_LINES = 2;
+let captionsShown = false;
+let captions = [];   // [{ key, who, text, final }]
+
+function renderCaptions() {
+  const host = document.getElementById('captionLines');
+  if (!host) return;
+  host.textContent = '';
+  if (!captions.length) {
+    const empty = document.createElement('div');
+    empty.className = 'caption-empty';
+    empty.textContent = 'Captions appear here as people speak.';
+    host.appendChild(empty);
+    return;
+  }
+  for (const c of captions.slice(-CAPTION_LINES)) {
+    const row = document.createElement('div');
+    row.className = 'caption-line' + (c.final ? '' : ' partial');
+    const inner = document.createElement('bdi');
+    const who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = `${c.who}: `;
+    inner.appendChild(who);
+    inner.appendChild(document.createTextNode(c.text));
+    row.appendChild(inner);
+    host.appendChild(row);
+  }
+}
+
+function showLiveStatus(status) {
+  const box = document.getElementById('liveCaptions');
+  const on = Boolean(status && status.state);
+  if (box) box.hidden = !on;
+  if (on !== captionsShown) {
+    captionsShown = on;
+    if (!on) captions = [];
+    renderCaptions();
+    resizeFloater();
+  }
+  const paused = document.getElementById('livePaused');
+  if (paused) paused.hidden = !(on && status.state === 'paused');
+  const badge = document.getElementById('liveCloudBadge');
+  if (badge) badge.hidden = !(on && status.mode === 'cloud_vertex' && status.state !== 'paused');
+}
+
+function addCaption(c) {
+  if (!c || typeof c.text !== 'string') return;
+  const key = `${c.chunkId}:${c.track}:${c.seg}`;
+  const at = captions.findIndex((x) => x.key === key);
+  const entry = { key, who: c.who || (c.track === 'mic' ? 'You' : 'Them'), text: c.text, final: Boolean(c.final) };
+  if (at >= 0) captions[at] = entry; else captions.push(entry);
+  if (captions.length > 8) captions = captions.slice(-8);
+  renderCaptions();
+}
+
+if (window.electronAPI?.onLiveStatus) window.electronAPI.onLiveStatus(showLiveStatus);
+if (window.electronAPI?.onLiveCaption) window.electronAPI.onLiveCaption(addCaption);
+window.electronAPI?.getLiveStatus?.().then(showLiveStatus).catch(() => {});
+
 // Timer loop
 timerInterval = setInterval(updateTimer, 1000);
 
@@ -140,12 +203,16 @@ document.getElementById('btnOpen')?.addEventListener('click', async () => {
 const noteDrawer = document.getElementById('noteDrawer');
 const noteInput = document.getElementById('noteInput');
 
+// Floater height: the pill, plus the captions box while live is on, plus the note drawer.
+function resizeFloater() {
+  if (!window.electronAPI?.expandFloater) return;
+  window.electronAPI.expandFloater(46 + (captionsShown ? CAPTIONS_HEIGHT : 0) + (drawerOpen ? 38 : 0));
+}
+
 function toggleNoteDrawer(open) {
   drawerOpen = open !== undefined ? open : !drawerOpen;
   noteDrawer.style.display = drawerOpen ? 'block' : 'none';
-  if (window.electronAPI?.expandFloater) {
-    window.electronAPI.expandFloater(drawerOpen ? 84 : 46);
-  }
+  resizeFloater();
   if (drawerOpen) {
     setTimeout(() => noteInput.focus(), 50);
   } else {

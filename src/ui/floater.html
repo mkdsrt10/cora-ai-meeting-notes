@@ -201,6 +201,46 @@
       display: flex;
       justify-content: space-between;
     }
+    /* Live transcript captions (docs/specs/live-transcript.md): shown only
+       while the Live transcript is on; You / Them by track. */
+    .live-captions {
+      width: 100%;
+      background: rgba(20, 20, 24, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 5px 9px;
+      -webkit-app-region: drag;
+    }
+    .live-captions[hidden] { display: none; }
+    .live-head {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      min-height: 0;
+    }
+    .live-badge, .live-paused {
+      font-size: 9px;
+      font-weight: 600;
+      border-radius: 999px;
+      padding: 0 6px;
+    }
+    .live-badge { background: rgba(59, 130, 246, 0.3); color: #bfdbfe; }
+    .live-paused { background: rgba(245, 158, 11, 0.25); color: #fcd34d; }
+    .live-badge[hidden], .live-paused[hidden] { display: none; }
+    .caption-line {
+      font-size: 11.5px;
+      line-height: 15px;
+      color: #e2e8f0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      direction: rtl;          /* keep the newest words visible */
+      text-align: left;
+    }
+    .caption-line bdi { direction: ltr; unicode-bidi: plaintext; }
+    .caption-line .who { color: #94a3b8; font-weight: 600; }
+    .caption-line.partial bdi { color: #cbd5e1; }
+    .caption-empty { font-size: 10.5px; color: #64748b; }
     .toast {
       position: absolute;
       top: -24px;
@@ -263,6 +303,14 @@
       </div>
     </div>
 
+    <!-- Live transcript captions -->
+    <div class="live-captions" id="liveCaptions" hidden>
+      <div class="live-head">
+        <span class="live-badge" id="liveCloudBadge" title="Audio is streaming to Google Cloud Speech-to-Text on your Vertex project" hidden>Live: Cloud</span>
+        <span class="live-paused" id="livePaused" title="The recording continues; only the captions stopped" hidden>Live captions paused</span>
+      </div>
+      <div id="captionLines"><div class="caption-empty">Captions appear here as people speak.</div></div>
+    </div>
     <!-- Quick Note Inline Drawer -->
     <div class="note-drawer" id="noteDrawer">
       <input type="text" class="note-input" id="noteInput" placeholder="Type a quick note & hit Enter…">
