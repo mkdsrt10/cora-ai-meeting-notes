@@ -387,6 +387,10 @@ def _edited(row: dict[str, Any], edits: dict[str, Any]) -> dict[str, Any]:
             raise OutboxError(f"field_not_editable:{name}", 400)
         if isinstance(value, str) and len(value) > 8000:
             raise OutboxError(f"field_too_long:{name}", 400)
+        options = editable[name].get("options") or []
+        if editable[name].get("type") == "select" and options and \
+                str(value) not in {str(o.get("value")) for o in options}:
+            raise OutboxError(f"not_an_option:{name}", 400)   # targets only from what was fetched
         clean[name] = value
     return clean
 

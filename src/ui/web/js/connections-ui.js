@@ -61,3 +61,34 @@ addEventListener('click', async event => {
     catch(error){ toast(error.message, true); }
   }
 });
+
+// ---- Slack: Send to Slack (Recording page and To-dos) and Usage instructions ----
+async function sendToSlack(itemIds){
+  try{
+    const { proposal } = await api('/api/plugins/slack/compose', { method: 'POST', body: JSON.stringify({ action_item_ids: itemIds }) });
+    openConfirmPanel(proposal);
+  }catch(error){
+    toast(/not_connected/.test(error.message) ? 'Connect Slack in Settings › Connections first.' : error.message, true);
+  }
+}
+
+registerActionItemTool({ label: 'Send to Slack', track: 'send_to_slack', run: items => sendToSlack(items.map(i => i.id)) });
+
+async function renderSlackSettings(slot){
+  const { settings } = await api('/api/plugins/slack/settings');
+  slot.innerHTML = `<div class="settings-field"><label for="slackUsage">Slack Usage instructions</label>
+      <textarea id="slackUsage" rows="5" maxlength="4000" placeholder="Optional. Leave empty for the fixed template (no model). Example: casual tone, one line per item, tag owners.">${esc(settings.usage_instructions || '')}</textarea></div>
+    <p class="muted">Slack messages are sent only from selected Action items, after you confirm the exact text and destination.</p>
+    <div class="workflow-actions"><button type="button" class="button primary small" data-slack-save>Save</button></div>`;
+}
+
+registerConnectionSettings('slack', renderSlackSettings);
+
+addEventListener('click', async event => {
+  if(!event.target.closest('[data-slack-save]')) return;
+  try{
+    await api('/api/plugins/slack/settings', { method: 'POST', body: JSON.stringify({ usage_instructions: $('#slackUsage').value }) });
+    trackAction('change_setting');
+    toast('Slack settings saved.');
+  }catch(error){ toast(error.message, true); }
+});

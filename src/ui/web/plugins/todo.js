@@ -5,9 +5,11 @@
 registerView('todo', {onShow: renderTodoView});
 
 let todoTab = 'open';
+const todoSelected = new Set();
 
 function todoRow(item){
-  return `<div class="session-row todo-row${item.done ? ' todo-done' : ''}" style="grid-template-columns:auto 1fr auto">
+  return `<div class="session-row todo-row${item.done ? ' todo-done' : ''}" style="grid-template-columns:auto auto 1fr auto">
+    <input type="checkbox" data-todo-select="${esc(item.id)}"${todoSelected.has(item.id) ? ' checked' : ''} aria-label="Select" title="Select to send">
     <input type="checkbox" data-track="tick_todo" data-todo-id="${esc(item.id)}"${item.done ? ' checked' : ''} aria-label="Done">
     <div><h4>${esc(item.text)}</h4>${item.owner || item.due ? `<p class="muted">${esc([item.owner && `Owner: ${item.owner}`, item.due && `Due: ${item.due}`].filter(Boolean).join(' · '))}</p>` : ''}</div>
     <button type="button" class="button secondary small" data-open-id="${esc(item.recording_id)}">${esc(item.recording_title)} · ${fmtDate(item.recorded_at)}</button>
@@ -18,7 +20,8 @@ async function renderTodoView(root){
   root.innerHTML = '<p class="muted">Loading…</p>';
   const [{ items }, { count }] = await Promise.all([api('/api/plugins/todo/items'), api('/api/outbox/count')]);
   const tabs = `<div class="todo-tabs"><button type="button" class="button secondary small${todoTab === 'open' ? ' active' : ''}" data-todo-tab="open">To-dos</button>
-    <button type="button" class="button secondary small${todoTab === 'suggested' ? ' active' : ''}" data-todo-tab="suggested">Suggested${count ? ` (${count})` : ''}</button></div>`;
+    <button type="button" class="button secondary small${todoTab === 'suggested' ? ' active' : ''}" data-todo-tab="suggested">Suggested${count ? ` (${count})` : ''}</button>
+    ${todoTab === 'open' ? `<button type="button" class="button secondary small" data-todo-slack${todoSelected.size ? '' : ' disabled'}>Send to Slack</button>` : ''}</div>`;
   if(todoTab === 'suggested'){
     root.innerHTML = tabs + '<div id="todoSuggested"><p class="muted">Loading…</p></div>';
     await renderSuggestedTab($('#todoSuggested'));
@@ -31,12 +34,19 @@ async function renderTodoView(root){
 }
 
 addEventListener('click', async event => {
+  if(event.target.closest('[data-todo-slack]') && todoSelected.size){ trackAction('send_to_slack'); return sendToSlack([...todoSelected]); }
   const tab = event.target.closest('[data-todo-tab]'); if(!tab) return;
   todoTab = tab.dataset.todoTab;
   await renderTodoView($('#view-todo')).catch(error => toast(error.message, true));
 });
 
 addEventListener('change', async event => {
+  const pick = event.target.closest('[data-todo-select]');
+  if(pick){
+    if(pick.checked) todoSelected.add(pick.dataset.todoSelect); else todoSelected.delete(pick.dataset.todoSelect);
+    const button = $('[data-todo-slack]'); if(button) button.disabled = !todoSelected.size;
+    return;
+  }
   const box = event.target.closest('[data-todo-id]'); if(!box) return;
   try{
     await api('/api/plugins/todo/done', {method:'POST', body:JSON.stringify({id: box.dataset.todoId, done: box.checked})});
