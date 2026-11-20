@@ -11,7 +11,7 @@ Runs plugins/notion/matcher.py over tests/fixtures/notion_matcher/fixture.json
 link precision = correct links / links proposed; link recall = correct links /
 items that should link; false creates = should-link items proposed as create
 (they still offer the right Task under "link instead" when it is among the 3
-nearest, counted as rescued).
+nearest, counted as rescued); skips make no Proposal at all.
 """
 from __future__ import annotations
 
@@ -36,13 +36,16 @@ def run(model=None, instructions: str = "") -> dict:
     links = [d for d in decisions if d.decision == "link"]
     correct = [d for d in links if d.task_id == expect[d.action_item_id]]
     should = [i for i, e in expect.items() if e]
-    false_creates = [d for d in decisions if d.decision != "link" and expect[d.action_item_id]]
+    false_creates = [d for d in decisions if d.decision == "create" and expect[d.action_item_id]]
     rescued = [d for d in false_creates if expect[d.action_item_id] in {t["id"] for t in d.nearest}]
+    skipped = [d for d in decisions if d.decision == "skip"]
     return {"items": len(items), "should_link": len(should), "links": len(links), "correct_links": len(correct),
             "link_precision": round(len(correct) / len(links), 3) if links else None,
             "link_recall": round(len(correct) / len(should), 3) if should else None,
             "false_creates": len(false_creates), "rescued_by_link_instead": len(rescued),
-            "skips": sum(d.decision == "skip" for d in decisions)}
+            "skips": len(skipped), "skipped_should_link": sum(bool(expect[d.action_item_id]) for d in skipped),
+            "creates_for_new_work": sum(d.decision == "create" and not expect[d.action_item_id] for d in decisions),
+            "new_work": sum(not e for e in expect.values())}
 
 
 def main() -> int:

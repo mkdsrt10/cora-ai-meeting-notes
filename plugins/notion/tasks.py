@@ -7,8 +7,9 @@ Settings (outbox.plugin_settings("notion")):
 
 The cache holds the Tasks database's pages (id, title, status, done,
 assignee ids, area, url, created/edited times) on this Mac. It is refreshed
-by the daily Hook, after processing when older than 15 minutes, and on
-demand. Its requests list the database only: no meeting content.
+by the daily Hook, when the database is picked, and on demand (Refresh
+Tasks), never during processing. Its requests list the database only: no
+meeting content.
 """
 from __future__ import annotations
 

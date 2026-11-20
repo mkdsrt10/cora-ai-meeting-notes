@@ -349,7 +349,8 @@ items pass (both 0), decisions **fail** (33% vs 67%); latency ≤ +10% pass (+6%
 Gemini is ahead on every quality row.
 
 **Go / no-go: NO-GO.** The harness does not move local notes on these meetings, so the track
-stops here, before the Outbox, Connections, Notion and Slack (T5–T10).
+stops here, before the Outbox, Connections, Notion and Slack (T5–T10). (The owner later chose
+to build T5–T10 anyway; see the next section.)
 
 How to read it:
 
@@ -371,6 +372,52 @@ How to read it:
    "About my work", and meetings that recur with the same people. Until then the local tier's
    problem is the transcript and the 4B model, as the earlier section concluded, and context for
    notes stays off by default (setting `notes_context_enabled`).
+
+### After the checkpoint: the rest of the harness and the §13.5 gates (T5–T10)
+
+The owner decided to build T5–T10 anyway (Outbox, Connections, Accounts, Notion, Slack), with
+context for notes left off by default and its sources unchanged. The quality gates below
+therefore still read the T4 run; nothing was retuned.
+
+| Gate | Target | Result | Evidence |
+|---|---|---|---|
+| Harness | a test plugin adds a Context source and a Proposal kind with no core edits; a failing plugin never breaks notes | **pass** | `tests/test_outbox.py` (test plugin, raising proposer), `tests/test_notes_context.py` (slow/erroring source skipped) |
+| Local quality (B vs A) | AI precision ≥ 50%, owners ≥ 60%, decisions precision ≥ 60%, recall not lower | **fail** | T4 table above: 0%, 11% correct, 4%, decisions recall 33% vs 67% |
+| Gap to cloud (B vs C) | reported | reported | T4 table: Gemini ahead on every quality row |
+| Local cost: latency | notes stage ≤ +10% vs A | **pass** | +6% (T4) |
+| Local cost: swap | no swap on 16 GB in a 1 h meeting | **not shown** | only a whole-Mac reading (1059 MB growth in one B run); needs the quiet-Mac check |
+| Notion matcher (local) | link precision ≥ 0.8 on the fixture | **pass** | Qwen3-4B local: 10/11 = 0.91 (0.90 with Usage instructions); lexical only: 5/5 = 1.0 |
+| Notion: duplicates | 0 duplicate Tasks after reprocess | **pass** | `tests/test_notion_plugin.py` (3 reprocesses, 1 Task created) |
+| Slack | selected items → one message, posted once, as the user; reprocess posts nothing | **pass** | `tests/test_slack_plugin.py` (user token, one `chat.postMessage`, permalink Link, second confirm refused) |
+| Egress | no outbound traffic during local processing; only on a confirm click | **pass in test** | `tests/test_egress.py`: notes + Proposals with Notion and Slack connected, socket guard and the real Connection recorded: 0 calls; Confirm: exactly 1 |
+| Safety | lockdown refuses confirm; audit rows hold hashes, not content | **pass** | `tests/test_outbox.py` (403 `blocked_policy`, audit outcome `blocked`; audit rows hold sha256 of key and payload only; tokens only in the Keychain) |
+
+Notion matcher eval (`tools/eval_notion_matcher.py`, fixture
+`tests/fixtures/notion_matcher/fixture.json`: 20 fictional Tasks, 25 hand-labelled Action items,
+15 continuing a Task and 10 new work; counts only):
+
+| | links | correct | precision | recall | create, right Task under "link instead" | skipped (no Proposal) | creates for new work |
+|---|---|---|---|---|---|---|---|
+| Lexical only | 5 | 5 | 1.00 | 0.33 | 10 of 10 | 0 | 10 of 10 |
+| Qwen3-4B local | 11 | 10 | 0.91 | 0.67 | 1 of 1 | 10 (4 should link) | 3 of 10 |
+| Qwen3-4B + Usage instructions | 10 | 9 | 0.90 | 0.60 | 2 of 2 | 10 (4 should link) | 3 of 10 |
+
+Failures and next steps:
+
+1. **Local notes quality (fail).** Unchanged from the checkpoint: rerun the three-arm eval once
+   Participants are named, People have roles, "About my work" is written and meetings recur.
+   Context for notes stays off by default.
+2. **Swap on 16 GB (not shown).** Run one 1 h local meeting on a quiet 16 GB Mac and read the
+   process's own memory and swap, not `vm.swapusage` for the whole Mac.
+3. **The local matcher skips too much.** It links precisely, but "skip" on 10 of 25 items hides
+   6 of 10 real new Tasks and 4 linkable items: they get no Proposal at all. Next: drop "skip"
+   from the model's choices (or show skipped items as a low-key "create?" chip), then rerun the
+   fixture; lexical-only already proposes every item.
+4. **Egress is shown in a test, not on the wire.** Capture traffic (e.g. `nettop`) during one
+   real local processing run with Notion and Slack connected.
+5. **Live checks owed with real accounts:** paste a Notion and a Slack token, link and create one
+   Task, mark one done both ways, send one Slack message; check that Notion shows the
+   integration as author with the user as Assignee, and that Slack shows the user, not a bot.
 
 ## Known limitations
 

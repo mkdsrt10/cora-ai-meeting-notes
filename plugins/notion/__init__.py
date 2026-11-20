@@ -18,10 +18,6 @@ from plugin_host import Plugin
 from . import proposer, routes, sources, tasks
 
 
-def after_meeting(recording_id: str) -> None:
-    tasks.refresh()          # only when older than 15 minutes; lists the database, no meeting content
-
-
 def daily() -> None:
     tasks.refresh(force=True)
     routes.status_pull()
@@ -37,7 +33,9 @@ PLUGIN = Plugin(
         ("GET", "schema", routes.get_schema),
         ("POST", "refresh", routes.post_refresh),
     ),
-    hooks={"after_meeting": after_meeting, "daily": daily},
+    # No after_meeting network call: processing stays offline (egress gate);
+    # the cache is refreshed daily, when the database is picked, and on demand.
+    hooks={"daily": daily},
     enabled_by_default=True,
     connection="notion",
     proposer=proposer.NotionProposer(),
