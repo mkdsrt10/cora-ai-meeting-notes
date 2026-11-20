@@ -10,6 +10,8 @@ GET  /api/links?recording=<id>
 GET  /api/connections                    {service: {connected, account_label, blocked_policy}}
 POST /api/connections/connect            {service, token}: token goes to the Keychain only
 POST /api/connections/disconnect         {service}
+GET  /api/person/accounts?id=<person>    Notion/Slack Account per connected service
+POST /api/person/accounts/confirm|reject {person_id, service, external_id}
 """
 from __future__ import annotations
 
@@ -100,3 +102,29 @@ def post_connection_connect(req, path: str, body: dict) -> None:
 def post_connection_disconnect(req, path: str, body: dict) -> None:
     connections.disconnect(str(body.get("service") or ""))
     return req.send_json({"ok": True, "connections": connections.status()})
+
+
+# ---- Accounts on the Person page (accounts.py) --------------------------------
+
+@route("GET", "/api/person/accounts")
+def get_person_accounts(req, path: str, query: dict) -> None:
+    import accounts
+    person_id = _q(query, "id")
+    result = {}
+    for service in connections.SERVICES:
+        if not connections.connected(service):
+            continue
+        accounts.refresh_users(service)   # names only; no meeting content
+        result[service] = accounts.account_state(person_id, service)
+    return req.send_json({"accounts": result})
+
+
+@route("POST", "/api/person/accounts/confirm", "/api/person/accounts/reject")
+def post_person_account(req, path: str, body: dict) -> None:
+    import accounts
+    service = str(body.get("service") or "")
+    if service not in connections.SERVICES:
+        raise ValueError("unknown service")
+    action = accounts.confirm if path.endswith("/confirm") else accounts.reject
+    action(str(body.get("person_id") or ""), service, str(body.get("external_id") or ""))
+    return req.send_json({"ok": True, "account": accounts.account_state(str(body.get("person_id") or ""), service)})

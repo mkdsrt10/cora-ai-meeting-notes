@@ -108,6 +108,7 @@ async function openPerson(id){
       </div>
       <div class="workflow-actions" style="margin-top:12px"><button class="button primary" data-save-person="${esc(person.id)}">Save</button></div>
     </article>
+    <article class="panel" id="personAccounts" style="margin-top:16px" hidden></article>
     <article class="panel" style="margin-top:16px">
       <span class="kicker">SEEN IN</span><h3>${recordings.length} recording${recordings.length === 1 ? '' : 's'}</h3>
       ${recordings.length ? `<div style="display:flex; flex-direction:column; gap:8px; margin-top:12px">${recordings.map(r => `
@@ -124,6 +125,7 @@ async function openPerson(id){
       </div>
     </article>` : ''}
   `;
+  renderPersonAccounts(person.id);
 }
 
 let pollTimer = null;

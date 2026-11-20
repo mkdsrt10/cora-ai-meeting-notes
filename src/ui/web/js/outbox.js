@@ -147,6 +147,36 @@ async function renderConnectionsSettings(){
   }
 }
 
+// ---- Accounts on the Person page: suggested by name, Confirm / Not them ----
+async function renderPersonAccounts(personId){
+  const host = $('#personAccounts'); if(!host) return;
+  try{
+    const { accounts } = await api(`/api/person/accounts?id=${encodeURIComponent(personId)}`);
+    const rows = Object.entries(accounts).map(([service, a]) => {
+      const name = a.account?.name || '';
+      const actions = a.state === 'suggested' ? `<button type="button" class="button primary small" data-account-confirm="${esc(service)}" data-external-id="${esc(a.account.id)}">Confirm</button>
+          <button type="button" class="button secondary small" data-account-reject="${esc(service)}" data-external-id="${esc(a.account.id)}">Not them</button>` : '';
+      const text = a.state === 'confirmed' ? `${esc(name)} <span class="stage-pill coached">Confirmed</span>`
+        : a.state === 'suggested' ? `${esc(name)}? <small class="muted">suggested by name</small>` : '<small class="muted">No match by name</small>';
+      return `<div class="settings-row" data-person-account="${esc(service)}"><div><strong>${esc(SERVICE_LABEL[service] || service)}</strong><small>${text}</small></div><span>${actions}</span></div>`;
+    });
+    host.dataset.personId = personId;
+    host.hidden = !rows.length;
+    host.innerHTML = rows.length ? `<span class="kicker">ACCOUNTS</span><p class="muted">Used for the Notion Assignee and Slack mentions. Unconfirmed means unassigned and a plain name.</p>${rows.join('')}` : '';
+  }catch(error){ console.error('Accounts failed to load:', error); }
+}
+
+addEventListener('click', async event => {
+  const button = event.target.closest('[data-account-confirm],[data-account-reject]'); if(!button) return;
+  const host = $('#personAccounts'); const confirmIt = 'accountConfirm' in button.dataset;
+  const service = confirmIt ? button.dataset.accountConfirm : button.dataset.accountReject;
+  try{
+    await api(`/api/person/accounts/${confirmIt ? 'confirm' : 'reject'}`, { method: 'POST', body: JSON.stringify({ person_id: host.dataset.personId, service, external_id: button.dataset.externalId }) });
+    if(confirmIt) trackAction('confirm_account');
+    await renderPersonAccounts(host.dataset.personId);
+  }catch(error){ toast(error.message, true); }
+});
+
 addEventListener('change', event => {
   const box = event.target.closest('[data-ai-select]'); if(!box) return;
   if(box.checked) outboxState.selected.add(box.dataset.aiSelect); else outboxState.selected.delete(box.dataset.aiSelect);
