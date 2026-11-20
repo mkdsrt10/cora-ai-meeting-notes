@@ -207,3 +207,21 @@ def test_todo_lists_action_items_across_recordings_with_done_state(port):
     items = [i for i in call(port, "GET", "/api/plugins/todo/items")[1]["items"] if i["recording_id"] == rec["id"]]
     assert [i["done"] for i in items] == [False, True]
     assert call(port, "POST", "/api/plugins/todo/done", {"recording_id": "nope", "index": 0, "done": True})[0] == 400
+
+
+def test_daily_hook_runs_once_a_day():
+    import datetime as dt
+    import db
+    calls = []
+    plugin_host.register(Plugin(id="daily-test", name="Daily", enabled_by_default=True,
+                                hooks={"daily": lambda: calls.append(1)}))
+    try:
+        db.init_db()
+        db.set_setting(plugin_host.DAILY_SETTING, None)
+        now = dt.datetime(2026, 11, 20, 9, tzinfo=dt.timezone.utc)
+        assert plugin_host.run_daily_if_due(now)["daily-test"] is True
+        assert plugin_host.run_daily_if_due(now + dt.timedelta(hours=23)) is None
+        assert plugin_host.run_daily_if_due(now + dt.timedelta(hours=25))["daily-test"] is True
+        assert len(calls) == 2
+    finally:
+        plugin_host.unregister("daily-test")

@@ -196,6 +196,26 @@ def run_hook(name: str, recording_id: str | None = None) -> dict[str, bool]:
     return results
 
 
+DAILY_SETTING = "plugins_daily_hook_at"
+
+
+def run_daily_if_due(now=None) -> dict[str, bool] | None:
+    """Run the daily Hook when it has not run in the last 24 hours (the
+    server checks hourly). Returns the Hook's results, or None when not due."""
+    import datetime as dt
+
+    import db
+    now = now or dt.datetime.now().astimezone()
+    last = db.get_setting(DAILY_SETTING)
+    try:
+        if last and now - dt.datetime.fromisoformat(last) < dt.timedelta(hours=24):
+            return None
+    except ValueError:
+        pass
+    db.set_setting(DAILY_SETTING, now.isoformat())
+    return run_hook("daily")
+
+
 def route_for(method: str, path: str) -> Handler | None:
     """Resolve /api/plugins/<id>/<subpath> to an enabled plugin's handler."""
     rest = path[len("/api/plugins/"):] if path.startswith("/api/plugins/") else ""
