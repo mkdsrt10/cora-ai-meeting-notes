@@ -59,6 +59,7 @@ def main() -> None:
     import threading
     threading.Thread(target=_backfill_identity, name="identity-backfill", daemon=True).start()
     threading.Thread(target=_scan_crash_reports, name="crash-reports", daemon=True).start()
+    threading.Thread(target=_daily_hooks, name="plugins-daily", daemon=True).start()
     import beta_sender
     # The port is bound; the daily people_snapshot (a walk of the Recordings
     # folder), the config fetch and the first flush all run on its thread.
@@ -85,6 +86,20 @@ def _scan_crash_reports() -> None:
             print(f"[crash_reports] {found} crash report(s) recorded", flush=True)
     except Exception as e:  # noqa: BLE001 - never stops the server
         print(f"[crash_reports] scan failed: {type(e).__name__}: {e}", flush=True)
+
+
+def _daily_hooks() -> None:
+    """Plugins' daily Hook (e.g. Notion's Task cache and status pull), once a
+    day, checked hourly. A failing plugin is isolated by the host."""
+    import time
+
+    import plugin_host
+    while True:
+        try:
+            plugin_host.run_daily_if_due()
+        except Exception as e:  # noqa: BLE001 - never stops the server
+            print(f"[plugins] daily hook failed: {type(e).__name__}", flush=True)
+        time.sleep(3600)
 
 
 def _backfill_identity() -> None:

@@ -7,6 +7,7 @@ $$('.settings-nav-item').forEach(tab => tab.addEventListener('click', () => {
   $$('.settings-panel').forEach(p => p.hidden = p.dataset.settingsContent !== tab.dataset.settingsPanel);
   if(tab.dataset.settingsPanel === 'recording') return loadMicrophonePicker('#settingsMicrophone');
   if(tab.dataset.settingsPanel === 'beta') return loadBetaSettings();
+  if(tab.dataset.settingsPanel === 'connections') return renderConnectionsSettings().catch(error => toast(error.message, true));
 }));
 
 // --- Beta (share toggle, name for the Cora team, what is shared, audio retention) ---
@@ -142,6 +143,12 @@ async function loadSettingsView(){
     if($('#settingsName')) $('#settingsName').value = status.self_name || '';
     if($('#settingsProfession')) $('#settingsProfession').value = status.profession || '';
   }catch(error){ toast(error.message, true); }
+  try{
+    const [work, contextOn] = await Promise.all(['work_context', 'notes_context_enabled'].map(key =>
+      api('/api/settings', { method: 'POST', body: JSON.stringify({ key }) })));
+    if($('#settingsWorkContext')) $('#settingsWorkContext').value = work.value || '';
+    if($('#settingsNotesContext')) $('#settingsNotesContext').checked = contextOn.value === true;
+  }catch{}
 
   try{
     const retain = await api('/api/settings', { method: 'POST', body: JSON.stringify({ key: 'retain_audio' }) });
@@ -249,8 +256,14 @@ $('#settingsProfileSave')?.addEventListener('click', async () => {
   try{
     if(name) await api('/api/onboarding/name', { method: 'POST', body: JSON.stringify({ name }) });
     await saveSetting('profession', profession);
+    if($('#settingsWorkContext')) await saveSetting('work_context', $('#settingsWorkContext').value);
     toast('Profile saved');
   }catch(error){ toast(error.message, true); }
+});
+
+$('#settingsNotesContext')?.addEventListener('change', async (e) => {
+  try{ await saveSetting('notes_context_enabled', e.target.checked); toast('Saved — used on the next notes run'); }
+  catch(error){ toast(error.message, true); }
 });
 
 $('#settingsRetainAudio')?.addEventListener('change', async (e) => {

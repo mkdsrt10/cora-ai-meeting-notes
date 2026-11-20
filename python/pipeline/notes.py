@@ -81,6 +81,15 @@ def generate_summary_variant(transcript_text: str, notes_text: str, slides_data:
     }
 
 
+# Each bullet ends with "(Owner: <name>, Due: <date>)" so core Action items
+# (action_items.parse_item) get an owner and due date like the Gemini path.
+ACTION_ITEMS_INSTRUCTION = (
+    "Extract ONLY the concrete action items/tasks from this meeting, as a Markdown bullet list. "
+    "End each bullet with \"(Owner: <name>, Due: <date>)\": the owner is the named speaker for first-person "
+    "commitments or the person asked to do it, \"unassigned\" if nobody was named; give a due date only if one "
+    "was actually mentioned, otherwise leave out \", Due: ...\".")
+
+
 def _extract(model: TextModel, instruction: str, transcript_chunk: str, max_tokens: int = 1200,
              grounded: bool = True, name: str = "llm_extract") -> str:
     """One narrow, single-purpose extraction call over one chunk."""
@@ -181,7 +190,7 @@ def _reconcile_decisions(decisions_md: str, reversals_md: str, overlap_threshold
     return "\n".join(kept) if kept else "- None noted."
 
 
-def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, Any]], aligned_segments: list[dict[str, Any]], model: TextModel, folder: Optional[Path] = None, *, template_instruction: str = "", user_notes: str = "") -> dict[str, Any]:
+def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, Any]], aligned_segments: list[dict[str, Any]], model: TextModel, folder: Optional[Path] = None, *, template_instruction: str = "", user_notes: str = "", context: Any = None) -> dict[str, Any]:
     """Six narrow, single-purpose Text model calls (see _extract) instead
     of one big structured-JSON ask — sized for a small local model. Long transcripts are chunked
     with overlap (_chunk_transcript) and each section's per-chunk results
@@ -220,6 +229,10 @@ def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, An
     t0 = time.time()
     tokens_before = model.stats["output_tokens"]
 
+    SECTION_KEYS = {
+        "Overview": "overview", "Action Items": "action_items", "Key Discussion & Decisions": "decisions",
+        "Timeline": "timeline", "Open Questions": "open_questions", "Key Entities": "entities", "Title": "title",
+    }
     SECTION_PROGRESS = {
         "Overview": ("Generating Executive Overview", 60),
         "Action Items": ("Extracting Action Items & Tasks", 68),
@@ -231,6 +244,8 @@ def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, An
 
     def run(instruction: str, max_tokens: int = 1600, grounded: bool = True, section: str = "", source_text: Optional[str] = None) -> str:
         instruction += "\nTemplate guidance: " + template_instruction
+        if context is not None:  # notes_context.Gathered: this section's tagged context
+            instruction = context.assemble(SECTION_KEYS.get(section, "*")).apply(instruction)
         results = []
         run_chunks = _chunk_transcript(source_text) if source_text is not None else chunks
         label, pct = SECTION_PROGRESS.get(section, (f"Generating {section}", 70))
@@ -263,7 +278,7 @@ def generate_enhanced_notes(transcript_text: str, slides_data: list[dict[str, An
     # transcript when mining finds too little to trust.
     commitment_text = _mine_commitment_turns(aligned_segments)
     action_items_md = run(
-        "Extract ONLY the concrete action items/tasks from this meeting, as a Markdown bullet list — include the named speaker as owner for first-person commitments, and a due date only if actually mentioned.",
+        ACTION_ITEMS_INSTRUCTION,
         section="Action Items",
         source_text=commitment_text or None,
     )

@@ -11,6 +11,9 @@ A Plugin declares, in one place (its package's ``PLUGIN``):
   - ``routes``: ``(method, subpath, handler)``, served under
     ``/api/plugins/<id>/<subpath>``. Handlers have the api.router signature.
   - ``hooks``: ``{"after_meeting": fn(recording_id), "daily": fn()}``.
+  - ``context_sources``: Context sources feeding notes generation
+    (notes_context.py); ``proposer`` and ``connection``: external writes as
+    Proposals the user confirms (outbox.py, connections.py).
 
 Bundled plugins are discovered under ``plugins/`` at the app root. Whether
 one is enabled is ``plugins.<id>.enabled`` in config.json, falling back to
@@ -53,6 +56,10 @@ class Plugin:
     routes: tuple[tuple[str, str, Handler], ...] = ()
     hooks: dict[str, Callable[..., Any]] = field(default_factory=dict)
     enabled_by_default: bool = False
+    # Plugins v2 (design §2): all optional, so older plugins work unchanged.
+    connection: str | None = None            # "notion" | "slack": which Connection it needs
+    proposer: Any = None                      # propose()/apply(): see outbox.py
+    context_sources: tuple[Any, ...] = ()     # ContextSource adapters: see notes_context.py
 
 
 _plugins: dict[str, Plugin] = {}
@@ -187,6 +194,26 @@ def run_hook(name: str, recording_id: str | None = None) -> dict[str, bool]:
             _log(p.id, f"hook {name}", exc)
             results[p.id] = False
     return results
+
+
+DAILY_SETTING = "plugins_daily_hook_at"
+
+
+def run_daily_if_due(now=None) -> dict[str, bool] | None:
+    """Run the daily Hook when it has not run in the last 24 hours (the
+    server checks hourly). Returns the Hook's results, or None when not due."""
+    import datetime as dt
+
+    import db
+    now = now or dt.datetime.now().astimezone()
+    last = db.get_setting(DAILY_SETTING)
+    try:
+        if last and now - dt.datetime.fromisoformat(last) < dt.timedelta(hours=24):
+            return None
+    except ValueError:
+        pass
+    db.set_setting(DAILY_SETTING, now.isoformat())
+    return run_hook("daily")
 
 
 def route_for(method: str, path: str) -> Handler | None:

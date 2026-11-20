@@ -301,6 +301,124 @@ local path, and grade precision in the next shootout. For transcription, the den
 the local tier needs either the larger Tara checkpoint with silence-aware chunking tuned for
 crosstalk, or a reference-scored WER before it is offered as the default to anyone.
 
+## Context for local notes: the plugin-harness checkpoint (November 2026)
+
+Spec `docs/specs/plugin-harness-local-proof.md`, design §13.4–§13.5. Question: does giving the
+local notes model context (People in the call, open Action items and decisions from earlier
+meetings with them, the user's Work context, smaller per-section budgets) close part of the gap
+to Gemini? Checkpoint rule: if arm B does not beat arm A on the gates, stop before building
+external writes.
+
+**Method.** [`tools/eval_notes_context.py`](../tools/eval_notes_context.py) reruns only the
+notes stage from saved transcripts of the four paired meetings above (M1–M4; the 59-minute one
+has no Gemini transcript). Arms: (A) Qwen3-4B on the local transcript, no context; (B) the same
+plus context from the harness (`python/notes_context.py`, local budgets); (C) Gemini 3.8-flash
+notes on the Gemini transcript, no context. A and B use the same template per meeting (chosen
+by A), and MLX decoding is greedy, so they differ only by context. All arms use the current
+notes code, which now asks for "(Owner: X, Due: Y)" on every Action item. A judge
+(Gemini 3.8-flash, which already processed these meetings in the 2026-11-06 rerun) writes one
+strict reference list per meeting from both transcripts, then labels each item of each arm
+supported / distorted / fabricated / duplicate, grades owners, and links follow-ups to earlier
+open items. The tool runs against a scratch copy of the database, never writes into Recording
+folders, keeps its notes, judge files and JSONL log under
+`<data dir>/research/notes-context-eval/`, and prints counts only.
+
+**What context there was.** Almost none. On all four meetings the transcripts (local and
+Gemini) name only the user; remote speakers are unnamed (finding 5 above: empty Accessibility
+speaker timelines), so no Person matched, no earlier meeting shared a Person or folder, and no
+Work context has been written yet. Arm B's context was one People block per section saying who
+the user is: 400 tokens in total across the four meetings and all sections.
+
+| | A local, no context | B local + context | C Gemini |
+|---|---|---|---|
+| Action items precision | 0/26 = 0% | 0/27 = 0% | 7/9 = 78% |
+| Action items recall | 0/8 = 0% | 0/8 = 0% | 7/8 = 88% |
+| Owner given | 17/26 = 65% | 27/27 = 100% | 8/9 = 89% |
+| Owner given and correct | 3/26 = 12% | 3/27 = 11% | 6/9 = 67% |
+| Decisions precision | 4/66 = 6% | 2/48 = 4% | 6/11 = 55% |
+| Decisions recall | 4/6 = 67% | 2/6 = 33% | 5/6 = 83% |
+| Open questions precision / recall | 0/45, 0/2 | 0/45, 0/2 | 2/4, 2/2 |
+| Fabricated items (all sections) | 1 | 11 | 0 |
+| Overview accuracy / usefulness (1–5) | 1.2 / 1.2 | 1.5 / 1.5 | 5.0 / 5.0 |
+| Notes stage, seconds (sum of 4) | 100 | 106 (+6%) | 95 |
+| Largest swap growth during one run | 48 MB | 1059 MB | 0 |
+
+Gates (B vs A): Action items precision ≥ 50% **fail** (0%); owners on ≥ 60% **fail** (given on
+100%, correct on 11%); decisions precision ≥ 60% **fail** (4%); recall not lower than A: Action
+items pass (both 0), decisions **fail** (33% vs 67%); latency ≤ +10% pass (+6%). Gap to cloud:
+Gemini is ahead on every quality row.
+
+**Go / no-go: NO-GO.** The harness does not move local notes on these meetings, so the track
+stops here, before the Outbox, Connections, Notion and Slack (T5–T10). (The owner later chose
+to build T5–T10 anyway; see the next section.)
+
+How to read it:
+
+1. **This tests the plumbing, not the idea.** The sources had nothing to give: no remote names,
+   no People, no shared earlier meetings, no Work context. The only extra fact, "this speaker is
+   the user", made the 4B model put the user down as owner of every item (100% given, 11%
+   correct) and invent more (11 fabricated vs 1). On these Recordings, context cannot help until
+   Participants are named.
+2. **The judge is stricter than the one in the earlier section.** Its references are shorter
+   (8 Action items and 6 decisions over four meetings, against 17 and 14) and it graded the
+   local baseline 0% where the earlier judge gave 23%; Gemini's precision moved less (78% vs
+   82%). Compare arms within this table, not with the earlier one. One judge run, no repeats;
+   the judge is the same family as arm C, so B vs C may lean toward C (B vs A does not).
+3. **The swap row is a whole-Mac reading** (`sysctl vm.swapusage` before and after each run),
+   not the process alone; the 1 GB growth in one B run needs the 16 GB check on a quiet Mac
+   before it means anything.
+4. **What would make a rerun worth it:** named Participants (fix the empty speaker timeline, or
+   Gemini diarization naming remote speakers), People with roles for the regulars, a written
+   "About my work", and meetings that recur with the same people. Until then the local tier's
+   problem is the transcript and the 4B model, as the earlier section concluded, and context for
+   notes stays off by default (setting `notes_context_enabled`).
+
+### After the checkpoint: the rest of the harness and the §13.5 gates (T5–T10)
+
+The owner decided to build T5–T10 anyway (Outbox, Connections, Accounts, Notion, Slack), with
+context for notes left off by default and its sources unchanged. The quality gates below
+therefore still read the T4 run; nothing was retuned.
+
+| Gate | Target | Result | Evidence |
+|---|---|---|---|
+| Harness | a test plugin adds a Context source and a Proposal kind with no core edits; a failing plugin never breaks notes | **pass** | `tests/test_outbox.py` (test plugin, raising proposer), `tests/test_notes_context.py` (slow/erroring source skipped) |
+| Local quality (B vs A) | AI precision ≥ 50%, owners ≥ 60%, decisions precision ≥ 60%, recall not lower | **fail** | T4 table above: 0%, 11% correct, 4%, decisions recall 33% vs 67% |
+| Gap to cloud (B vs C) | reported | reported | T4 table: Gemini ahead on every quality row |
+| Local cost: latency | notes stage ≤ +10% vs A | **pass** | +6% (T4) |
+| Local cost: swap | no swap on 16 GB in a 1 h meeting | **not shown** | only a whole-Mac reading (1059 MB growth in one B run); needs the quiet-Mac check |
+| Notion matcher (local) | link precision ≥ 0.8 on the fixture | **pass** | Qwen3-4B local: 10/11 = 0.91 (0.90 with Usage instructions); lexical only: 5/5 = 1.0 |
+| Notion: duplicates | 0 duplicate Tasks after reprocess | **pass** | `tests/test_notion_plugin.py` (3 reprocesses, 1 Task created) |
+| Slack | selected items → one message, posted once, as the user; reprocess posts nothing | **pass** | `tests/test_slack_plugin.py` (user token, one `chat.postMessage`, permalink Link, second confirm refused) |
+| Egress | no outbound traffic during local processing; only on a confirm click | **pass in test** | `tests/test_egress.py`: notes + Proposals with Notion and Slack connected, socket guard and the real Connection recorded: 0 calls; Confirm: exactly 1 |
+| Safety | lockdown refuses confirm; audit rows hold hashes, not content | **pass** | `tests/test_outbox.py` (403 `blocked_policy`, audit outcome `blocked`; audit rows hold sha256 of key and payload only; tokens only in the Keychain) |
+
+Notion matcher eval (`tools/eval_notion_matcher.py`, fixture
+`tests/fixtures/notion_matcher/fixture.json`: 20 fictional Tasks, 25 hand-labelled Action items,
+15 continuing a Task and 10 new work; counts only):
+
+| | links | correct | precision | recall | create, right Task under "link instead" | skipped (no Proposal) | creates for new work |
+|---|---|---|---|---|---|---|---|
+| Lexical only | 5 | 5 | 1.00 | 0.33 | 10 of 10 | 0 | 10 of 10 |
+| Qwen3-4B local | 11 | 10 | 0.91 | 0.67 | 1 of 1 | 10 (4 should link) | 3 of 10 |
+| Qwen3-4B + Usage instructions | 10 | 9 | 0.90 | 0.60 | 2 of 2 | 10 (4 should link) | 3 of 10 |
+
+Failures and next steps:
+
+1. **Local notes quality (fail).** Unchanged from the checkpoint: rerun the three-arm eval once
+   Participants are named, People have roles, "About my work" is written and meetings recur.
+   Context for notes stays off by default.
+2. **Swap on 16 GB (not shown).** Run one 1 h local meeting on a quiet 16 GB Mac and read the
+   process's own memory and swap, not `vm.swapusage` for the whole Mac.
+3. **The local matcher skips too much.** It links precisely, but "skip" on 10 of 25 items hides
+   6 of 10 real new Tasks and 4 linkable items: they get no Proposal at all. Next: drop "skip"
+   from the model's choices (or show skipped items as a low-key "create?" chip), then rerun the
+   fixture; lexical-only already proposes every item.
+4. **Egress is shown in a test, not on the wire.** Capture traffic (e.g. `nettop`) during one
+   real local processing run with Notion and Slack connected.
+5. **Live checks owed with real accounts:** paste a Notion and a Slack token, link and create one
+   Task, mark one done both ways, send one Slack message; check that Notion shows the
+   integration as author with the user as Assignee, and that Slack shows the user, not a bot.
+
 ## Known limitations
 
 - **Cold start:** loading weights from disk into unified memory takes roughly 18–25 seconds on

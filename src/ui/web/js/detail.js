@@ -493,6 +493,7 @@ function renderEnhancedNotes(record){
   const info = record?.call_summary?.processing;
   host.innerHTML = (info ? `<p class="muted">Template: ${esc(info.template)} (${esc(info.template_selection)}) · ${esc(info.mode)} · ${esc(info.provider)} · ${esc(info.model)} <button type="button" class="button secondary small" data-change-template>Change template / regenerate</button></p>` : '') + (renderMarkdownSubset(record?.enhanced_notes) || '<p class="muted">No notes generated yet.</p>');
   host.querySelector('[data-change-template]')?.addEventListener('click', () => openSummarizeModal());
+  renderActionItemsPanel(record);
 }
 
 // versions/ stamps are time.strftime("%Y%m%dT%H%M%S") from the Python side.

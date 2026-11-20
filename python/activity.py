@@ -44,6 +44,11 @@ ACTIONS: dict[str, str] = {
     "reprocess": DOING,
     "retry": DOING,
     "change_setting": DOING,      # the setting_changed event
+    "confirm_proposal": DOING,    # Outbox: the user's Confirm (one external write)
+    "dismiss_proposal": DOING,
+    "connect_service": DOING,     # Settings › Connections
+    "confirm_account": DOING,     # Person page Accounts
+    "send_to_slack": DOING,       # opens the Slack composer with selected Action items
     # browsing
     "open_recording": BROWSING,
     "switch_view": BROWSING,

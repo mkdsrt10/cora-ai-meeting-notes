@@ -55,3 +55,40 @@ def fake_transcriber(monkeypatch):
         return transcriber.FakeTranscriber(recorder.segments, engine=profile.get("transcription") or "local")
     monkeypatch.setattr(transcriber, "_make", make)
     return recorder
+
+
+@pytest.fixture
+def keychain(monkeypatch):
+    """A dict instead of the login Keychain, so tests never store a token."""
+    import connections
+    store = {}
+
+    class Fake:
+        def set(self, account, secret):
+            store[account] = secret
+            return True
+
+        def get(self, account):
+            return store.get(account)
+
+        def delete(self, account):
+            return store.pop(account, None) is not None
+    monkeypatch.setattr(connections, "keychain", Fake())
+    return store
+
+
+@pytest.fixture
+def fake_conn(keychain):
+    """fake_conn("notion") installs a FakeConnection for that service."""
+    import connections
+    from fake_connection import FakeConnection
+    installed = []
+
+    def make(service="notion"):
+        fake = FakeConnection(service)
+        connections.use(service, fake)
+        installed.append(service)
+        return fake
+    yield make
+    for service in installed:
+        connections.use(service, None)

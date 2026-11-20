@@ -508,6 +508,13 @@ def _re_summarize(req, path: str, body: dict, options: dict) -> None:
         db.update_recording_data(folder.name, "diarization", diar_data)
 
     db.update_recording_data(folder.name, "call_summary", call_summary_payload)
+    import action_items
+    import outbox
+    action_items.sync(folder.name)
+    try:
+        outbox.refresh(folder.name)
+    except Exception as exc:  # noqa: BLE001 - Proposals never fail a re-summarize
+        print(f"[Re-summarize] Proposals failed ({type(exc).__name__})", flush=True)
 
     return req.send_json({
         "ok": True,
