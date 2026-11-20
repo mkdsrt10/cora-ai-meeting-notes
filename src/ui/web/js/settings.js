@@ -7,6 +7,7 @@ $$('.settings-nav-item').forEach(tab => tab.addEventListener('click', () => {
   $$('.settings-panel').forEach(p => p.hidden = p.dataset.settingsContent !== tab.dataset.settingsPanel);
   if(tab.dataset.settingsPanel === 'recording') return loadMicrophonePicker('#settingsMicrophone');
   if(tab.dataset.settingsPanel === 'beta') return loadBetaSettings();
+  if(tab.dataset.settingsPanel === 'connections') return renderConnectionsSettings().catch(error => toast(error.message, true));
 }));
 
 // --- Beta (share toggle, name for the Cora team, what is shared, audio retention) ---

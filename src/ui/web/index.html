@@ -411,6 +411,7 @@
             <button type="button" class="notes-toggle-btn" data-notes-view="raw">Raw Notes</button>
           </div>
           <div id="notepadEnhancedNotes" class="notepad-readonly" style="display:none"></div>
+          <div id="recordingActionItems" class="recording-action-items" hidden></div>
           <textarea id="notepadNotes" placeholder="Type notes during or after the meeting — saved automatically, and used to sharpen Cora's memory of names and terms."></textarea>
           <div class="notepad-status" id="notepadSaveStatus"></div>
         </div>
@@ -482,6 +483,7 @@
           <button class="settings-nav-item" data-settings-panel="meeting-types">Meeting types</button>
           <button class="settings-nav-item" data-settings-panel="models">Processing &amp; models</button>
           <button class="settings-nav-item" data-settings-panel="cloud-models">Where models run</button>
+          <button class="settings-nav-item" data-settings-panel="connections">Connections</button>
           <button class="settings-nav-item" data-settings-panel="mcp">Claude / ChatGPT (MCP)</button>
           <button class="settings-nav-item" data-settings-panel="privacy">Data &amp; privacy</button>
           <button class="settings-nav-item" data-settings-panel="beta">Beta</button>
@@ -592,6 +594,12 @@
           </div>
 
           <!-- MCP Integration Panel -->
+          <div class="settings-panel" data-settings-content="connections" hidden>
+            <h1 class="settings-title">Connections</h1>
+            <p class="settings-sub">Your own Notion and Slack. Cora suggests; nothing is written until you click Confirm, and every write acts as you. Tokens stay in this Mac's Keychain.</p>
+            <div id="settingsConnections"></div>
+          </div>
+
           <div class="settings-panel" data-settings-content="mcp" hidden>
             <h1 class="settings-title">Claude Desktop &amp; ChatGPT (MCP)</h1>
             <p class="settings-sub">Cora includes a built-in Model Context Protocol (MCP) server. Point Claude Desktop, Cursor, Windsurf, or ChatGPT to query your transcripts, search decisions, and draft follow-ups with frontier models.</p>
@@ -798,6 +806,7 @@
   </div>
 </div>
 
+<aside id="confirmPanel" class="confirm-panel" hidden aria-label="Confirm"></aside>
 <div class="toast" id="toast"></div>
 <script src="/pixel-icons.js?v=cora-v4"></script>
 <!-- App scripts: classic scripts sharing one global scope; order matters (see scripts/lint-ui.js). -->
@@ -826,6 +835,7 @@
 <script src="/js/title-editor.js"></script>
 <script src="/js/search.js"></script>
 <script src="/js/plugin-host.js"></script>
+<script src="/js/outbox.js"></script>
 <!-- Enabled plugins' page scripts (src/ui/web/plugins/<id>.js) are loaded by plugin-host.js here, before init runs load(). -->
 <script src="/js/update-banner.js"></script>
 <script src="/js/detect-hint.js"></script>

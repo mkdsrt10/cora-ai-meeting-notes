@@ -10,6 +10,7 @@
   setupTitleEditor();
   setupTranscriptSearch();
   await plugins;
+  refreshSuggestedCount();
   load().catch(error=>toast(error.message,true));
   loadFolders();
   loadLocalStats();
