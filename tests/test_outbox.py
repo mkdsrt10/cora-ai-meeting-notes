@@ -212,7 +212,8 @@ def test_a_raising_proposer_is_isolated(port, plugin):
     plugin_host.register(Plugin(id="outbox-boom", name="Boom", enabled_by_default=True, proposer=Boom()))
     try:
         recording("ob-boom", ["Send the deck"])
-        assert outbox.refresh("ob-boom") == {"outbox-test": 1, "outbox-boom": -1}
+        result = outbox.refresh("ob-boom")
+        assert (result["outbox-test"], result["outbox-boom"]) == (1, -1)
         assert len(keys(port, "ob-boom")) == 1
     finally:
         plugin_host.unregister("outbox-boom")

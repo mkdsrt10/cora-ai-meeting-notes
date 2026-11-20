@@ -368,8 +368,9 @@ def audit_rows() -> list[dict[str, Any]]:
 
 
 def _edited(row: dict[str, Any], edits: dict[str, Any]) -> dict[str, Any]:
+    """The values to apply: each editable field as shown, replaced by the user's edits."""
     editable = {f["name"]: f for f in row["fields"] if f.get("editable")}
-    clean: dict[str, Any] = {}
+    clean: dict[str, Any] = {name: f.get("value") for name, f in editable.items()}
     for name, value in (edits or {}).items():
         if name not in editable:
             raise OutboxError(f"field_not_editable:{name}", 400)
