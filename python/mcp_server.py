@@ -641,8 +641,11 @@ def cora_get_action_items(status: str = "pending", limit: int = 40) -> list[dict
         status: Filter by status: 'pending', 'done', or 'all'.
         limit: Maximum items to return (default 40).
     """
+    # Action items are core records (ADR 0004): read them, not the old
+    # To-dos done marks, so done/edits/user-added items match the app.
+    import action_items as core_items
+    core_items.backfill()
     recs = db.get_all_recordings()
-    todo_states = {f"{ts['recording_id']}_{ts['item_index']}": ts for ts in db.get_todo_states()}
     items = []
 
     for r in recs:
@@ -651,31 +654,32 @@ def cora_get_action_items(status: str = "pending", limit: int = 40) -> list[dict
         identity = r.get("identity") or {}
         labels = r.get("speaker_labels") or {}
 
-        for idx, act in enumerate(actions):
-            ts_key = f"{r['id']}_{idx}"
-            is_done = todo_states.get(ts_key, {}).get("done", False)
-
+        for row in core_items.for_recording(r["id"]):
+            is_done = row["done"]
             if status == "pending" and is_done:
                 continue
             if status == "done" and not is_done:
                 continue
 
+            pos = row["position"]
+            act: Any = actions[pos] if row["provenance"] == "ai" and pos is not None and 0 <= pos < len(actions) else {}
             if isinstance(act, str):
                 # Local pipeline (call_summary v2) stores flat bullets like
                 # "Ship the fix (Owner: Priya, Due: Friday)".
                 act = _parse_action_bullet(act)
             owner_id = act.get("owner_speaker_id", "")
-            owner_name = (_resolve_speaker_name(owner_id, labels, identity) if owner_id
-                          else act.get("owner") or "Unassigned")
+            owner_name = (row["owner"] or (_resolve_speaker_name(owner_id, labels, identity) if owner_id
+                                           else act.get("owner")) or "Unassigned")
 
             items.append({
+                "id": row["id"],
                 "recording_id": r["id"],
                 "meeting_title": r.get("title"),
                 "recorded_at": r.get("recorded_at"),
-                "item_index": idx,
-                "action": act.get("action"),
+                "item_index": pos,
+                "action": row["text"],
                 "owner": owner_name,
-                "due_date": act.get("due_date"),
+                "due_date": row["due"] or act.get("due_date"),
                 "timestamp": act.get("timestamp"),
                 "is_done": is_done,
             })

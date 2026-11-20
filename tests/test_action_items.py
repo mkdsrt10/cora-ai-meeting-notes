@@ -176,3 +176,22 @@ def test_parse_bullet_reads_owner_and_due():
     assert action_items.parse_item("Ship the fix (owner: unassigned)") == {"text": "Ship the fix", "owner": None, "due": None}
     assert action_items.parse_item({"action": "Ship", "owner_speaker_id": "SPEAKER_2", "due_date": "Mon"}) == \
         {"text": "Ship", "owner": "SPEAKER_2", "due": "Mon"}
+
+
+def test_mcp_action_items_read_core_records(port):
+    import mcp_server
+    process("mcp-core", ["Send the deck (Owner: Priya, Due: Friday)", "Book the room"])
+    items = by_text(listed(port, "mcp-core"))
+    assert call(port, "POST", f"/api/action-items/{items['Book the room']['id']}", {"done": True})[0] == 200
+    status, added = call(port, "POST", "/api/action-items", {"recording_id": "mcp-core", "text": "Call the vendor"})
+    assert status in (200, 201)
+
+    def mine(status):
+        return {i["action"]: i for i in mcp_server.cora_get_action_items(status=status, limit=500)
+                if i["recording_id"] == "mcp-core"}
+
+    pending, done = mine("pending"), mine("done")
+    assert set(pending) == {"Send the deck", "Call the vendor"}
+    assert set(done) == {"Book the room"} and done["Book the room"]["id"] == items["Book the room"]["id"]
+    assert (pending["Send the deck"]["owner"], pending["Send the deck"]["due_date"]) == ("Priya", "Friday")
+    assert pending["Call the vendor"]["owner"] == "Unassigned"
