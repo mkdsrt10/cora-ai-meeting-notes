@@ -219,9 +219,12 @@ class NotionProposer:
     def _apply_done(self, p: dict, conn) -> Applied:
         mapping = tasks.settings()["mapping"]
         prop, done_value = mapping.get("status"), mapping.get("done_value")
-        if not prop or not done_value:
+        if not prop:
             raise ValueError("status mapping missing")
-        kind = p.get("status_type") or "status"
+        page = conn.request("GET", f"/pages/{p['task_id']}")
+        kind = ((page.get("properties") or {}).get(prop) or {}).get("type") or "status"
+        if kind != "checkbox" and not done_value:
+            raise ValueError("done value missing")
         value = {"checkbox": True} if kind == "checkbox" else {kind: {"name": done_value}}
         conn.request("PATCH", f"/pages/{p['task_id']}", json={"properties": {prop: value}})
         tasks.set_done(p["task_id"], True)
@@ -229,7 +232,32 @@ class NotionProposer:
 
     # ---- done in Cora -> "Mark done in Notion" (T8) ------------------------------
     def on_action_item(self, event: str, item: dict, ctx) -> list[Proposal]:
-        return []
+        """Ticking a Linked To-do done raises one task.update per Linked Task
+        that is still open in Notion; unticking withdraws it if not yet confirmed."""
+        if event != "done" or not tasks.configured():
+            return []
+        mapping = tasks.settings()["mapping"]
+        if not mapping.get("status"):
+            return []
+        linked = {lk["external_id"] for lk in outbox.links(action_item_id=item["id"], service="notion")
+                  if lk["kind"] == "task"}
+        result = []
+        for task_id in sorted(linked):
+            key = f"notion:done:{item['id']}:{task_id}"
+            if not item["done"]:
+                outbox.withdraw(key)
+                continue
+            task = tasks.task(task_id) or {"id": task_id, "title": "", "done": False}
+            if task["done"]:
+                continue   # already done in Notion (e.g. the status pull ticked this To-do)
+            title = task.get("title") or "the Linked Task"
+            result.append(Proposal(
+                key=key, kind="task.update", title=f"Mark done in Notion: '{title}'",
+                payload={"task_id": task_id, "url": task.get("url"), "recording_id": item["recording_id"]},
+                action_item_ids=(item["id"],), target={"id": task_id, "title": title, "url": task.get("url")},
+                sends=f"Sets the status of '{title}' to '{mapping.get('done_value') or 'done'}' in Notion. "
+                      "Nothing else changes."))
+        return result
 
 
 def _meeting_page(recording_id: str | None) -> str | None:

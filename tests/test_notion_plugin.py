@@ -274,3 +274,67 @@ def test_link_never_edits_title_or_body(port, notion, fake_text):
     assert not [r for r in notion.requests if r["method"] == "PATCH"]
     assert [r["path"] for r in notion.requests if r["method"] == "POST" and "/query" not in r["path"]] == ["/comments"]
     assert action_items.for_recording("n-noedit")[0]["id"] in p["action_item_ids"]
+
+
+# ---- T8: done both ways -------------------------------------------------------
+
+def linked_item(port, notion, fake_text, rec_id, text, task_id):
+    fake_text.reply = model(lambda t: {"decision": "link", "task_id": task_id, "confidence": 0.95})
+    recording(rec_id, [text])
+    p = process(rec_id)[0]
+    assert call(port, "POST", "/api/outbox/confirm", {"key": p["key"]})[0] == 200
+    return p["action_item_ids"][0]
+
+
+def done_proposals(port, rec_id):
+    return [p for p in proposals(port, rec_id) if p["kind"] == "task.update"]
+
+
+def test_done_in_notion_marks_the_linked_todo_done_once(port, notion, fake_text):
+    from plugins.notion import PLUGIN
+    item = linked_item(port, notion, fake_text, "n-pull", "Plan the Q1 offsite agenda draft", "t-offsite")
+    notion.state["tasks"] = [t if t["id"] != "t-offsite" else page("t-offsite", "Plan the Q1 offsite agenda",
+                                                                     status="Done") for t in TASKS]
+    PLUGIN.hooks["daily"]()
+    assert action_items.get(item)["done"] is True
+    assert done_proposals(port, "n-pull") == []          # already done there: nothing to suggest back
+    call(port, "POST", f"/api/action-items/{item}", {"done": False})   # the user unticks it
+    PLUGIN.hooks["daily"]()
+    assert action_items.get(item)["done"] is False       # not re-ticked
+
+
+def test_done_in_cora_raises_exactly_one_mark_done_proposal(port, notion, fake_text):
+    item = linked_item(port, notion, fake_text, "n-push", "Hire a backend engineer soon", "t-hiring")
+    notion.on("GET", "/pages/t-hiring", {"id": "t-hiring", "properties": {"Status": {"type": "status"}}})
+    for done in (True, True):
+        call(port, "POST", "/api/plugins/todo/done", {"id": item, "done": done})
+    process("n-push")                                     # reprocessing keeps it, no duplicate
+    ups = done_proposals(port, "n-push")
+    assert len(ups) == 1 and ups[0]["title"] == "Mark done in Notion: 'Hire a backend engineer'"
+    assert not [r for r in notion.requests if r["method"] == "PATCH"]   # nothing until Confirm
+
+    call(port, "POST", "/api/outbox/confirm", {"key": ups[0]["key"]})
+    patches = [r for r in notion.requests if r["method"] == "PATCH"]
+    assert patches == [{"method": "PATCH", "path": "/pages/t-hiring", "query": None,
+                        "json": {"properties": {"Status": {"status": {"name": "Done"}}}}}]
+    call(port, "POST", "/api/action-items/" + item, {"done": False})
+    call(port, "POST", "/api/action-items/" + item, {"done": True})
+    assert done_proposals(port, "n-push") == []           # confirmed key never comes back
+
+
+def test_unticking_before_confirm_withdraws_and_reticking_restores_one(port, notion, fake_text):
+    item = linked_item(port, notion, fake_text, "n-flip", "Launch referral program pilot", "t-onboard")
+    call(port, "POST", f"/api/action-items/{item}", {"done": True})
+    call(port, "POST", f"/api/action-items/{item}", {"done": False})
+    assert done_proposals(port, "n-flip") == []
+    call(port, "POST", f"/api/action-items/{item}", {"done": True})
+    assert len(done_proposals(port, "n-flip")) == 1
+
+
+def test_an_unlinked_todo_done_raises_nothing(port, notion, fake_text):
+    fake_text.reply = model(lambda t: {"decision": "create", "confidence": 0.9})
+    recording("n-unlinked", ["Buy a new kettle"])
+    process("n-unlinked")
+    item = action_items.for_recording("n-unlinked")[0]["id"]
+    call(port, "POST", f"/api/action-items/{item}", {"done": True})
+    assert done_proposals(port, "n-unlinked") == []

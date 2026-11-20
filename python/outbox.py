@@ -284,10 +284,10 @@ def _store(plugin_id: str, recording_id: str | None, proposals: list[Proposal], 
         for p in proposals:
             _upsert(conn, plugin_id, recording_id, p, now)
             seen.add(p.key)
-        if retire_missing:
+        if retire_missing:   # only automatic kinds; user-started ones (send, mark done) stay
             stale = [r["key"] for r in conn.execute(
                 "SELECT key FROM outbox WHERE plugin_id = ? AND recording_id IS ? AND state = 'pending' "
-                "AND kind != 'message.post'", (plugin_id, recording_id)) if r["key"] not in seen]
+                "AND kind NOT IN ('message.post', 'task.update')", (plugin_id, recording_id)) if r["key"] not in seen]
             conn.executemany("UPDATE outbox SET state = 'retired', retired_reason = 'invalid', updated_at = ? "
                              "WHERE key = ?", [(now, k) for k in stale])
         conn.commit()
@@ -313,6 +313,17 @@ def on_action_item_change(event: str, item_id: str) -> None:
 
 
 action_items.on_change(on_action_item_change)
+
+
+def withdraw(key: str) -> bool:
+    """A plugin withdraws its own pending Proposal (e.g. the To-do was unticked
+    before 'Mark done in Notion' was confirmed). Kept as retired, not deleted."""
+    with db.get_db() as conn:
+        _ensure(conn)
+        cur = conn.execute("UPDATE outbox SET state = 'retired', retired_reason = 'invalid', updated_at = ? "
+                           "WHERE key = ? AND state IN ('pending', 'failed')", (_now().isoformat(), key))
+        conn.commit()
+    return cur.rowcount > 0
 
 
 def expire() -> int:
