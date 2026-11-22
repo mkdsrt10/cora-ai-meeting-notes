@@ -58,7 +58,7 @@ test('document page: breadcrumb, editable title, When/People/Folder rows and plu
   assert.match(text(p.$('#crumb')), /Home.*Weekly product sync/);
   assert.equal(p.$('#meetingTitle').getAttribute('contenteditable'), 'true');
   const props = p.$$('#props .k').map(text);
-  assert.deepEqual(props, ['When', 'People', 'Folder', 'Key phrases', 'T Tracker']);
+  assert.deepEqual(props, ['When', 'People', 'Folder', 'T Tracker']);
   assert.equal(p.$('#props a').getAttribute('href'), 'https://example.invalid/log');
   p.$('#meetingTitle').textContent = 'Pricing sync';
   p.$('#meetingTitle').dispatchEvent(new (require('./v2-dom').Event)('focusout'));
@@ -66,9 +66,9 @@ test('document page: breadcrumb, editable title, When/People/Folder rows and plu
   assert.ok(p.posts().some((c) => c.url === '/api/recording/title' && c.body.title === 'Pricing sync'));
 });
 
-test('tabs: Notes / Transcript / Notepad and the rest, plus a plugin tab only when contributed', async () => {
+test('tabs: Notes / Transcript and the rest (no Notepad tab), plus a plugin tab only when contributed', async () => {
   let p = await meeting();
-  assert.deepEqual(p.$$('#tabs [data-tab]').map(text), ['Notes', 'Transcript', 'Notepad', 'Participants', 'Timeline', 'Processing', 'Insights']);
+  assert.deepEqual(p.$$('#tabs [data-tab]').map(text), ['Notes', 'Transcript', 'Participants', 'Timeline', 'Processing', 'Insights']);
   await p.click('[data-tab="plugin:0"]');
   assert.deepEqual(p.$('#tabBody .kv').children.map(text), ['Talk time', '40%']);
   p = await meeting({ rows: [] });
@@ -181,9 +181,9 @@ test('Transcript: the full transcript when ready; live captions and Draft labels
   assert.match(text(p.$('[data-tab="transcript"]')), /Draft transcript/);
 });
 
-test('Notepad saves what you type; Participants link to People', async () => {
+test('your notes sit inside Notes and save what you type; Participants link to People', async () => {
   const p = await meeting();
-  await p.click('[data-tab="notepad"]');
+  assert.ok(p.$('#tabBody .mynotes'), 'your notes are on the Notes tab');
   assert.equal(p.$('#notepadText').value, 'my own line');
   await p.input('#notepadText', 'my own line, edited');
   await p.runTimers();
@@ -203,6 +203,10 @@ test('notices, key phrases and earlier versions, as in the classic look', async 
   assert.deepEqual(p.posts().find((c) => c.url === '/api/recording/confirm-speaker').body, { id: 'r1', speaker_id: 'S2' });
   await p.click('[data-dismiss-cloud]');
   assert.ok(p.posts().some((c) => c.url === '/api/recording/cloud-offer/dismiss'));
+  assert.ok(!p.$('#addPhrase'), 'key phrases are not in the header');
+  await p.click('[data-open-menu]');
+  await p.click('[data-meeting-cmd="key-phrases"]');
+  assert.match(text(p.$('#keyPhrases')), /Team tier/);
   await p.input('#addPhrase', 'Pricing v2');
   await p.key('Enter', {}, p.$('#addPhrase'));
   assert.deepEqual(p.posts().find((c) => c.url === '/api/recording/key-phrase').body, { id: 'r1', action: 'add', term: 'Pricing v2' });
@@ -248,4 +252,13 @@ test('never shows another meeting’s Action items: on switch, while loading, wh
   assert.equal(p.run('mt.id'), 'r2');
   assert.equal(p.run('mt.items.length'), 0, 'r1’s late items never land on r2');
   assert.equal(p.$('[data-item="a1"]'), null);
+});
+
+test('with no notes of your own, one quiet button opens the box; a live meeting shows it straight away', async () => {
+  let p = await meeting({ record: { ...REC, notes: '' } });
+  assert.ok(!p.$('#notepadText'));
+  await p.click('[data-write-notes]');
+  assert.ok(p.$('#notepadText'));
+  p = await meeting({ record: { ...REC, notes: '', analysis_stage: 'recording', enhanced_notes: '' } });
+  assert.ok(p.$('#notepadText') && !p.$('[data-write-notes]'));
 });

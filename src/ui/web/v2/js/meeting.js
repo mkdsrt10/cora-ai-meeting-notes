@@ -1,21 +1,21 @@
 // The meeting page in the v2 shell: a document with a breadcrumb, an
 // editable title, When / People / Folder rows and plugin property rows;
-// Notes / Transcript / Notepad tabs plus Participants, Timeline, Processing
+// Notes (with your own notes in it) / Transcript tabs plus Participants, Timeline, Processing
 // and plugin tabs; the Action-item checklist inside the Notes with one chip
 // each, a selection bar and the suggestion row at the end; a ⋯ menu for
-// rename, export, reprocess, add to meeting, open folder and plugin actions.
+// rename, export, reprocess, key phrases, add to meeting, open folder and plugin actions.
 // Reuses the classic transcript (js/transcript.js) and processing history
 // (js/processing-history.js) renderers through the shims below.
 // Classic script sharing global scope with the other v2 files.
 
-const mt = { id: null, record: null, rows: [], items: [], proposals: [], selected: new Set(), tab: 'notes', notesBaseline: '' };
+const mt = { id: null, record: null, rows: [], items: [], proposals: [], selected: new Set(), tab: 'notes', notesBaseline: '', writing: false };
 
 // ---- shims the reused classic renderers call ----
 const PENDING_STAGES = PENDING;
 function selectedRecording(){ return mt.record; }
 async function loadSelectedRecording(id){ if(id === mt.id) await reloadMeeting(); }
 
-const TABS = [['notes', 'Notes'], ['transcript', 'Transcript'], ['notepad', 'Notepad'], ['participants', 'Participants'], ['timeline', 'Timeline'], ['processing', 'Processing']];
+const TABS = [['notes', 'Notes'], ['transcript', 'Transcript'], ['participants', 'Participants'], ['timeline', 'Timeline'], ['processing', 'Processing']];
 
 // ---- Notes: a small Markdown subset, with the Action items section replaced by the checklist ----
 function inlineMd(text){ return esc(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>'); }
@@ -98,10 +98,27 @@ function notices(r){
   return out.join('');
 }
 
-function keyPhrases(r){
-  if(PENDING.has(r.analysis_stage) && r.analysis_stage !== 'recording') return '';
-  return `<span class="k">Key phrases</span><span class="v" id="keyPhrases">${(r.key_phrases || []).map(p => `<span class="tag">${esc(p.term)}<button type="button" class="ib" style="width:16px;height:16px" data-remove-phrase="${esc(p.term)}" aria-label="Remove ${esc(p.term)}">×</button></span>`).join('')}
-    <input class="inp" style="width:120px;padding:2px 6px" id="addPhrase" placeholder="+ add" aria-label="Add a key phrase" title="Terms Cora biases transcription toward"></span>`;
+// Key phrases: terms the transcriber is biased toward. They only matter when a
+// meeting is transcribed (again), so they live behind ⋯ › Improve transcript
+// spelling, not in the header.
+function keyPhrasesBody(r){
+  const tags = (r.key_phrases || []).map(p => `<span class="tag">${esc(p.term)}<button type="button" class="ib" style="width:16px;height:16px" data-remove-phrase="${esc(p.term)}" aria-label="Remove ${esc(p.term)}">×</button></span>`).join('');
+  return `<p class="muted">Names, product terms and jargon Cora should spell right when this meeting is transcribed. They apply the next time it is processed or re-summarized; for every meeting, use Memory.</p>
+    <div class="tags" id="keyPhrases">${tags || '<span class="muted">None yet.</span>'}</div>
+    <input class="inp" id="addPhrase" placeholder="Add a term and press Enter" aria-label="Add a key phrase">`;
+}
+function openKeyPhrases(){
+  const panel = $('#confirmPanel');
+  confirmState.queue = [];
+  panel.dataset.key = 'key-phrases';
+  panel.innerHTML = `<div class="ph"><span>Transcript spelling</span><span class="grow"></span><button type="button" class="ib" data-close-panel aria-label="Close">×</button></div>
+    <div class="pb"><h3 id="confirmTitle">Improve transcript spelling</h3><div id="keyPhrasesBody">${keyPhrasesBody(mt.record)}</div></div>`;
+  if(panel.hidden){ panel.hidden = false; pushOverlay(closeConfirmPanel); }
+  $('#addPhrase')?.focus();
+}
+function redrawKeyPhrases(){
+  const body = $('#keyPhrasesBody');
+  if(body && $('#confirmPanel')?.dataset.key === 'key-phrases'){ body.innerHTML = keyPhrasesBody(mt.record); $('#addPhrase')?.focus(); }
 }
 
 function versionRow(r){
@@ -131,11 +148,20 @@ function notesTab(r){
   }else if(r.draft_notes?.markdown){
     notes = `<p><span class="status draft">${esc(r.draft_notes.label || 'Draft')}</span> <span class="muted">From the live captions. The full notes replace these when processing finishes.</span></p>${mdToHtml(r.draft_notes.markdown)}<h3>Action items</h3>${checklist()}`;
   }else{
-    notes = `${PENDING.has(r.analysis_stage) ? '<p class="muted">Notes appear here after the meeting is processed. Type in the Notepad meanwhile.</p>' : '<p class="muted">No notes for this meeting.</p>'}${mt.items.length ? `<h3>Action items</h3>${checklist()}` : ''}`;
+    notes = `${PENDING.has(r.analysis_stage) ? '<p class="muted">Cora’s notes appear here after the meeting is processed.</p>' : '<p class="muted">No notes for this meeting.</p>'}${mt.items.length ? `<h3>Action items</h3>${checklist()}` : ''}`;
   }
   if(mt.version && mt.versionNotes !== undefined) return `<p class="muted">An earlier version, from before a reprocess. Read only.</p><div class="notes md" id="notesBody">${mdToHtml(mt.versionNotes)}</div>`;
   return `${processingBanner(r)}${notices(r)}${r.audio_url ? `<audio class="audio" controls preload="none" src="${esc(r.audio_url)}" aria-label="Meeting audio"></audio>` : ''}
-    <div class="notes md" id="notesBody">${notes}</div>${blocks}${footerRow()}${feedbackWidget(r)}`;
+    ${myNotes(r)}<div class="notes md" id="notesBody">${notes}</div>${blocks}${footerRow()}${feedbackWidget(r)}`;
+}
+
+// Your own notes, inside the Notes tab: open to type in while the meeting is
+// live or once you have written something; otherwise one quiet button.
+function myNotes(r){
+  const own = r.notes || '';
+  if(!own && !mt.writing && !PENDING.has(r.analysis_stage)) return '<button type="button" class="btn q sm mynotes-add" data-write-notes>+ Add your own notes</button>';
+  return `<section class="mynotes" aria-label="Your notes"><div class="mynotes-h"><span>Your notes</span><span class="muted" id="notepadStatus" aria-live="polite"></span></div>
+    <label class="sr-only" for="notepadText">Your notes</label><textarea id="notepadText" rows="${Math.min(14, Math.max(3, own.split('\n').length + 1))}" placeholder="Type here during the call or after. Cora never overwrites these.">${esc(own)}</textarea></section>`;
 }
 
 function transcriptTab(){
@@ -145,10 +171,6 @@ function transcriptTab(){
     <div class="transcript" id="notepadTranscript"></div>`;
 }
 
-function notepadTab(r){
-  return `<div class="notepad"><label class="sr-only" for="notepadText">Notepad</label><textarea id="notepadText" placeholder="Type your own notes, during the call or after. Cora never overwrites them.">${esc(r.notes || '')}</textarea>
-    <p class="muted" id="notepadStatus" aria-live="polite"></p></div>`;
-}
 
 function participantsTab(r){
   const list = r.participants || [];
@@ -180,7 +202,7 @@ function drawTab(){
   const r = mt.record;
   const plugin = surfacesOf(mt.rows, 'recording.tab').find((c, i) => mt.tab === `plugin:${i}`);
   if(plugin){ host.innerHTML = drawPanel(plugin, { heading: false }); return; }
-  host.innerHTML = { notes: notesTab, transcript: transcriptTab, notepad: notepadTab, participants: participantsTab, timeline: timelineTab, processing: processingTab }[mt.tab]?.(r) || '';
+  host.innerHTML = { notes: notesTab, transcript: transcriptTab, participants: participantsTab, timeline: timelineTab, processing: processingTab }[mt.tab]?.(r) || '';
   if(mt.tab === 'transcript') renderCleanTranscript(r);
   if(mt.tab === 'processing') loadProcessingHistory();
   drawSelectionBar();
@@ -200,7 +222,7 @@ function propertyRows(r){
     <span class="k">When</span><span class="v">${esc(fmtDate(r.recorded_at))}${r.duration_seconds ? ` · ${esc(fmtDuration(r.duration_seconds))}` : ''}</span>
     <span class="k">People</span><span class="v">${people.length ? people.map(n => `<span class="tag">${avatar(n)} ${esc(n)}</span>`).join('') : '<span class="muted">No one identified yet</span> <button type="button" class="btn q sm" data-tab-go="participants">Participants</button>'}</span>
     <span class="k">Folder</span><span class="v"><select class="inp" style="width:auto" id="meetingFolder" aria-label="Folder">${folderOptions}</select></span>
-    ${keyPhrases(r)}${versionRow(r)}
+    ${versionRow(r)}
     ${r.analysis_stage !== 'ready' ? `<span class="k">Status</span><span class="v"><span class="status ${esc(r.analysis_stage)}">${esc(stageLabel(r.analysis_stage))}</span></span>` : ''}
     ${extra}</div>`;
 }
@@ -254,11 +276,12 @@ async function renderMeeting(host, params = {}){
   // Never show another meeting's data: reset as soon as the meeting changes,
   // and drop a load that finishes after you moved to another meeting.
   if(mt.id !== id){
-    Object.assign(mt, { record: null, rows: [], items: [], proposals: [], selected: new Set(), version: '', versionNotes: undefined });
-    mt.tab = params.focus === 'notepad' ? 'notepad' : 'notes';
+    Object.assign(mt, { record: null, rows: [], items: [], proposals: [], selected: new Set(), version: '', versionNotes: undefined, writing: false });
+    mt.tab = 'notes';
     drawSelectionBar();
   }
-  if(params.tab) mt.tab = params.tab;
+  if(params.tab) mt.tab = params.tab === 'notepad' ? 'notes' : params.tab;
+  if(params.focus === 'notepad'){ mt.tab = 'notes'; mt.writing = true; }
   mt.id = id;
   const fresh = await loadMeetingData(id);
   if(mt.id !== id || shell.page !== 'meeting' || shell.params.id !== id) return;
@@ -313,6 +336,7 @@ function meetingMenuItems(){
     ...(pending ? [] : [['copy-id', 'Copy meeting ID'], ['export', 'Export notes (.md)'], ['export-transcript', 'Export notes + transcript (.md)'], ['copy-notes', 'Copy notes']]),
     ['hr'],
     ...(pending ? [] : [['resummarize', 'Re-summarize…'], ['continue', 'Add to this meeting (record more)']]),
+    ['key-phrases', 'Improve transcript spelling…'],
     ['open-folder', 'Open folder in Finder'],
     ['participants', 'Participants'], ['timeline', 'Speaker timeline'], ['processing', 'Processing history'],
     ['hr'],
@@ -380,6 +404,7 @@ async function meetingCommand(cmd){
   if(cmd === 'export-transcript') return exportMeeting('notes_transcript');
   if(cmd === 'copy-notes'){ await copyText(r.enhanced_notes || ''); track('notes_exported', { recording_id: r.id, kind: 'copy' }); toast('Notes copied.'); return; }
   if(cmd === 'resummarize') return openReprocess();
+  if(cmd === 'key-phrases') return openKeyPhrases();
   if(cmd === 'continue'){
     try{
       if(!window.electronAPI?.startRecording) throw new Error('Recording is only available in the Cora app.');
@@ -411,6 +436,7 @@ addEventListener('click', async event => {
   const t = event.target;
   const tab = t.closest('[data-tab]');
   if(tab){ mt.tab = tab.dataset.tab; drawTabs(); drawTab(); return; }
+  if(t.closest('[data-write-notes]')){ mt.writing = true; drawTab(); $('#notepadText')?.focus(); return; }
   const tabGo = t.closest('[data-tab-go]');
   if(tabGo){ mt.tab = tabGo.dataset.tabGo; drawTabs(); drawTab(); return; }
   if(t.closest('[data-open-menu]')){ openMeetingMenu(t.closest('[data-open-menu]')); return; }
@@ -480,7 +506,7 @@ addEventListener('click', async event => {
   }
   if(t.closest('[data-dismiss-cloud]')){ try{ await api('/api/recording/cloud-offer/dismiss', { method: 'POST', body: JSON.stringify({ id: mt.record.id }) }); await reloadMeeting(); }catch(error){ toast(error.message, true); } return; }
   const phrase = t.closest('[data-remove-phrase]');
-  if(phrase){ try{ await api('/api/recording/key-phrase', { method: 'POST', body: JSON.stringify({ id: mt.record.id, action: 'remove', term: phrase.dataset.removePhrase }) }); phrase.closest('.tag').remove(); }catch(error){ toast(error.message, true); } return; }
+  if(phrase){ try{ await api('/api/recording/key-phrase', { method: 'POST', body: JSON.stringify({ id: mt.record.id, action: 'remove', term: phrase.dataset.removePhrase }) }); mt.record.key_phrases = (mt.record.key_phrases || []).filter(x => x.term !== phrase.dataset.removePhrase); redrawKeyPhrases(); }catch(error){ toast(error.message, true); } return; }
   const hide = t.closest('[data-participant-hide]');
   if(hide){
     const row = hide.closest('[data-raw-name]');
@@ -498,7 +524,7 @@ addEventListener('keydown', event => {
     event.preventDefault();
     const term = t.value.trim(); if(!term) return;
     api('/api/recording/key-phrase', { method: 'POST', body: JSON.stringify({ id: mt.id, action: 'add', term }) })
-      .then(() => { (mt.record.key_phrases ||= []).push({ term, source: 'manual' }); drawMeeting(); $('#addPhrase')?.focus(); }).catch(error => toast(error.message, true));
+      .then(() => { (mt.record.key_phrases ||= []).push({ term, source: 'manual' }); redrawKeyPhrases(); }).catch(error => toast(error.message, true));
     return;
   }
   if(t.id === 'addItem' && event.key === 'Enter'){
