@@ -20,17 +20,23 @@ def test_there_is_no_listing_of_every_database():
 
 def test_a_pasted_link_picks_that_exact_database(fake_conn):
     fake = fake_conn("notion")
-    fake.on("GET", f"/databases/{DB}", {"id": DB, "title": [{"plain_text": "Tasks"}]})
+    fake.on("GET", f"/databases/{DB}", {"id": DB, "title": [{"plain_text": "Tasks"}], "data_sources": [{"id": "ds-a", "name": "Eng"}]})
     found = routes.database_from_link(fake, f"https://www.notion.so/acme/Tasks-{DB}?v={VIEW}&pvs=4")
-    assert found == {"id": DB, "title": "Tasks"}
+    assert found == {"id": DB, "title": "Tasks", "data_sources": [{"id": "ds-a", "name": "Eng"}]}
     assert [r["path"] for r in fake.requests] == [f"/databases/{DB}"]
 
 
 def test_a_dashed_id_works_too(fake_conn):
     fake = fake_conn("notion")
-    fake.on("GET", f"/databases/{DB}", {"id": DB, "title": []})
+    fake.on("GET", f"/databases/{DB}", {"id": DB, "title": [], "data_sources": [{"id": "ds-a", "name": ""}]})
     dashed = f"{DB[:8]}-{DB[8:12]}-{DB[12:16]}-{DB[16:20]}-{DB[20:]}"
-    assert routes.database_from_link(fake, dashed) == {"id": DB, "title": "Untitled"}
+    assert routes.database_from_link(fake, dashed)["title"] == "Untitled"
+
+
+def test_the_app_notion_com_link_form_works(fake_conn):
+    fake = fake_conn("notion")
+    fake.on("GET", f"/databases/{DB}", {"id": DB, "title": [], "data_sources": [{"id": "ds-a", "name": ""}]})
+    assert routes.database_from_link(fake, f"https://app.notion.com/p/{DB}?pvs=24")["id"] == DB
 
 
 def test_a_link_cora_cannot_see_says_to_share_it(fake_conn):

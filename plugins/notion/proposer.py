@@ -150,7 +150,7 @@ class NotionProposer:
         return Proposal(
             key=f"notion:task:{first['id']}", kind="task.create", title=f"Create Task '{title}'",
             fields=tuple(fields),
-            payload={"database_id": s["database_id"], "mapping": mapping, "meeting": meeting, "date": date,
+            payload={"database_id": s["database_id"], "data_source_id": s.get("data_source_id") or "", "mapping": mapping, "meeting": meeting, "date": date,
                      "recording_id": recording_id,
                      "item_text": first["text"], "nearest": [{"id": t["id"], "title": t["title"], "url": t.get("url")}
                                                              for t in nearest]},
@@ -210,7 +210,11 @@ class NotionProposer:
             for line in str(edits.get("checklist") or "").splitlines() if line.strip()]
         children.append({"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {
             "content": f"From {p['meeting']}{', ' + p['date'] if p['date'] else ''}. (via Cora)"}}]}})
-        page = conn.request("POST", "/pages", json={"parent": {"database_id": p["database_id"]}, "properties": props,
+        # A Proposal made before data sources carries only database_id: Notion still
+        # accepts that parent for a database with one data source.
+        parent = ({"type": "data_source_id", "data_source_id": p["data_source_id"]} if p.get("data_source_id")
+                  else {"database_id": p["database_id"]})
+        page = conn.request("POST", "/pages", json={"parent": parent, "properties": props,
                                                     "children": children})
         tasks.upsert({"id": page.get("id"), "title": title, "url": page.get("url"), "assignee_ids":
                       [assignee] if assignee else [], "created_time": page.get("created_time")})

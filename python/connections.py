@@ -36,7 +36,9 @@ SERVICES = ("notion", "slack")
 # How the UI names each service and hints its token, so a renderer can draw
 # Settings › Connections from data alone (UI shell v2, ADR 0005).
 DISPLAY = {"notion": ("Notion", "secret_… / ntn_…"), "slack": ("Slack", "xoxp-…")}
-NOTION_VERSION = "2022-06-28"
+# 2025-09-03: a database holds one or more data sources; Tasks live in one
+# of them (plugins/notion). Older versions reject multi-source databases.
+NOTION_VERSION = "2025-09-03"
 MAX_ATTEMPTS = 3
 _ID_SEGMENT = re.compile(r"^[0-9a-fA-F-]{16,}$|^[A-Z][A-Z0-9]{6,}$")
 

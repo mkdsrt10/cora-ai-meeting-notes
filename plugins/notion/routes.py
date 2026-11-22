@@ -3,7 +3,7 @@
 GET  settings     {settings, starter_instructions, connected, tasks_cached, fetched_at}
 POST settings     {database_link? or database_id?, mapping?, usage_instructions?} (a pasted link picks the database;
                   Cora never lists every database the integration can see)
-GET  schema?db=   that database's properties (names, types, options)
+GET  schema       the Tasks data source's properties (names, types, options)
 POST refresh      refresh the Task cache now
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ def post_settings(req, path: str, body: dict) -> None:
         found = _listing(req, database_from_link, link)
         if found is None:
             return None
-        body.update(database_id=found["id"], database_title=found["title"], mapping={})
+        body.update(database_id=found["id"], database_title=found["title"], data_sources=found["data_sources"], mapping={})
     saved = tasks.save_settings(body)
     if saved.get("database_id") != before:
         tasks.refresh(force=True)
@@ -58,14 +58,15 @@ def database_from_link(conn, link: str) -> dict[str, str]:
             raise ValueError("Notion can't find that database with your token. Check the link, and that your Notion account can open it.") from None
         raise
     title = "".join(t.get("plain_text", "") for t in body.get("title") or []) or "Untitled"
-    return {"id": body.get("id") or db_id, "title": title}
+    sources = [{"id": d.get("id"), "name": str(d.get("name") or "")} for d in body.get("data_sources") or [] if d.get("id")]
+    if not sources:
+        raise ValueError("That link is not a database Cora can use. Open the Tasks database itself in Notion and copy its link.")
+    return {"id": body.get("id") or db_id, "title": title, "data_sources": sources}
 
 
-def schema(conn, db_id: str) -> list[dict[str, Any]]:
-    """One database's properties: names, types, options (a listing call)."""
-    if not db_id or not all(c.isalnum() or c == "-" for c in db_id):
-        raise ValueError("db is required")
-    body = conn.request("GET", f"/databases/{db_id}")
+def schema(conn) -> list[dict[str, Any]]:
+    """The Tasks data source's properties: names, types, options (a listing call)."""
+    body = conn.request("GET", f"/data_sources/{tasks.source_id(conn)}")
     props = []
     for name, prop in (body.get("properties") or {}).items():
         kind = prop.get("type")
@@ -88,10 +89,9 @@ def _listing(req, fn, *args) -> Any:
 
 
 def get_schema(req, path: str, query: dict) -> None:
-    db_id = (query.get("db") or [""])[0]
-    if not db_id or not all(c.isalnum() or c == "-" for c in db_id):
-        raise ValueError("db is required")
-    props = _listing(req, schema, db_id)
+    if not tasks.settings().get("database_id"):
+        raise ValueError("Pick a Tasks database first")
+    props = _listing(req, schema)
     if props is None:
         return None
     return req.send_json({"properties": props})

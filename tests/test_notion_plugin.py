@@ -72,7 +72,8 @@ def notion(fake_conn, port):
     fake.on("GET", "/users/me", {"bot": {"owner": {"user": {"id": "n-me"}}}})
     fake.on("GET", "/users", {"results": [{"id": "n-me", "type": "person", "name": "Mira Testwell"},
                                           {"id": "n-quill", "type": "person", "name": "Quill Arbuthnot"}]})
-    fake.on("POST", "/databases/db1/query", lambda r: {"results": state["tasks"], "has_more": False})
+    fake.on("GET", "/databases/db1", {"id": "db1", "data_sources": [{"id": "ds1", "name": "Team Tasks"}]})
+    fake.on("POST", "/data_sources/ds1/query", lambda r: {"results": state["tasks"], "has_more": False})
 
     def create(r):
         state["created"] += 1
@@ -185,7 +186,7 @@ def test_create_assignee_only_from_a_confirmed_account(port, notion, fake_text):
     assert bodies[0]["properties"]["Assignee"] == {"people": [{"id": "n-quill"}]}
     assert bodies[0]["properties"]["Due"] == {"date": {"start": "2026-11-20"}}
     assert "Assignee" not in bodies[1]["properties"]                                     # left empty
-    assert bodies[0]["parent"] == {"database_id": "db1"}
+    assert bodies[0]["parent"] == {"type": "data_source_id", "data_source_id": "ds1"}
 
 
 def test_reprocessing_proposes_nothing_twice_and_creates_no_duplicates(port, notion, fake_text):

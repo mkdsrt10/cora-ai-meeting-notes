@@ -17,7 +17,7 @@ async function renderNotionSettings(slot){
   // No listing of every database the integration can see: the user pastes the link.
   const { settings, starter_instructions, tasks_cached, fetched_at } = await api('/api/plugins/notion/settings');
   const dbId = settings.database_id || '';
-  const props = dbId ? (await api(`/api/plugins/notion/schema?db=${encodeURIComponent(dbId)}`)).properties : [];
+  const props = dbId ? (await api('/api/plugins/notion/schema')).properties : [];
   const mapping = settings.mapping || {};
   const statusProp = props.find(p => p.name === mapping.status);
   slot.innerHTML = `<p>${dbId ? `Tasks database: <strong>${esc(settings.database_title || 'Untitled')}</strong>` : 'No Tasks database picked yet.'}</p>

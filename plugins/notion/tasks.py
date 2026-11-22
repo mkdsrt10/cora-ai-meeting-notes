@@ -1,7 +1,9 @@
 """Notion plugin settings and the local Task cache.
 
 Settings (outbox.plugin_settings("notion")):
-    database_id, database_title
+    database_id, database_title       the database the user pasted the link of
+    data_source_id, data_sources      the data source holding the Tasks, and the
+                                      database's sources [{id, name}] to pick from
     mapping: {title, status, done_value, assignee, due, area, meeting}
     usage_instructions: free text (starter template below)
 
@@ -70,12 +72,36 @@ def configured() -> bool:
     return bool(s.get("database_id") and s["mapping"].get("title"))
 
 
+def source_id(conn) -> str:
+    """The data source the Tasks live in. Settings saved before data sources
+    (only a database_id) resolve to the database's first source, once."""
+    s = settings()
+    if s.get("data_source_id"):
+        return s["data_source_id"]
+    body = conn.request("GET", f"/databases/{s['database_id']}")
+    sources = [{"id": d.get("id"), "name": str(d.get("name") or "")[:200]} for d in body.get("data_sources") or [] if d.get("id")]
+    if not sources:
+        raise connections.ConnectionFailed("permanent", None, "no_data_source")
+    outbox.save_plugin_settings(PLUGIN_ID, {"data_source_id": sources[0]["id"], "data_sources": sources})
+    return sources[0]["id"]
+
+
 def save_settings(body: dict[str, Any]) -> dict[str, Any]:
     allowed = {"title", "status", "done_value", "assignee", "due", "area", "meeting"}
     values: dict[str, Any] = {}
     if "database_id" in body:
         values["database_id"] = str(body.get("database_id") or "").strip()
         values["database_title"] = str(body.get("database_title") or "")[:200]
+        sources = [{"id": str(d.get("id")), "name": str(d.get("name") or "")[:200]}
+                   for d in body.get("data_sources") or [] if isinstance(d, dict) and d.get("id")]
+        values["data_sources"] = sources
+        values["data_source_id"] = sources[0]["id"] if sources else ""
+    if body.get("data_source_id"):
+        chosen = str(body["data_source_id"]).strip()
+        known = values.get("data_sources", settings().get("data_sources") or [])
+        if known and chosen not in {d["id"] for d in known}:
+            raise ValueError("Pick one of this database's data sources")
+        values["data_source_id"] = chosen
     if "mapping" in body:
         mapping = body.get("mapping") or {}
         if not isinstance(mapping, dict):
@@ -158,7 +184,7 @@ def refresh(*, force: bool = False) -> bool:
         pages: list[dict] = []
         cursor = None
         for _ in range(MAX_PAGES):
-            body = conn.request("POST", f"/databases/{s['database_id']}/query",
+            body = conn.request("POST", f"/data_sources/{source_id(conn)}/query",
                                 json={"page_size": 100, **({"start_cursor": cursor} if cursor else {})})
             pages.extend(body.get("results") or [])
             cursor = body.get("next_cursor")

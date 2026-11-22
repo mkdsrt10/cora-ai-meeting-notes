@@ -58,12 +58,19 @@ def settings_form(ctx) -> dict[str, Any]:
     _apply_link(ctx.values)
     chosen = ctx.values.get("database_id")
     if chosen and chosen != s.get("database_id"):
-        tasks.save_settings({"database_id": chosen, "database_title": str(ctx.values.get("database_title") or ""), "mapping": {}})
+        tasks.save_settings({"database_id": chosen, "database_title": str(ctx.values.get("database_title") or ""),
+                             "data_sources": ctx.values.get("data_sources") or [], "mapping": {}})
+        tasks.refresh(force=True)
+        s = tasks.settings()
+    source = ctx.values.get("data_source_id")
+    if source and not chosen and source != s.get("data_source_id"):
+        tasks.save_settings({"data_source_id": source, "mapping": {}})
         tasks.refresh(force=True)
         s = tasks.settings()
     try:
         conn = connections.get("notion")
-        props = routes.schema(conn, s["database_id"]) if s.get("database_id") else []
+        props = routes.schema(conn) if s.get("database_id") else []
+        s = tasks.settings()
     except connections.NotConnected:
         raise SurfaceError("not_connected", 409) from None
     except connections.BlockedByPolicy:
@@ -77,6 +84,11 @@ def settings_form(ctx) -> dict[str, Any]:
         {"type": "field", "name": "database_link", "label": "Change database" if s.get("database_id") else "Tasks database link",
          "input": "text", "value": "", "reload": True, "placeholder": "https://www.notion.so/…",
          "help": "In Notion, open your Tasks database and use ⋯ → Copy link, then paste it here."}]
+    sources = s.get("data_sources") or []
+    if len(sources) > 1:
+        blocks.append({"type": "field", "name": "data_source_id", "label": "Data source with your Tasks", "input": "select",
+                       "value": s.get("data_source_id") or "", "reload": True,
+                       "options": [{"value": d["id"], "label": d["name"] or "Untitled"} for d in sources]})
     if s.get("database_id"):
         for key, label, types in MAP:
             blocks.append({"type": "field", "name": f"mapping.{key}", "label": label, "input": "select",
@@ -110,7 +122,7 @@ def _apply_link(values: dict) -> None:
         raise SurfaceError("blocked_policy", 403) from None
     except connections.ConnectionFailed as exc:
         raise SurfaceError(f"notion_{exc.kind}", 502) from None
-    values["database_id"], values["database_title"] = found["id"], found["title"]
+    values["database_id"], values["database_title"], values["data_sources"] = found["id"], found["title"], found["data_sources"]
 
 
 def save_settings(ctx) -> dict[str, Any]:
@@ -123,7 +135,10 @@ def save_settings(ctx) -> dict[str, Any]:
         body["usage_instructions"] = str(v["usage_instructions"] or "")
     if v.get("database_id") and v["database_id"] != before:
         # A different database: the old property mapping doesn't apply to it.
-        body.update(database_id=v["database_id"], database_title=str(v.get("database_title") or ""), mapping={})
+        body.update(database_id=v["database_id"], database_title=str(v.get("database_title") or ""),
+                    data_sources=v.get("data_sources") or [], mapping={})
+    elif v.get("data_source_id") and v["data_source_id"] != tasks.settings().get("data_source_id"):
+        body.update(data_source_id=v["data_source_id"], mapping={})
     saved = tasks.save_settings(body)
     if saved.get("database_id") != before:
         tasks.refresh(force=True)

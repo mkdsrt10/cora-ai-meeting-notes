@@ -251,9 +251,12 @@ def test_notion_and_slack_chips_footer_and_selection_action(port, bundled):
 def test_notion_settings_section_picks_a_pasted_link_and_never_lists_databases(port, bundled):
     notion, _ = bundled
     db_id = "1f2e3d4c5b6a79881f2e3d4c5b6a7988"
-    notion.on("GET", f"/databases/{db_id}", {"id": db_id, "title": [{"plain_text": "Team tasks"}], "properties": {
-        "Name": {"type": "title"}, "State": {"type": "status", "status": {"options": [{"name": "Done"}]}}}})
-    notion.on("POST", f"/databases/{db_id}/query", {"results": [], "has_more": False})
+    notion.on("GET", f"/databases/{db_id}", {"id": db_id, "title": [{"plain_text": "Team tasks"}],
+                                              "data_sources": [{"id": "ds-eng", "name": "Eng"}, {"id": "ds-ops", "name": "Ops"}]})
+    for ds in ("ds-eng", "ds-ops"):
+        notion.on("GET", f"/data_sources/{ds}", {"properties": {
+            "Name": {"type": "title"}, "State": {"type": "status", "status": {"options": [{"name": "Done"}]}}}})
+        notion.on("POST", f"/data_sources/{ds}/query", {"results": [], "has_more": False})
     status, body = call(port, "POST", "/api/surfaces/action", {"plugin_id": "notion", "action_id": "settings_form", "values": {}})
     assert status == 200, body
     assert [b.get("name") for b in body["panel"]["blocks"] if b["type"] == "field"][:1] == ["database_link"]
@@ -261,13 +264,18 @@ def test_notion_settings_section_picks_a_pasted_link_and_never_lists_databases(p
                                                                "values": {"database_link": f"https://www.notion.so/x/Team-tasks-{db_id}?v=1"}})
     assert status == 200, body
     names = [b.get("name") for b in body["panel"]["blocks"] if b["type"] == "field"]
-    assert names[:3] == ["database_link", "mapping.title", "mapping.status"] and "usage_instructions" in names
+    assert names[:4] == ["database_link", "data_source_id", "mapping.title", "mapping.status"] and "usage_instructions" in names
     assert any(b["type"] == "text" and b["text"] == "Tasks database: Team tasks" for b in body["panel"]["blocks"])
     status, body = call(port, "POST", "/api/surfaces/action", {"plugin_id": "notion", "action_id": "save_settings", "values": {
         "database_link": "", "mapping.title": "Name", "mapping.status": "State", "usage_instructions": "Small tasks only"}})
     assert status == 200 and body["toast"] == "Notion settings saved."
     s = outbox.plugin_settings("notion")
-    assert s["database_id"] == db_id and s["mapping"] == {"title": "Name", "status": "State"}
+    assert s["database_id"] == db_id and s["data_source_id"] == "ds-eng" and s["mapping"] == {"title": "Name", "status": "State"}
+    status, body = call(port, "POST", "/api/surfaces/action", {"plugin_id": "notion", "action_id": "settings_form",
+                                                               "values": {"data_source_id": "ds-ops"}})
+    assert status == 200, body
+    s = outbox.plugin_settings("notion")
+    assert s["data_source_id"] == "ds-ops" and s["mapping"] == {}, "another data source starts a fresh mapping"
     assert s["usage_instructions"] == "Small tasks only"
     assert notion.requests and all(r["path"] != "/search" for r in notion.requests)
 
