@@ -195,6 +195,16 @@ h2.h .hint{font-weight:400;font-size:12px;color:var(--ink3)}
 .menu hr{border:0;border-top:1px solid var(--line);margin:4px 0}
 .audio{width:100%;margin:0 0 18px}
 
+/* surfaces (drawn by Cora from plugin data) */
+.smark{width:14px;height:14px;border-radius:3px;background:var(--ink);color:var(--bg);display:inline-grid;place-items:center;font:700 9px/1 -apple-system,sans-serif;flex:none}
+.sann{display:inline-flex;align-items:center;gap:6px;color:var(--ink2);text-decoration:none}
+a.sann:hover{color:var(--ink)}
+.sann .ct{font-size:11px;color:var(--accent);font-weight:600}
+.spanel-block{margin:0 0 18px}
+.pf-row{display:flex;gap:8px;margin-top:10px}
+.menu-chip{padding:3px 4px}
+.nav .smark{margin:0 1px}
+
 /* selection bar */
 .bar{position:fixed;left:calc(50% + var(--side-w) / 2);bottom:22px;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:4px;padding:5px;border-radius:12px;background:var(--ink);color:var(--bg);box-shadow:var(--shadow);font-size:12.5px}
 .bar .n{padding:0 10px 0 8px;font-weight:600}

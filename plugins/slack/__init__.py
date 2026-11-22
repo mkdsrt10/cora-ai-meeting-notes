@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from plugin_host import Plugin
 
-from . import composer
+from . import composer, surfaces
 
 PLUGIN = Plugin(
     id="slack",
@@ -33,4 +33,6 @@ PLUGIN = Plugin(
     enabled_by_default=True,
     connection="slack",
     proposer=composer.SlackProposer(),
+    surfaces=surfaces.surfaces,
+    actions=surfaces.ACTIONS,
 )

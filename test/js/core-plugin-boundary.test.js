@@ -21,3 +21,20 @@ test('core never names Coaching, archetypes or practice moments', () => {
     }
   }
 });
+
+// UI shell v2 (ADR 0005): Cora draws every plugin surface from data, so the
+// v2 shell never names a specific plugin anywhere in its code, markup or styles.
+function walk(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
+}
+
+test('the v2 shell never names a specific plugin', () => {
+  const files = walk(path.join(root, 'src/ui/web/v2')).filter((f) => /\.(js|css|html)$/.test(f));
+  assert.ok(files.length >= 3, 'v2 shell files found');
+  for (const file of files) {
+    const text = fs.readFileSync(file, 'utf8');
+    for (const word of [/notion/i, /slack/i, /\bto-?dos?\b/i, /coach/i, /\bplugins\/[a-z]/i]) {
+      assert.doesNotMatch(text, word, `${path.relative(root, file)} mentions ${word}`);
+    }
+  }
+});

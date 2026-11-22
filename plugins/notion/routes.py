@@ -9,6 +9,7 @@ POST refresh      refresh the Task cache now
 from __future__ import annotations
 
 import datetime as dt
+from typing import Any
 
 import connections
 import db
@@ -31,10 +32,30 @@ def post_settings(req, path: str, body: dict) -> None:
     return req.send_json({"ok": True, "settings": tasks.settings()})
 
 
-def _listing(req, method: str, path: str, json: dict | None = None) -> dict | None:
-    """A listing call (no meeting content); errors become a 409 the page can show."""
+def databases(conn) -> list[dict[str, str]]:
+    """Databases shared with the integration: ids and titles (a listing call)."""
+    body = conn.request("POST", "/search", json={"filter": {"property": "object", "value": "database"}, "page_size": 50})
+    return [{"id": d.get("id"), "title": "".join(t.get("plain_text", "") for t in d.get("title") or []) or "Untitled"}
+            for d in body.get("results") or [] if d.get("id")]
+
+
+def schema(conn, db_id: str) -> list[dict[str, Any]]:
+    """One database's properties: names, types, options (a listing call)."""
+    if not db_id or not all(c.isalnum() or c == "-" for c in db_id):
+        raise ValueError("db is required")
+    body = conn.request("GET", f"/databases/{db_id}")
+    props = []
+    for name, prop in (body.get("properties") or {}).items():
+        kind = prop.get("type")
+        options = [o.get("name") for o in ((prop.get(kind) or {}).get("options") or [])] if kind in ("status", "select") else []
+        props.append({"name": name, "type": kind, "options": options})
+    return props
+
+
+def _listing(req, fn, *args) -> Any:
+    """A listing call (no meeting content); errors become a status the page can show."""
     try:
-        return connections.get("notion").request(method, path, json=json)
+        return fn(connections.get("notion"), *args)
     except connections.NotConnected:
         req.send_json({"error": "not_connected"}, 409)
     except connections.BlockedByPolicy:
@@ -45,11 +66,9 @@ def _listing(req, method: str, path: str, json: dict | None = None) -> dict | No
 
 
 def get_databases(req, path: str, query: dict) -> None:
-    body = _listing(req, "POST", "/search", {"filter": {"property": "object", "value": "database"}, "page_size": 50})
-    if body is None:
+    result = _listing(req, databases)
+    if result is None:
         return None
-    result = [{"id": d.get("id"), "title": "".join(t.get("plain_text", "") for t in d.get("title") or []) or "Untitled"}
-              for d in body.get("results") or [] if d.get("id")]
     return req.send_json({"databases": result})
 
 
@@ -57,14 +76,9 @@ def get_schema(req, path: str, query: dict) -> None:
     db_id = (query.get("db") or [""])[0]
     if not db_id or not all(c.isalnum() or c == "-" for c in db_id):
         raise ValueError("db is required")
-    body = _listing(req, "GET", f"/databases/{db_id}")
-    if body is None:
+    props = _listing(req, schema, db_id)
+    if props is None:
         return None
-    props = []
-    for name, prop in (body.get("properties") or {}).items():
-        kind = prop.get("type")
-        options = [o.get("name") for o in ((prop.get(kind) or {}).get("options") or [])] if kind in ("status", "select") else []
-        props.append({"name": name, "type": kind, "options": options})
     return req.send_json({"properties": props})
 
 

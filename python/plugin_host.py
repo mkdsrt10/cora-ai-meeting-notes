@@ -14,6 +14,8 @@ A Plugin declares, in one place (its package's ``PLUGIN``):
   - ``context_sources``: Context sources feeding notes generation
     (notes_context.py); ``proposer`` and ``connection``: external writes as
     Proposals the user confirms (outbox.py, connections.py).
+  - ``surfaces`` and ``actions``: what it shows in the Surfaces Cora draws
+    (UI shell v2) and the handlers its Actions run (surfaces.py, ADR 0005).
 
 Bundled plugins are discovered under ``plugins/`` at the app root. Whether
 one is enabled is ``plugins.<id>.enabled`` in config.json, falling back to
@@ -60,6 +62,10 @@ class Plugin:
     connection: str | None = None            # "notion" | "slack": which Connection it needs
     proposer: Any = None                      # propose()/apply(): see outbox.py
     context_sources: tuple[Any, ...] = ()     # ContextSource adapters: see notes_context.py
+    # Surface contract (ADR 0005): what it shows where Cora draws it, and the
+    # handlers its Actions run. See surfaces.py.
+    surfaces: Callable[[Any], Any] | None = None          # surfaces(SurfaceContext) -> [Contribution]
+    actions: dict[str, Callable[[Any], Any]] = field(default_factory=dict)
 
 
 _plugins: dict[str, Plugin] = {}

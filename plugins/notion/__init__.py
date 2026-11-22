@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from plugin_host import Plugin
 
-from . import proposer, routes, sources, tasks
+from . import proposer, routes, sources, surfaces, tasks
 
 
 def daily() -> None:
@@ -40,4 +40,6 @@ PLUGIN = Plugin(
     connection="notion",
     proposer=proposer.NotionProposer(),
     context_sources=(sources.NotionTasks(),),
+    surfaces=surfaces.surfaces,
+    actions=surfaces.ACTIONS,
 )
