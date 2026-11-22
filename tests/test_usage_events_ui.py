@@ -258,7 +258,7 @@ context.fetch = async (path, opts) => {
   const out = path === '/api/people/create' ? {ok: true, person: {id: 'p1', name: body.name}} : {people: []};
   return {ok: true, json: async () => out};
 };
-load('core.js', 'usage.js');
+load('lib.js', 'core.js', 'usage.js');
 scenario(async () => {
   node('#createPersonName').value = 'Asha Rao';
   await fire('#createPersonForm', 'submit');

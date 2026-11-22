@@ -34,7 +34,7 @@ const context=vm.createContext({console:{...console,warn(){}},setTimeout,Promise
    plugins:[{id:'todo',name:'To-dos',view:{id:'todo',title:'To-dos',subtitle:'All action items',icon:'check'}},{id:'coaching',name:'Coaching',view:null}],
    stages:{needs_diarization:'Needs diarization',ready:'Ready',coached:'Coached'}}:{items:[]}})});
 context.globalThis=context; context.window=context;
-for(const f of ['core.js','plugin-host.js']) vm.runInContext(fs.readFileSync(web+'js/'+f,'utf8'),context);
+for(const f of ['lib.js','core.js','plugin-host.js']) vm.runInContext(fs.readFileSync(web+'js/'+f,'utf8'),context);
 vm.runInContext('stopLiveFeedPolling=()=>{}; toast=(m)=>{throw new Error(m)};',context);
 (async()=>{
  await vm.runInContext('loadPlugins()',context);

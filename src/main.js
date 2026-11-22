@@ -24,6 +24,7 @@ const os = require('os');
 const { createMainLog } = require('./main-log');
 const { createExportFile } = require('./main/export-file');
 const { createMenuBar } = require('./main/menu-bar');
+const { resolveShellUrl } = require('./main/shell-page');
 
 // Mirror main-process console output to a local daily log (never uploaded).
 const mainLog = createMainLog({ logsDir: LOGS_DIR });
@@ -713,6 +714,12 @@ function takeMeetingScreenshot(recId, targetDir) {
   });
 }
 
+function loadShellPage(win) {
+  resolveShellUrl(DASHBOARD_URL, fetchSetting).then((url) => {
+    if (win && !win.isDestroyed()) win.loadURL(url);
+  });
+}
+
 function createWindow({ show = true } = {}) {
   mainWindow = new BrowserWindow({
     width: 1080,
@@ -736,13 +743,13 @@ function createWindow({ show = true } = {}) {
   mainWindow.webContents.on('did-fail-load', () => {
     setTimeout(() => {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.loadURL(DASHBOARD_URL);
+        loadShellPage(mainWindow);
       }
     }, 500);
   });
 
-  // Load the web app
-  mainWindow.loadURL(DASHBOARD_URL);
+  // Load the web app: the classic shell or UI shell v2, by the ui_shell setting.
+  loadShellPage(mainWindow);
   
   // Closing hides to the menu bar (the Dock icon goes with it).
   mainWindow.on('close', (event) => {

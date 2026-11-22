@@ -36,7 +36,7 @@ const context=vm.createContext({console,setTimeout,Promise,encodeURIComponent,JS
  addEventListener(){},
  fetch:async(path,opts)=>{ if(opts&&opts.method==='POST') posted.push([path,opts.body]); return {ok:true,json:async()=>replies[path]||{}}; }});
 context.globalThis=context; context.window=context;
-for(const f of ['core.js','usage.js','outbox.js']) vm.runInContext(fs.readFileSync(web+'js/'+f,'utf8'),context);
+for(const f of ['lib.js','core.js','usage.js','outbox.js']) vm.runInContext(fs.readFileSync(web+'js/'+f,'utf8'),context);
 (async()=>{
  await vm.runInContext("renderActionItemsPanel({id:'r1'})",context);
  const list=node('#recordingActionItems').innerHTML;

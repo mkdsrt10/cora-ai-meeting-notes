@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en" data-shell="v2">
+<head>
+  <meta charset="utf-8">
+  <!-- Same strict CSP as the classic shell: no remote code, fonts or requests. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Cora AI Meeting Notes</title>
+  <link rel="stylesheet" href="/v2/shell.css">
+</head>
+<body>
+<a class="sr-only" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <aside class="side" id="sidebar" aria-label="Sidebar">
+    <div class="ws"><span class="logo" aria-hidden="true">c</span><span>Cora</span><span class="grow"></span>
+      <button class="ib" type="button" id="collapseSidebar" aria-label="Hide sidebar" title="Hide sidebar (⌘\)">⇤</button></div>
+    <button class="search" type="button" id="openPalette" aria-label="Search and commands">⌕ Search<kbd>⌘K</kbd></button>
+    <div id="sideRecording" aria-live="polite"></div>
+    <nav id="navMain" aria-label="Pages"></nav>
+    <nav id="navPlugins" aria-label="Plugin pages"></nav>
+    <div id="navRecentWrap" hidden><div class="slabel">Recent</div><nav id="navRecent" aria-label="Recent meetings"></nav></div>
+    <div id="navFoldersWrap" hidden><div class="slabel"><span class="grow">Folders</span><button class="ib" type="button" id="addFolder" aria-label="New folder" title="New folder">+</button></div><nav id="navFolders" aria-label="Folders"></nav></div>
+    <div class="side-bottom"><button class="nav" type="button" data-go="settings"><span class="ico" aria-hidden="true">⚙</span><span class="lbl">Settings</span></button></div>
+  </aside>
+  <main id="main" tabindex="-1">
+    <header class="top">
+      <button class="ib" type="button" id="expandSidebar" aria-label="Show sidebar" title="Show sidebar (⌘\)" hidden>⇥</button>
+      <div class="crumb" id="crumb"></div>
+      <div class="grow"></div>
+      <div id="topActions"></div>
+    </header>
+    <div id="page"></div>
+  </main>
+</div>
+<aside class="peek" id="confirmPanel" role="dialog" aria-label="Review suggestion" hidden></aside>
+<div class="bar" id="selectionBar" role="toolbar" aria-label="Selected Action items" hidden></div>
+<div class="scrim" id="palette" hidden></div>
+<div class="tour" id="tour" role="dialog" aria-modal="true" aria-labelledby="tourTitle" hidden></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="/js/lib.js"></script>
+<script src="/js/usage.js"></script>
+<script src="/v2/js/shell.js"></script>
+<script src="/v2/js/settings.js"></script>
+<script src="/v2/js/home.js"></script>
+<script src="/v2/js/init.js"></script>
+</body>
+</html>

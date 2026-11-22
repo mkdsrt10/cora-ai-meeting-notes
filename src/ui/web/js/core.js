@@ -31,17 +31,6 @@ registerView('settings', {title: 'Settings', onShow: () => loadSettingsView()});
 // Stage id -> label, from GET /api/plugins (core stages plus enabled plugins').
 let stageLabels = {};
 const PENDING_STAGES = new Set(['recording', 'processing', 'paused']);
-const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fmtDate = value => value ? new Date(value).toLocaleString([], {dateStyle:'medium', timeStyle:'short'}) : 'Unknown date';
-const fmtDuration = seconds => `${Math.floor((seconds || 0) / 60)}:${String(Math.round(seconds || 0) % 60).padStart(2,'0')}`;
-const fmtBytes = value => { let n = Number(value || 0), u = 0; const units=['B','KB','MB','GB','TB']; while(n >= 1000 && u < units.length-1){n/=1000;u++} return `${n.toFixed(u > 1 ? 1 : 0)} ${units[u]}`; };
-
-async function api(path, options={}) {
-  const response = await fetch(path, {headers:{'Content-Type':'application/json'}, ...options});
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
-  return body;
-}
 function toast(message, error=false){ const node=$('#toast'); node.textContent=message; node.classList.toggle('error', error); node.classList.add('show'); setTimeout(()=>node.classList.remove('show'), 3500); }
 function stagePill(stage){ return `<span class="stage-pill ${esc(stage)}">${esc(stageLabels[stage] || stage)}</span>`; }
 // "Processing failed": the plain-language reason and a Retry that reruns
@@ -50,10 +39,6 @@ function failureNotice(record){
   if(record?.analysis_stage !== 'failed') return '';
   const message = record.failure?.message || 'Processing did not finish.';
   return `<p class="failure-message">${esc(message)}</p><button type="button" class="button secondary small" data-retry-processing="${esc(record.id)}">Retry</button>`;
-}
-async function copyText(value){
-  if(navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
-  const node=document.createElement('textarea'); node.value=value; document.body.appendChild(node); node.select(); document.execCommand('copy'); node.remove();
 }
 
 let currentView = 'recordings';

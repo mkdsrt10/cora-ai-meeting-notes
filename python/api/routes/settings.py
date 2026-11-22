@@ -284,7 +284,7 @@ def post_api_onboarding_complete(req, path: str, body: dict) -> None:
 NULLABLE_SETTINGS = frozenset({"microphone", "beta_display_name"})
 
 # Defaults for keys whose unset value is not null (beta audio retention).
-SETTING_DEFAULTS = {"audio_retention_days": 30, "audio_cap_mb": 500}
+SETTING_DEFAULTS = {"audio_retention_days": 30, "audio_cap_mb": 500, "ui_shell": "classic", "ui_theme": "system"}
 READ_ONLY_SETTINGS = frozenset({"install_id"})
 DISPLAY_NAME_MAX = usage_events.DISPLAY_NAME_MAX
 
@@ -360,7 +360,19 @@ def _whole_number_at_least(key: str, minimum: int):
     return validate
 
 
+def _one_of(key: str, choices: tuple[str, ...]):
+    def validate(value):
+        if value not in choices:
+            raise ValueError(f"{key} must be one of {', '.join(choices)}")
+        return value
+    return validate
+
+
 _VALIDATORS = {
+    # Which window the app opens (src/main/shell-page.js) and the v2 theme
+    # override (docs/specs/ui-shell-v2.md). The default stays classic.
+    "ui_shell": _one_of("ui_shell", ("classic", "v2")),
+    "ui_theme": _one_of("ui_theme", ("system", "light", "dark")),
     "microphone": _validate_microphone,
     "beta_display_name": _validate_display_name,
     "share_usage": _true_or_false("share_usage"),

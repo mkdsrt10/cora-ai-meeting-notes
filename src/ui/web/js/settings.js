@@ -432,3 +432,12 @@ async function sendLogsBundle(send){
 
 $('#logsBundleSaveBtn')?.addEventListener('click', () => sendLogsBundle(false));
 $('#logsBundleSendBtn')?.addEventListener('click', () => sendLogsBundle(true));
+
+// UI shell v2 (docs/specs/ui-shell-v2.md): the switch is the stored setting
+// ui_shell, which the main process reads to pick the page on every launch.
+async function tryNewLook(){
+  await api('/api/settings', { method: 'POST', body: JSON.stringify({ key: 'ui_shell', value: 'v2' }) });
+  trackAction('change_setting');
+  location.assign('/v2/');
+}
+$('#settingsTryNewLook')?.addEventListener('click', () => tryNewLook().catch(error => toast(error.message, true)));
