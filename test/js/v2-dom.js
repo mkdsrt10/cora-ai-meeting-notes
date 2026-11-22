@@ -345,7 +345,7 @@ function loadPage(page, { replies = {}, settings = {}, dark = false, scripts, be
     const method = (opts.method || 'GET').toUpperCase();
     calls.push({ method, url, body: opts.body ? JSON.parse(opts.body) : undefined });
     let value; let status = 200;
-    try { value = respond(method, url, opts.body); } catch (e) { value = { error: e.message }; status = e.status || 400; }
+    try { value = await respond(method, url, opts.body); } catch (e) { value = { error: e.message }; status = e.status || 400; }
     if (value && value.__status) { status = value.__status; value = value.body || { error: 'failed' }; }
     return { ok: status < 400, status, json: async () => JSON.parse(JSON.stringify(value)) };
   };

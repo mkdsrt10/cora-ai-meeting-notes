@@ -251,11 +251,18 @@ async function reloadMeeting(){
 async function renderMeeting(host, params = {}){
   const id = params.id;
   if(!id) return go('home');
-  if(mt.id !== id){ mt.selected = new Set(); mt.version = ''; mt.versionNotes = undefined; mt.tab = params.focus === 'notepad' ? 'notepad' : 'notes'; }
+  // Never show another meeting's data: reset as soon as the meeting changes,
+  // and drop a load that finishes after you moved to another meeting.
+  if(mt.id !== id){
+    Object.assign(mt, { record: null, rows: [], items: [], proposals: [], selected: new Set(), version: '', versionNotes: undefined });
+    mt.tab = params.focus === 'notepad' ? 'notepad' : 'notes';
+    drawSelectionBar();
+  }
   if(params.tab) mt.tab = params.tab;
   mt.id = id;
-  Object.assign(mt, await loadMeetingData(id));
-  if(shell.params.id !== id) return;
+  const fresh = await loadMeetingData(id);
+  if(mt.id !== id || shell.page !== 'meeting' || shell.params.id !== id) return;
+  Object.assign(mt, fresh);
   mt.notesBaseline = mt.record.notes || '';
   setSurfaceContext(() => ({ context: 'recording', id: mt.id, rows: mt.rows }));
   setSelectionProvider(() => mt.selected);

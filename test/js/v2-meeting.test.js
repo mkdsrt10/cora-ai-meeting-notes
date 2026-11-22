@@ -208,3 +208,44 @@ test('notices, key phrases and earlier versions, as in the classic look', async 
   assert.deepEqual(p.posts().find((c) => c.url === '/api/recording/key-phrase').body, { id: 'r1', action: 'add', term: 'Pricing v2' });
   assert.ok(p.$('#notesVersion'));
 });
+
+test('never shows another meeting’s Action items: on switch, while loading, while recording, or after a late reply', async () => {
+  const live = { ...REC, id: 'r2', title: 'Live call', analysis_stage: 'recording', enhanced_notes: '', notes: '', transcript_view: { source: 'none', label: 'Transcript' } };
+  const gates = {};
+  const later = (key, value) => new Promise((resolve) => { gates[key] = () => resolve(value); });
+  const p = loadPage('v2/index.html', { settings: { tour_seen: true }, replies: { ...replies(),
+    '/api/recording': (url) => (url.includes('id=r2') ? live : REC),
+    '/api/action-items': (url) => (url.includes('recording=r2') ? later('r2', { items: [] }) : later('r1', { items: ITEMS })),
+    'GET /api/surfaces': (url) => ({ contributions: url.includes('id=r1') ? ROWS : [] }),
+    '/api/outbox/recording': (url) => (url.includes('id=r1') ? { proposals: PROPOSALS, links: [] } : { proposals: [], links: [] }),
+  } });
+  await p.flush();
+
+  // 1. Open r1 and let it load: its items show; select one.
+  const first = p.run('go("meeting", { id: "r1" })');
+  await p.flush(); gates.r1(); await first; await p.flush();
+  assert.equal(p.$$('#checklist .row').length, 2);
+  await p.click('[data-select-item="a1"]');
+  assert.equal(p.$('#selectionBar').hidden, false);
+
+  // 2. Switch to the live meeting r2: while it loads nothing of r1 is on screen.
+  const second = p.run('go("meeting", { id: "r2" })');
+  await p.flush();
+  assert.equal(p.$('[data-item="a1"]'), null, 'no r1 rows while r2 loads');
+  assert.equal(p.$('#selectionBar').hidden, true, 'no r1 selection while r2 loads');
+  gates.r2(); await second; await p.flush();
+  assert.equal(text(p.$('#meetingTitle')), 'Live call');
+  assert.equal(p.$('#checklist .row'), null, 'a live meeting with no notes shows none of r1’s Action items');
+  assert.equal(p.run('mt.items.length'), 0);
+
+  // 3. A late reply for r1, after moving on to r2, is dropped.
+  const back = p.run('go("meeting", { id: "r1" })');
+  await p.flush();
+  const third = p.run('go("meeting", { id: "r2" })');
+  await p.flush(); gates.r2(); await third; await p.flush();
+  gates.r1(); await back; await p.flush();
+  assert.equal(text(p.$('#meetingTitle')), 'Live call');
+  assert.equal(p.run('mt.id'), 'r2');
+  assert.equal(p.run('mt.items.length'), 0, 'r1’s late items never land on r2');
+  assert.equal(p.$('[data-item="a1"]'), null);
+});
