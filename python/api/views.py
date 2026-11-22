@@ -103,7 +103,8 @@ def participant_capture_payload(recording_id: str, folder: Path | None) -> dict:
                 live=folder is None, speaker_events=len(timeline) if isinstance(timeline, list) else 0)
 
 
-def participants_payload(recording_id: str, folder: Path | None) -> list[dict[str, Any]]:
+def participants_payload(recording_id: str, folder: Path | None, *, metadata: dict | None = None,
+                         people: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """The AX-discovered roster (participants.json — live in inbox/ while
     recording, archived alongside the audio after), merged with any user
     edits (rename/hide/map-to-person) stored in
@@ -124,9 +125,11 @@ def participants_payload(recording_id: str, folder: Path | None) -> list[dict[st
     if not isinstance(raw_names, list):
         raw_names = []
 
-    metadata = db.get_recording_data(recording_id, "metadata") or {}
+    if metadata is None:
+        metadata = db.get_recording_data(recording_id, "metadata") or {}
     overrides = metadata.get("participant_overrides") or {}
-    people = db.get_all_people()
+    if people is None:
+        people = db.get_all_people()
     people_by_id = {p["id"]: p for p in people}
 
     result = []
@@ -289,7 +292,8 @@ def cloud_offer(metadata: dict) -> str | None:
     return None
 
 
-def recording_item(folder: Path | dict, detailed: bool = False) -> dict[str, Any]:
+def recording_item(folder: Path | dict, detailed: bool = False, *,
+                   people: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     if isinstance(folder, dict):
         rec_data = folder
         if rec_data.get("status") in PENDING_TITLES:
@@ -371,12 +375,7 @@ def recording_item(folder: Path | dict, detailed: bool = False) -> dict[str, Any
         "archetype": archetype_name,
         "archetype_id": archetype_id,
         "archetype_info": arch_info,
-        "participant_names": sorted({
-            name for name in (
-                (profile.get("label", {}).get("name") or profile.get("suggested_person", {}).get("name"))
-                for profile in profiles
-            ) if name
-        }),
+        "participant_names": meeting_people(folder, metadata, profiles, people),
         "meeting_tool": metadata.get("meeting_tool"),
         "folder_id": metadata.get("folder_id"),
         # Set while a pause/resume or "Continue this meeting" segment is
@@ -464,8 +463,24 @@ def _parse_recorded_at(value: str | None) -> dt.datetime:
         return dt.datetime.min.replace(tzinfo=dt.timezone.utc)
 
 
+def meeting_people(folder: Path, metadata: dict, profiles: list[dict[str, Any]],
+                   people: list[dict[str, Any]] | None = None) -> list[str]:
+    """Who was in the meeting: labelled or suggested speakers plus the captured
+    roster (with the user's renames, hides and links), one entry per name."""
+    names = [p.get("label", {}).get("name") or p.get("suggested_person", {}).get("name") for p in profiles]
+    if (folder / "participants.json").exists():
+        names += [p["display_name"]
+                  for p in participants_payload(folder.name, folder, metadata=metadata, people=people)]
+    unique: dict[str, str] = {}
+    for name in names:
+        if name and name.strip().lower() not in unique:
+            unique[name.strip().lower()] = name.strip()
+    return sorted(unique.values())
+
+
 def all_recordings() -> list[dict[str, Any]]:
     rows = db.get_all_recordings()
+    people = db.get_all_people()
     items = []
     for row in rows:
         # A recording started via pause/resume (or the detail page's
@@ -485,7 +500,7 @@ def all_recordings() -> list[dict[str, Any]]:
         folder = Path(row["folder_path"])
         if not folder.is_dir():
             continue
-        item = recording_item(row)
+        item = recording_item(row, people=people)
         # Keep meetings whose audio was deleted after processing
         # (retain_audio off) — the transcript and notes are what matter.
         # A failed one ("Processing failed") is always kept so it can be retried.
