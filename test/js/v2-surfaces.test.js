@@ -116,10 +116,9 @@ test('selection actions send the selected Action item ids', async () => {
   assert.deepEqual([post.body.context, post.body.id, post.body.action_item_ids], ['recording', 'r1', ['a1', 'a3']]);
 });
 
-test('a returned proposal goes to the registered result handler (the confirm panel)', async () => {
-  const p = await page({ 'POST /api/surfaces/action': { proposal: { key: 'k9', kind: 'message.post', title: 'Send 1 item' } } });
-  p.context.__seen = [];
-  p.run('onSurfaceResult(r => { if(r.proposal){ __seen.push(r.proposal.key); return true; } })');
+test('a returned proposal opens the confirm panel', async () => {
+  const p = await page({ 'POST /api/surfaces/action': { proposal: { key: 'k9', kind: 'message.post', title: 'Send 1 item', fields: [] } } });
   await p.run('runSurfaceAction({ plugin: "p-one", action: "send" })');
-  assert.deepEqual(p.context.__seen, ['k9']);
+  assert.equal(p.$('#confirmPanel').hidden, false);
+  assert.equal(p.$('#confirmPanel').dataset.key, 'k9');
 });
