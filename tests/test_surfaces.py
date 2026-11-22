@@ -299,3 +299,43 @@ def test_connections_carry_their_own_label_and_token_hint(port):
     status, body = call(port, "GET", "/api/connections")
     for service, c in body["connections"].items():
         assert c["label"] and c["token_hint"], service
+
+
+# ---- To-dos on the contract (T6) ----------------------------------------------
+
+@pytest.fixture
+def todos():
+    config({"notion": {"enabled": False}, "slack": {"enabled": False}})
+    yield
+    config()
+
+
+def test_todos_page_matches_its_lists(port, todos):
+    import plugins.todo.store as store
+    ids = recording("sf-todo", ["Draft the pricing page", "Book five interviews"])
+    action_items.set_done(ids[1], True)
+    app = only(port, "app", "todo")
+    assert [(c["surface"], c.get("id")) for c in app] == [("app.nav", "todos"), ("app.page", "todos"), ("selection.action", None)]
+    page = app[1]["panel"]
+    listed = {i["id"]: i for i in store.listed()}
+    open_ids = [i["id"] for i in page["blocks"][0]["items"]]
+    assert open_ids == [k for k, v in listed.items() if not v["done"]]
+    assert ids[0] in open_ids and ids[1] not in open_ids
+    status, body = call(port, "GET", "/api/surfaces?context=app&filter=done")
+    done_page = next(c for c in body["contributions"] if c["surface"] == "app.page" and c["plugin_id"] == "todo")
+    assert ids[1] in [i["id"] for i in done_page["panel"]["blocks"][0]["items"]]
+    assert done_page["panel"]["filter"] == "done"
+
+
+def test_mark_done_from_the_selection_bar_updates_the_core_record(port, todos):
+    ids = recording("sf-todo-done", ["Write the screener", "Send the deck"])
+    status, body = call(port, "POST", "/api/surfaces/action", {"plugin_id": "todo", "action_id": "mark_done", "action_item_ids": ids})
+    assert status == 200 and body["refresh"] is True
+    assert all(action_items.get(i)["done"] for i in ids)
+
+
+def test_todos_off_removes_nav_page_and_actions(port, todos):
+    recording("sf-todo-off", ["Write the screener"])
+    config({"todo": {"enabled": False}, "notion": {"enabled": False}, "slack": {"enabled": False}})
+    assert only(port, "app", "todo") == []
+    assert call(port, "POST", "/api/surfaces/action", {"plugin_id": "todo", "action_id": "mark_done", "action_item_ids": []})[0] == 404

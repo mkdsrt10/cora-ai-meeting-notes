@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from plugin_host import Plugin, View
 
-from . import items
+from . import items, surfaces
 
 PLUGIN = Plugin(
     id="todo",
@@ -19,4 +19,6 @@ PLUGIN = Plugin(
     routes=(("GET", "items", items.get_items), ("POST", "done", items.post_done)),
     hooks={"after_meeting": items.after_meeting},
     enabled_by_default=True,
+    surfaces=surfaces.surfaces,
+    actions=surfaces.ACTIONS,
 )
