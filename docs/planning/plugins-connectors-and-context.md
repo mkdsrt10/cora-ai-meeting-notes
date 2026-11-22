@@ -400,7 +400,7 @@ The local baseline is weak exactly where the harness should help (judge-graded, 
 | UI | Minimal | in the **current** app: one Proposal chip under each Action item + one confirm panel + a Slack send from selection. Not the v2 shell | — |
 
 ### 13.3 Out (parked, not rejected)
-UI shell v2 and feature parity (prototype stays as reference), Surface contract Q32–Q41, Review mode, Suggested inbox, 5 s undo, Task comments (Q15–Q18), Call Log page, Recipe rung / gallery / MCP rung, OAuth, Coaching migration, personal-agent repositioning (`cora-launch/personal-agent.md`). (Q25–Q31 settled in §13.9.)
+(UI shell v2 and the Surface contract Q32–Q41 un-parked 2026-11-22, see §13.10.) Review mode, Suggested inbox, 5 s undo, Task comments (Q15–Q18), Call Log page, Recipe rung / gallery / MCP rung, OAuth, Coaching migration, personal-agent repositioning (`cora-launch/personal-agent.md`). (Q25–Q31 settled in §13.9.)
 
 ### 13.4 Proof: one eval, three arms
 - **Data:** the paired meetings already used in RESEARCH.md. Audio copies were deleted, so the eval reruns the **notes stage from saved transcripts** (local transcript and Gemini transcript each), which isolates the harness from ASR.
@@ -519,3 +519,21 @@ DualCapture ──► .mov (unchanged, canonical)
 - Q60 `cora-notion-sync` keeps writing Call Log pages until Call Log ships; only its Task-related rules move into Notion Usage instructions.
 - Q61 A confirmed link adds a comment ("From ‹meeting›, ‹date›: ‹action item›") and sets the Meeting relation if mapped. No Cora deep link. Never edits a Task's title or body.
 - Q62 One right-side confirm panel for create, link, mark done and Slack, with a 🔒 "what will be sent" line. No modal.
+
+### 13.10 UI shell v2 and the Surface contract (2026-11-22, all accepted)
+Un-parked after the harness build: the plugin side works but sits on the old screens. Prototype `prototype/plugins-ux` (fab55e9) is the visual reference. Surface contract: ADR 0005. Spec: `docs/specs/ui-shell-v2.md`.
+
+- Q32 **Two tracks, one seam:** the plugin side is built; the shell is built around it. The Surface contract is written first as the seam.
+- Q33 **Cora draws, plugins supply data** on every surface. No plugin JS in the app window; To-dos and Coaching JS pages are the exception until they move (Q41).
+- Q34 **Object-attached catalog (v1):** App (nav item + badge, page, Settings section, ⌘K command) · Recording (property row, Notes block, tab, footer suggestion, ⋯ menu) · Action item (inline chip, hover icon, ⋯ menu, on done) · Selection (selection-bar action) · Person (Accounts row) · Folder (defaults). Kinds: Annotation, Action, Panel; external writes are always Proposals in the confirm panel. A surface with nothing in it is not drawn. New surfaces only when a real plugin needs one.
+- Q35 **One chip per Action item:** pending Proposal, then Link, then plugin order; extras behind "+N" or in the side panel.
+- Q36 **Cora owns every shortcut;** new ⌘K command menu lists all actions, plugin actions included.
+- Q37 **Plugins never call each other;** they meet only through core records (Action item, Link, Account).
+- Q38 **Proposals render by type** (`task.create|link|update|comment`, `message.post`, `page.create`), not by plugin.
+- Q39 **Suggested is a core nav item,** shown only when something is pending. Replaces the To-dos › Suggested tab (§12 Q14, §13.9 Q53).
+- Q40 **Parity gates the switch:** every current feature works in the new shell before it becomes default (filters, Folders, Memory, live recording controls and floater, Participants, Speaker timeline, Processing history, Export, Feedback, Reprocess, Coaching, onboarding tour, every Settings panel incl. Live captions and Connections).
+- Q41 **To-dos moves onto the contract** in this build (selection bar + nav item); Coaching (Notes block + tab) right after.
+- Q63 **Side by side:** new shell behind Settings › "Try the new look", same data and server; default once Q40 passes; old shell deleted one release later.
+- Q64 **Tech:** plain JS + CSS, no build step; prototype design tokens are the CSS base. The Notes editor (§12 Q22) stays its own spec; the shell leaves room for it.
+- Q65 **Look:** prototype palette (neutral greys, one purple accent) and type scale; dark mode follows macOS with a manual override.
+- Q66 **Layout:** sidebar = search/⌘K, Home, Suggested, People, plugin nav items, Recent meetings, Folders, Settings. Meeting = document page (breadcrumb, When/People rows, Notes / Transcript / Notepad + plugin tabs, Action-item checklist with chips inside the Notes). Confirm panel slides in from the right.

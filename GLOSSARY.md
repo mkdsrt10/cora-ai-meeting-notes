@@ -58,6 +58,8 @@ Domain terms for Cora. Code, docs and reviews use these names. Architecture voca
 
 **Proposal**: one external write a Plugin suggests for a Recording (create, link, update or comment on a Task; post or update a message), waiting for the user's click. Nothing reaches an external tool without that click. Shown in the app as "Suggested". _Avoid_: action, draft, suggestion.
 
+**Surface**: a place in the app a Plugin can fill, attached to a Cora object (the app, a Recording, an Action item, a selection, a Person, a Folder). Cora draws it; the Plugin supplies only what goes in it. An empty Surface isn't shown. _Avoid_: slot, extension point, widget.
+
 **Outbox**: every pending Proposal, across Recordings. A Proposal leaves it by being confirmed, dismissed, or retired (no longer valid, or 14 days without a decision).
 
 **Task comment**: what one Recording concluded about one Task it discussed (decisions, progress, blockers, open questions), as one comment. Each point is backed by a transcript quote that stays on the Mac. _Avoid_: task update (that changes the Task's fields).
