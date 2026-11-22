@@ -140,7 +140,9 @@ addEventListener('keydown', event => {
 addEventListener('click', event => {
   const target = event.target;
   const nav = target.closest('[data-go]');
-  if(nav){
+  // A control inside a clickable row (Retry on a meeting row) acts on its own.
+  const inner = target.closest('button,a,input,select,textarea,label');
+  if(nav && !(inner && inner !== nav && nav.contains(inner))){
     event.preventDefault();
     let params = {};
     if(nav.dataset.goParams){ try{ params = JSON.parse(nav.dataset.goParams); }catch(error){ params = {}; } }

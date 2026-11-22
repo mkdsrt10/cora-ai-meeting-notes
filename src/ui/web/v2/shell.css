@@ -61,6 +61,15 @@ kbd{font:500 10.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;padding:2px 5p
 .side-rec .live{display:flex;align-items:center;gap:6px;font-weight:600}
 .side-rec .live i{width:8px;height:8px;border-radius:50%;background:var(--red);animation:pulse 1.4s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.35}}
+.folder-row{display:flex;align-items:center}
+.folder-row .nav{flex:1}
+.folder-del{opacity:0}
+.folder-row:hover .folder-del,.folder-del:focus-visible{opacity:1}
+.side-hint{margin:2px 8px;font-size:12px}
+.rec-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.nav.new-note{color:var(--ink);font-weight:550;margin-bottom:6px}
+.nav.new-note .ico{color:var(--red)}
+.home-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:8px}
 main{overflow:auto;position:relative;min-width:0}
 .top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:8px;height:46px;padding:0 20px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(12px);color:var(--ink2);font-size:12.5px}
 .crumb{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap;overflow:hidden}
