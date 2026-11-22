@@ -248,21 +248,28 @@ def test_notion_and_slack_chips_footer_and_selection_action(port, bundled):
     assert notion.requests == [], "the Notion database list is fetched only when its section is opened"
 
 
-def test_notion_settings_section_loads_by_listing_calls_and_saves(port, bundled):
+def test_notion_settings_section_picks_a_pasted_link_and_never_lists_databases(port, bundled):
     notion, _ = bundled
-    notion.on("POST", "/search", {"results": [{"id": "db-1", "title": [{"plain_text": "Team tasks"}]}]})
-    notion.on("GET", "/databases/db-1", {"properties": {"Name": {"type": "title"}, "State": {"type": "status", "status": {"options": [{"name": "Done"}]}}}})
-    notion.on("POST", "/databases/db-1/query", {"results": [], "has_more": False})
-    status, body = call(port, "POST", "/api/surfaces/action", {"plugin_id": "notion", "action_id": "settings_form", "values": {"database_id": "db-1"}})
+    db_id = "1f2e3d4c5b6a79881f2e3d4c5b6a7988"
+    notion.on("GET", f"/databases/{db_id}", {"id": db_id, "title": [{"plain_text": "Team tasks"}], "properties": {
+        "Name": {"type": "title"}, "State": {"type": "status", "status": {"options": [{"name": "Done"}]}}}})
+    notion.on("POST", f"/databases/{db_id}/query", {"results": [], "has_more": False})
+    status, body = call(port, "POST", "/api/surfaces/action", {"plugin_id": "notion", "action_id": "settings_form", "values": {}})
+    assert status == 200, body
+    assert [b.get("name") for b in body["panel"]["blocks"] if b["type"] == "field"][:1] == ["database_link"]
+    status, body = call(port, "POST", "/api/surfaces/action", {"plugin_id": "notion", "action_id": "settings_form",
+                                                               "values": {"database_link": f"https://www.notion.so/x/Team-tasks-{db_id}?v=1"}})
     assert status == 200, body
     names = [b.get("name") for b in body["panel"]["blocks"] if b["type"] == "field"]
-    assert names[:3] == ["database_id", "mapping.title", "mapping.status"] and "usage_instructions" in names
+    assert names[:3] == ["database_link", "mapping.title", "mapping.status"] and "usage_instructions" in names
+    assert any(b["type"] == "text" and b["text"] == "Tasks database: Team tasks" for b in body["panel"]["blocks"])
     status, body = call(port, "POST", "/api/surfaces/action", {"plugin_id": "notion", "action_id": "save_settings", "values": {
-        "database_id": "db-1", "mapping.title": "Name", "mapping.status": "State", "usage_instructions": "Small tasks only"}})
+        "database_link": "", "mapping.title": "Name", "mapping.status": "State", "usage_instructions": "Small tasks only"}})
     assert status == 200 and body["toast"] == "Notion settings saved."
     s = outbox.plugin_settings("notion")
-    assert s["mapping"] == {"title": "Name", "status": "State"} and s["usage_instructions"] == "Small tasks only"
-    assert all(r["path"] in ("/search", "/databases/db-1", "/databases/db-1/query") for r in notion.requests)
+    assert s["database_id"] == db_id and s["mapping"] == {"title": "Name", "status": "State"}
+    assert s["usage_instructions"] == "Small tasks only"
+    assert notion.requests and all(r["path"] != "/search" for r in notion.requests)
 
 
 def test_slack_send_makes_one_proposal_and_nothing_when_disconnected(port, bundled, monkeypatch):

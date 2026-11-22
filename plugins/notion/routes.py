@@ -1,12 +1,14 @@
 """Notion plugin routes (/api/plugins/notion/...) and the daily status pull.
 
 GET  settings     {settings, starter_instructions, connected, tasks_cached, fetched_at}
-POST settings     {database_id?, database_title?, mapping?, usage_instructions?}
-GET  databases    databases shared with the integration (ids and titles; a listing call)
+POST settings     {database_link? or database_id?, mapping?, usage_instructions?} (a pasted link picks the database;
+                  Cora never lists every database the integration can see)
 GET  schema?db=   that database's properties (names, types, options)
 POST refresh      refresh the Task cache now
 """
 from __future__ import annotations
+
+import re
 
 import datetime as dt
 from typing import Any
@@ -26,17 +28,37 @@ def get_settings(req, path: str, query: dict) -> None:
 
 def post_settings(req, path: str, body: dict) -> None:
     before = tasks.settings().get("database_id")
+    body = dict(body)
+    link = str(body.pop("database_link", "") or "").strip()
+    if link:
+        found = _listing(req, database_from_link, link)
+        if found is None:
+            return None
+        body.update(database_id=found["id"], database_title=found["title"], mapping={})
     saved = tasks.save_settings(body)
     if saved.get("database_id") != before:
         tasks.refresh(force=True)
     return req.send_json({"ok": True, "settings": tasks.settings()})
 
 
-def databases(conn) -> list[dict[str, str]]:
-    """Databases shared with the integration: ids and titles (a listing call)."""
-    body = conn.request("POST", "/search", json={"filter": {"property": "object", "value": "database"}, "page_size": 50})
-    return [{"id": d.get("id"), "title": "".join(t.get("plain_text", "") for t in d.get("title") or []) or "Untitled"}
-            for d in body.get("results") or [] if d.get("id")]
+_DB_ID = re.compile(r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}")
+
+
+def database_from_link(conn, link: str) -> dict[str, str]:
+    """A database picked by pasting its Notion link (or id), for workspaces where
+    several shared databases have the same name. One read of that database."""
+    ids = _DB_ID.findall(str(link or "").split("?", 1)[0])
+    if not ids:
+        raise ValueError("Paste the database's link from Notion (⋯ → Copy link)")
+    db_id = ids[-1].replace("-", "")
+    try:
+        body = conn.request("GET", f"/databases/{db_id}")
+    except connections.ConnectionFailed as exc:
+        if exc.kind == "permanent":
+            raise ValueError("Notion can't find that database for Cora. In Notion, open it and add Cora under ⋯ → Connections.") from None
+        raise
+    title = "".join(t.get("plain_text", "") for t in body.get("title") or []) or "Untitled"
+    return {"id": body.get("id") or db_id, "title": title}
 
 
 def schema(conn, db_id: str) -> list[dict[str, Any]]:
@@ -63,13 +85,6 @@ def _listing(req, fn, *args) -> Any:
     except connections.ConnectionFailed as exc:
         req.send_json({"error": f"notion_{exc.kind}"}, 502)
     return None
-
-
-def get_databases(req, path: str, query: dict) -> None:
-    result = _listing(req, databases)
-    if result is None:
-        return None
-    return req.send_json({"databases": result})
 
 
 def get_schema(req, path: str, query: dict) -> None:

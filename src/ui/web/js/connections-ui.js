@@ -14,14 +14,16 @@ function optionList(values, current, empty = '—'){
 }
 
 async function renderNotionSettings(slot){
-  const [{ settings, starter_instructions, tasks_cached, fetched_at }, { databases }] = await Promise.all([
-    api('/api/plugins/notion/settings'), api('/api/plugins/notion/databases')]);
+  // No listing of every database the integration can see: the user pastes the link.
+  const { settings, starter_instructions, tasks_cached, fetched_at } = await api('/api/plugins/notion/settings');
   const dbId = settings.database_id || '';
   const props = dbId ? (await api(`/api/plugins/notion/schema?db=${encodeURIComponent(dbId)}`)).properties : [];
   const mapping = settings.mapping || {};
   const statusProp = props.find(p => p.name === mapping.status);
-  slot.innerHTML = `<div class="settings-field"><label for="notionDatabase">Tasks database</label>
-      <select id="notionDatabase">${optionList(databases.map(d => ({ value: d.id, label: d.title })), dbId, 'Pick the database you share with the integration')}</select></div>
+  slot.innerHTML = `<p>${dbId ? `Tasks database: <strong>${esc(settings.database_title || 'Untitled')}</strong>` : 'No Tasks database picked yet.'}</p>
+    <div class="settings-field"><label for="notionDatabaseLink">${dbId ? 'Change database' : 'Tasks database link'}</label>
+      <input id="notionDatabaseLink" class="auth-input" type="text" autocomplete="off" placeholder="https://www.notion.so/…">
+      <p class="muted">In Notion, open your Tasks database and use ⋯ → Copy link, then paste it here. Add Cora under ⋯ → Connections first.</p></div>
     ${dbId ? NOTION_MAP.map(([key, label, types]) => `<div class="settings-field"><label for="notionMap-${key}">${esc(label)}</label>
       <select id="notionMap-${key}" data-notion-map="${key}">${optionList(props.filter(p => types.includes(p.type)).map(p => ({ value: p.name, label: p.name })), mapping[key])}</select></div>`).join('')
       + (statusProp && statusProp.type !== 'checkbox' ? `<div class="settings-field"><label for="notionMap-done_value">Status that means done</label>
@@ -34,10 +36,9 @@ async function renderNotionSettings(slot){
 }
 
 async function saveNotionSettings(){
-  const select = $('#notionDatabase');
   const mapping = {};
   $$('[data-notion-map]').forEach(s => { if(s.value) mapping[s.dataset.notionMap] = s.value; });
-  const body = { database_id: select.value, database_title: select.selectedOptions[0]?.textContent || '', mapping, usage_instructions: $('#notionUsage').value };
+  const body = { mapping, usage_instructions: $('#notionUsage').value };
   await api('/api/plugins/notion/settings', { method: 'POST', body: JSON.stringify(body) });
   trackAction('change_setting');
   toast('Notion settings saved.');
@@ -46,9 +47,9 @@ async function saveNotionSettings(){
 registerConnectionSettings('notion', renderNotionSettings);
 
 addEventListener('change', async event => {
-  if(event.target.id !== 'notionDatabase') return;
+  if(event.target.id !== 'notionDatabaseLink' || !event.target.value.trim()) return;
   try{
-    await api('/api/plugins/notion/settings', { method: 'POST', body: JSON.stringify({ database_id: event.target.value, database_title: event.target.selectedOptions[0]?.textContent || '', mapping: {} }) });
+    await api('/api/plugins/notion/settings', { method: 'POST', body: JSON.stringify({ database_link: event.target.value.trim() }) });
     await renderNotionSettings(event.target.closest('[data-connection-extra]'));
   }catch(error){ toast(error.message, true); }
 });

@@ -29,7 +29,6 @@ PLUGIN = Plugin(
     routes=(
         ("GET", "settings", routes.get_settings),
         ("POST", "settings", routes.post_settings),
-        ("GET", "databases", routes.get_databases),
         ("GET", "schema", routes.get_schema),
         ("POST", "refresh", routes.post_refresh),
     ),
