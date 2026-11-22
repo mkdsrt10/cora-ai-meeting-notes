@@ -32,11 +32,25 @@ function setMeter(el, db) {
   el.classList.toggle('loud', db > -5);
 }
 
+// Icon buttons (floater.html): Mute and Pause swap their icon and label.
+const svg = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICONS = {
+  mic: svg('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/>'),
+  micOff: svg('<path d="M15 9.5V6a3 3 0 0 0-5.7-1.3M9 9v2a3 3 0 0 0 4.6 2.5M18.5 11a6.5 6.5 0 0 1-1.1 3.6M5.5 11a6.5 6.5 0 0 0 10.2 5.3M12 17.5V21M3 3l18 18"/>'),
+  pause: svg('<path d="M9 5v14M15 5v14"/>'),
+  play: svg('<path d="M8 5l11 7-11 7z"/>'),
+};
+function setIcon(button, icon, label) {
+  if (!button) return;
+  button.innerHTML = ICONS[icon];
+  button.setAttribute?.('aria-label', label);
+}
+
 const btnMute = document.getElementById('btnMute');
 function updateMuteUI(muted) {
   isMicMuted = muted;
   if (btnMute) {
-    btnMute.textContent = isMicMuted ? '🔇 Muted' : '🎤 Mute';
+    setIcon(btnMute, isMicMuted ? 'micOff' : 'mic', isMicMuted ? 'Unmute microphone' : 'Mute microphone');
     btnMute.classList.toggle('btn-muted', isMicMuted);
     btnMute.title = isMicMuted ? 'Unmute microphone (speech will be recorded)' : 'Mute microphone (private moments won\'t be recorded)';
   }
@@ -61,7 +75,8 @@ if (window.electronAPI) {
       const dot = document.getElementById('liveDot');
       const pauseBtn = document.getElementById('btnPause');
       if (dot) dot.classList.toggle('paused', isPaused);
-      if (pauseBtn) pauseBtn.textContent = isPaused ? '▶' : '⏸';
+      setIcon(pauseBtn, isPaused ? 'play' : 'pause', isPaused ? 'Resume recording' : 'Pause recording');
+      if (pauseBtn) pauseBtn.title = isPaused ? 'Resume recording' : 'Pause recording';
     });
   }
 
@@ -80,7 +95,7 @@ if (window.electronAPI) {
     micDeviceHeard = true;
     const group = document.getElementById('meterMicGroup');
     if (group) group.title = name ? `Microphone: ${name}` : 'Your microphone';
-    if (name && micDevice && name !== micDevice) showToast(`🎤 Now recording with ${name}`);
+    if (name && micDevice && name !== micDevice) showToast(`Now recording with ${name}`);
     micDevice = name || null;
   };
   if (window.electronAPI.onMicDevice) window.electronAPI.onMicDevice(showMicDevice);
@@ -165,7 +180,7 @@ timerInterval = setInterval(updateTimer, 1000);
 document.getElementById('btnSnap')?.addEventListener('click', async () => {
   if (window.electronAPI?.snapScreenshot) {
     await window.electronAPI.snapScreenshot();
-    showToast('📸 Slide captured with OCR');
+    showToast('Slide captured');
   }
 });
 
@@ -173,7 +188,7 @@ btnMute?.addEventListener('click', async () => {
   if (window.electronAPI?.toggleMuteMic) {
     const res = await window.electronAPI.toggleMuteMic(!isMicMuted);
     updateMuteUI(res?.isMuted ?? !isMicMuted);
-    showToast(isMicMuted ? '🔇 Microphone muted' : '🎤 Microphone unmuted');
+    showToast(isMicMuted ? 'Microphone muted' : 'Microphone unmuted');
   }
 });
 
@@ -231,7 +246,7 @@ noteInput?.addEventListener('keydown', async (e) => {
       if (window.electronAPI?.appendNote) {
         await window.electronAPI.appendNote(formatted);
       }
-      showToast('📝 Note added to meeting');
+      showToast('Note added to the meeting');
     }
     toggleNoteDrawer(false);
   } else if (e.key === 'Escape') {

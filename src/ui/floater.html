@@ -28,83 +28,79 @@
       gap: 6px;
       padding: 3px;
     }
+    /* Matches the v2 shell: near-black glass, one purple accent, icon buttons. */
     .floater-pill {
       height: 40px;
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 0 10px;
-      background: rgba(20, 20, 24, 0.88);
-      backdrop-filter: blur(24px) saturate(180%);
-      -webkit-backdrop-filter: blur(24px) saturate(180%);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 999px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), 0 1px 2px rgba(255, 255, 255, 0.1) inset;
+      gap: 10px;
+      padding: 0 6px 0 12px;
+      background: rgba(20, 20, 22, 0.92);
+      backdrop-filter: blur(28px) saturate(180%);
+      -webkit-backdrop-filter: blur(28px) saturate(180%);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 14px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
       -webkit-app-region: drag;
     }
     .drag-handle {
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 7px;
       cursor: grab;
       flex-shrink: 0;
     }
     .pulse-dot {
-      width: 8px;
-      height: 8px;
+      width: 7px;
+      height: 7px;
       border-radius: 50%;
-      background: #ef4444;
-      animation: pulse 1.5s infinite;
+      background: #f04444;
+      animation: pulse 1.6s infinite;
       flex-shrink: 0;
     }
     .pulse-dot.paused {
-      background: #f59e0b;
+      background: #e0a23a;
       animation: none;
     }
     @keyframes pulse {
-      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-      70% { transform: scale(1.1); box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
-      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+      0% { box-shadow: 0 0 0 0 rgba(240, 68, 68, 0.55); }
+      70% { box-shadow: 0 0 0 5px rgba(240, 68, 68, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(240, 68, 68, 0); }
     }
     .timer {
       font-variant-numeric: tabular-nums;
-      font-weight: 700;
-      font-size: 11.5px;
-      letter-spacing: 0.02em;
-      color: #f8fafc;
-      min-width: 36px;
+      font-weight: 560;
+      font-size: 12.5px;
+      color: #f4f4f5;
+      min-width: 38px;
     }
     .divider {
       width: 1px;
-      height: 16px;
-      background: rgba(255, 255, 255, 0.12);
+      height: 18px;
+      background: rgba(255, 255, 255, 0.08);
       flex-shrink: 0;
     }
     .audio-meters {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 10px;
       flex-shrink: 0;
       -webkit-app-region: no-drag;
     }
     .meter-group {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 5px;
     }
     .meter-label {
-      font-size: 9px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: #94a3b8;
-      width: 22px;
-      text-align: right;
+      font-size: 10px;
+      font-weight: 500;
+      color: #a1a1aa;
     }
     .meter-track {
-      width: 38px;
-      height: 5px;
-      background: rgba(255, 255, 255, 0.1);
+      width: 34px;
+      height: 4px;
+      background: rgba(255, 255, 255, 0.08);
       border-radius: 999px;
       overflow: hidden;
       position: relative;
@@ -113,65 +109,47 @@
       height: 100%;
       width: 0%;
       border-radius: 999px;
-      background: #10b981;
+      background: #8b8bf0;
       transition: width 0.08s linear, background-color 0.15s ease;
     }
     .meter-fill.quiet {
-      background: #f59e0b;
+      background: #e0a23a;
     }
     .meter-fill.loud {
-      background: #ef4444;
+      background: #f04444;
     }
     .actions {
       display: flex;
       align-items: center;
-      gap: 4px;
+      gap: 2px;
       margin-left: auto;
       -webkit-app-region: no-drag;
     }
     .btn {
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      color: #e2e8f0;
-      border-radius: 999px;
-      padding: 3px 8px;
-      font-size: 10.5px;
-      font-weight: 500;
+      width: 28px;
+      height: 28px;
+      background: transparent;
+      border: 0;
+      color: #d4d4d8;
+      border-radius: 8px;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      transition: all 0.15s ease;
-      white-space: nowrap;
+      justify-content: center;
+      transition: background-color 0.12s ease, color 0.12s ease;
       outline: none;
     }
-    .btn:hover {
-      background: rgba(255, 255, 255, 0.16);
-      color: #ffffff;
-      border-color: rgba(255, 255, 255, 0.2);
-    }
-    .btn:active {
-      transform: scale(0.96);
-    }
-    .btn-danger {
-      background: rgba(239, 68, 68, 0.2);
-      border-color: rgba(239, 68, 68, 0.3);
-      color: #fca5a5;
-    }
-    .btn-danger:hover {
-      background: rgba(239, 68, 68, 0.35);
-      color: #ffffff;
-      border-color: rgba(239, 68, 68, 0.5);
-    }
-    .btn-muted {
-      background: rgba(239, 68, 68, 0.25) !important;
-      border-color: rgba(239, 68, 68, 0.4) !important;
-      color: #fca5a5 !important;
-    }
+    .btn svg { width: 15px; height: 15px; }
+    .btn:hover { background: rgba(255, 255, 255, 0.09); color: #ffffff; }
+    .btn:focus-visible { box-shadow: 0 0 0 2px #8b8bf0; }
+    .btn:active { transform: scale(0.94); }
+    .btn-danger { background: #e5484d; color: #ffffff; margin-left: 4px; }
+    .btn-danger:hover { background: #f05358; }
+    .btn-muted { background: rgba(229, 72, 77, 0.2) !important; color: #ff9592 !important; }
     .note-drawer {
       display: none;
       width: 100%;
-      background: rgba(20, 20, 24, 0.94);
+      background: rgba(20, 20, 22, 0.94);
       backdrop-filter: blur(24px);
       -webkit-backdrop-filter: blur(24px);
       border: 1px solid rgba(255, 255, 255, 0.14);
@@ -205,8 +183,8 @@
        while the Live transcript is on; You / Them by track. */
     .live-captions {
       width: 100%;
-      background: rgba(20, 20, 24, 0.9);
-      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(20, 20, 22, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.09);
       border-radius: 12px;
       padding: 5px 9px;
       -webkit-app-region: drag;
@@ -224,7 +202,7 @@
       border-radius: 999px;
       padding: 0 6px;
     }
-    .live-badge { background: rgba(59, 130, 246, 0.3); color: #bfdbfe; }
+    .live-badge { background: rgba(139, 139, 240, 0.22); color: #c7c7fb; }
     .live-paused { background: rgba(245, 158, 11, 0.25); color: #fcd34d; }
     .live-badge[hidden], .live-paused[hidden] { display: none; }
     .caption-line {
@@ -246,7 +224,7 @@
       top: -24px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(16, 185, 129, 0.9);
+      background: rgba(91, 91, 214, 0.95);
       color: #ffffff;
       font-size: 10px;
       font-weight: 600;
@@ -264,7 +242,7 @@
   </style>
 </head>
 <body>
-  <div class="toast" id="toast">Slide snapped!</div>
+  <div class="toast" id="toast"></div>
   <div class="floater-wrapper">
     <div class="floater-pill">
       <div class="drag-handle" title="Drag to reposition">
@@ -283,7 +261,7 @@
           </div>
         </div>
         <div class="meter-group">
-          <span class="meter-label">Sys</span>
+          <span class="meter-label">Them</span>
           <div class="meter-track">
             <div class="meter-fill" id="meterSys"></div>
           </div>
@@ -294,12 +272,12 @@
 
       <!-- Quick Action Controls -->
       <div class="actions">
-        <button class="btn" id="btnSnap" title="Snap current slide with OCR (Cmd+Shift+S)">📸 Snap</button>
-        <button class="btn" id="btnMute" title="Mute your microphone so private moments aren't recorded">🎤 Mute</button>
-        <button class="btn" id="btnPause" title="Pause / Resume recording">⏸</button>
-        <button class="btn" id="btnNote" title="Add a quick note">📝</button>
-        <button class="btn btn-danger" id="btnStop" title="Stop & Finalize meeting">⏹</button>
-        <button class="btn" id="btnOpen" title="Open Cora dashboard">↗</button>
+        <button class="btn" id="btnSnap" title="Snap the current slide (⌘⇧S)" aria-label="Snap slide"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
+        <button class="btn" id="btnMute" title="Mute your microphone so private moments aren't recorded" aria-label="Mute microphone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg></button>
+        <button class="btn" id="btnPause" title="Pause recording" aria-label="Pause recording"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5v14M15 5v14"/></svg></button>
+        <button class="btn" id="btnNote" title="Add a quick note" aria-label="Add a quick note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h10l4 4v12H5z"/><path d="M9 12h6M9 16h4"/></svg></button>
+        <button class="btn" id="btnOpen" title="Open Cora" aria-label="Open Cora"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></svg></button>
+        <button class="btn btn-danger" id="btnStop" title="Stop and process the meeting" aria-label="Stop recording"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5" fill="currentColor"/></svg></button>
       </div>
     </div>
 
