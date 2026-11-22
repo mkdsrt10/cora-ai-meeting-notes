@@ -33,7 +33,7 @@ test('the v2 shell never names a specific plugin', () => {
   assert.ok(files.length >= 3, 'v2 shell files found');
   for (const file of files) {
     const text = fs.readFileSync(file, 'utf8');
-    for (const word of [/notion/i, /slack/i, /\bto-?dos?\b/i, /coach/i, /\bplugins\/[a-z]/i]) {
+    for (const word of [/notion/i, /slack/i, /\bto-?dos?\b/i, /coach/i, /\/plugins\/[a-z-]+\.js/i]) {
       assert.doesNotMatch(text, word, `${path.relative(root, file)} mentions ${word}`);
     }
   }

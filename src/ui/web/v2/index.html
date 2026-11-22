@@ -38,6 +38,50 @@
 <div class="scrim" id="palette" hidden></div>
 <div class="tour" id="tour" role="dialog" aria-modal="true" aria-labelledby="tourTitle" hidden></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<!-- Markup for reused classic panels (js/providers.js binds to it at load);
+     Settings moves it into the open panel and parks it here again. -->
+<div id="v2Park" hidden><div data-parked="byom">
+<h3 class="sec">Bring your own key</h3>
+            <div class="seg byom-tabs" id="byomPresetTabs"></div>
+            <p class="muted" id="byomPresetNote"></p>
+
+            <div class="field" id="byomBaseUrlField">
+              <label for="byomBaseUrl">Base URL</label>
+              <input type="text" id="byomBaseUrl" class="inp" spellcheck="false" autocomplete="off">
+            </div>
+            <label class="byom-advanced" id="byomAdvancedField"><input type="checkbox" id="byomAdvanced"> Change base URL</label>
+
+            <div class="field" id="byomKeyField">
+              <label for="byomKey"><span id="byomKeyLabel">API key</span> <span class="badge" id="byomKeySaved" hidden>Saved</span></label>
+              <input type="password" id="byomKey" class="inp" autocomplete="off" spellcheck="false">
+            </div>
+
+            <div class="field">
+              <label for="byomModel">Model</label>
+              <div class="byom-model-row">
+                <input type="text" id="byomModel" class="inp" list="byomModelList" spellcheck="false" autocomplete="off">
+                <button class="btn sm" id="byomLoadModels" type="button">Load models</button>
+              </div>
+              <datalist id="byomModelList"></datalist>
+            </div>
+
+            <div class="field" id="byomAsrField">
+              <label for="byomAsrModel">Transcription model (optional)</label>
+              <input type="text" id="byomAsrModel" class="inp" spellcheck="false" autocomplete="off">
+            </div>
+
+            <div id="byomVertexField" hidden>
+              <button class="btn sm" id="byomOpenVertex" type="button">Use Google Cloud (Vertex AI) instead</button>
+            </div>
+
+            <p class="onboarding-error" id="byomError" style="display:none;margin-top:8px"></p>
+            <p class="onboarding-success" id="byomSuccess" style="display:none;margin-top:8px"></p>
+
+            <div style="display:flex;gap:8px;margin-top:16px">
+              <button class="btn" id="byomTestBtn" type="button">Test</button>
+              <button class="btn pri" id="byomSaveBtn" type="button">Save</button>
+            </div>
+</div></div>
 
 <script src="/js/lib.js"></script>
 <script src="/js/usage.js"></script>
@@ -48,10 +92,14 @@
 <script src="/v2/js/palette.js"></script>
 <script src="/js/processing.js"></script>
 <script src="/js/processing-history.js"></script>
+<script src="/js/model-setup.js"></script>
+<script src="/js/providers.js"></script>
 <script src="/js/transcript.js"></script>
 <script src="/v2/js/confirm.js"></script>
 <script src="/v2/js/meeting.js"></script>
 <script src="/v2/js/settings.js"></script>
+<script src="/v2/js/settings-panels.js"></script>
+<script src="/v2/js/pages.js"></script>
 <script src="/v2/js/home.js"></script>
 <script src="/v2/js/init.js"></script>
 </body>

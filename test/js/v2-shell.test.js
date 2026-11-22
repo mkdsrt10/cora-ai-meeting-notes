@@ -17,7 +17,7 @@ test('v2 loads Home in the frame with an empty state', async () => {
 test('Back to the classic look writes ui_shell=classic and opens the classic page', async () => {
   const page = loadPage('v2/index.html', { settings: { ui_shell: 'v2' } });
   await page.flush();
-  await page.click('[data-go="settings"]');
+  await page.run('go("settings", { panel: "appearance" })');
   await page.click('[data-switch-shell="classic"]');
   assert.equal(page.store.ui_shell, 'classic');
   assert.deepEqual(page.location.assigned, ['/']);
@@ -27,7 +27,7 @@ test('theme follows the system until overridden, and the override is saved', asy
   const page = loadPage('v2/index.html', { settings: { ui_theme: 'dark' } });
   await page.flush();
   assert.equal(page.doc.documentElement.getAttribute('data-theme'), 'dark', 'saved override applied at start');
-  await page.click('[data-go="settings"]');
+  await page.run('go("settings", { panel: "appearance" })');
   assert.equal(page.$('[data-theme-choice="dark"]').getAttribute('aria-checked'), 'true');
   await page.click('[data-theme-choice="system"]');
   assert.equal(page.doc.documentElement.getAttribute('data-theme'), null, 'system: no override attribute, CSS follows macOS');
@@ -50,7 +50,7 @@ test('sidebar collapses and comes back, by button and by ⌘\\', async () => {
 test('every control in the frame is a real button or link (reachable by Tab)', async () => {
   const page = loadPage('v2/index.html');
   await page.flush();
-  await page.click('[data-go="settings"]');
+  await page.run('go("settings", { panel: "appearance" })');
   for (const el of page.$$('[data-go],[data-switch-shell],[data-theme-choice],[data-settings-panel]')) {
     assert.ok(['button', 'a'].includes(el.localName) || el.getAttribute('tabindex') === '0', `${el.outerHTML.slice(0, 80)} is focusable`);
   }

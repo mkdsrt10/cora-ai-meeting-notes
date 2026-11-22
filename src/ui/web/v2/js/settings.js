@@ -6,8 +6,8 @@
 const settingsPanels = [];
 function defineSettingsPanel(id, { title, render, when }){
   const existing = settingsPanels.findIndex(p => p.id === id);
-  const panel = { id, title, render, when };
-  if(existing >= 0) settingsPanels[existing] = panel; else settingsPanels.push(panel);
+  if(existing >= 0) settingsPanels.splice(existing, 1);
+  settingsPanels.push({ id, title, render, when });
 }
 
 defineSettingsPanel('appearance', {

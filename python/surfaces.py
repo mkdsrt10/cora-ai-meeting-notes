@@ -164,6 +164,34 @@ def outbox_footer(ctx: SurfaceContext, noun: str) -> list[Contribution]:
                          proposal_key=open_[0]["key"])]
 
 
+def account_row(person_id: str, service: str, label: str) -> Contribution:
+    """The person.accounts row for one Connection: who this Person is there,
+    suggested by name or confirmed (accounts.py). Refreshes the user list
+    first: names only, no meeting content (ADR 0002)."""
+    import accounts
+    accounts.refresh_users(service)
+    state = accounts.account_state(person_id, service)
+    account = state.get("account") or {}
+    return Contribution("person.accounts", "annotation", label, id=str(account.get("id") or "") or None,
+                        target=person_id, state=state["state"], detail=account.get("name") or None, icon=service,
+                        action=Action("account_confirm", "app") if state["state"] == "suggested" else None)
+
+
+def account_actions(service: str) -> dict[str, Callable[[ActionContext], dict]]:
+    """Confirm / Not them on a suggested Account, as a plugin's Actions."""
+    import accounts
+
+    def decide(confirm: bool):
+        def run(ctx: ActionContext) -> dict[str, Any]:
+            person_id, external_id = str(ctx.values.get("person_id") or ""), str(ctx.values.get("external_id") or "")
+            if not person_id or not external_id:
+                raise ValueError("person_id and external_id are required")
+            (accounts.confirm if confirm else accounts.reject)(person_id, service, external_id)
+            return {"refresh": True}
+        return run
+    return {"account_confirm": decide(True), "account_reject": decide(False)}
+
+
 # ---- the read side ------------------------------------------------------------
 
 def _context_for(plugin_id: str, context: str, target: str | None, recording: dict | None,

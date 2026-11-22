@@ -33,6 +33,9 @@ import paths
 import policy
 
 SERVICES = ("notion", "slack")
+# How the UI names each service and hints its token, so a renderer can draw
+# Settings › Connections from data alone (UI shell v2, ADR 0005).
+DISPLAY = {"notion": ("Notion", "secret_… / ntn_…"), "slack": ("Slack", "xoxp-…")}
 NOTION_VERSION = "2022-06-28"
 MAX_ATTEMPTS = 3
 _ID_SEGMENT = re.compile(r"^[0-9a-fA-F-]{16,}$|^[A-Z][A-Z0-9]{6,}$")
@@ -307,4 +310,5 @@ def status() -> dict[str, dict[str, Any]]:
         rows = {r["service"]: dict(r) for r in c.execute("SELECT * FROM connections")}
     blocked = policy.lockdown_enabled()
     return {s: {"connected": s in rows or s in _fakes, "account_label": (rows.get(s) or {}).get("account_label") or "",
-                "checked_at": (rows.get(s) or {}).get("checked_at"), "blocked_policy": blocked} for s in SERVICES}
+                "checked_at": (rows.get(s) or {}).get("checked_at"), "blocked_policy": blocked,
+                "label": DISPLAY.get(s, (s.title(), ""))[0], "token_hint": DISPLAY.get(s, ("", ""))[1]} for s in SERVICES}

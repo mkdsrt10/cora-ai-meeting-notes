@@ -12,6 +12,17 @@ def get_api_plugins(req, path: str, query: dict) -> None:
     return req.send_json({"plugins": plugin_host.views(), "stages": recording_stage.labels()})
 
 
+@route("GET", "/api/plugin-states")
+def get_api_plugin_states(req, path: str, query: dict) -> None:
+    return req.send_json({"plugins": plugin_host.states()})
+
+
+@route("POST", "/api/plugin-states")
+def post_api_plugin_state(req, path: str, body: dict) -> None:
+    plugin_host.set_enabled(str(body.get("id") or ""), bool(body.get("enabled")))
+    return req.send_json({"ok": True, "plugins": plugin_host.states()})
+
+
 @route("GET", "/api/plugins/", prefix=True)
 def get_api_plugin_route(req, path: str, query: dict) -> None:
     handler = plugin_host.route_for("GET", path)

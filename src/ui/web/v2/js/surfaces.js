@@ -189,7 +189,9 @@ addEventListener('click', async event => {
     const request = { plugin: act.dataset.plugin, action: act.dataset.surfaceAction, context: ctx.context, id: ctx.id };
     if(appliesTo === 'selection') request.itemIds = [...selectedItemIds()];
     if(appliesTo === 'action_item') request.itemIds = [act.dataset.target || act.closest('[data-item]')?.dataset.item].filter(Boolean);
-    await runSurfaceAction(request);
+    if(act.dataset.values){ try{ request.values = JSON.parse(act.dataset.values); }catch(error){ request.values = {}; } }
+    const result = await runSurfaceAction(request);
+    if(result?.refresh) document.dispatchEvent(new Event('surfacesrefresh'));
   }
 });
 

@@ -210,6 +210,11 @@ def bundled(fake_conn):
     config({"todo": {"enabled": False}, "coaching": {"enabled": False}})
     notion, slack = fake_conn("notion"), fake_conn("slack")
     yield notion, slack
+    for plugin_id in ("notion", "slack"):
+        db.set_setting(f"plugin_settings.{plugin_id}", {})
+    with db.get_db() as conn:
+        conn.execute("DELETE FROM outbox WHERE recording_id LIKE 'sf-%'")
+        conn.commit()
     config()
 
 
@@ -275,3 +280,22 @@ def test_slack_send_makes_one_proposal_and_nothing_when_disconnected(port, bundl
     import connections
     connections.use("slack", None)
     assert [c for c in call(port, "GET", "/api/surfaces?context=recording&id=sf-slack")[1]["contributions"] if c["plugin_id"] == "slack"] == []
+
+
+# ---- Settings in the v2 shell draws from data (T5) ------------------------------
+
+def test_plugin_states_turn_a_plugin_off_everywhere(port, plugins):
+    status, body = call(port, "GET", "/api/plugin-states")
+    states = {p["id"]: p["enabled"] for p in body["plugins"]}
+    assert states["surf-a"] is True and states["notion"] is False
+    assert call(port, "POST", "/api/plugin-states", {"id": "surf-a", "enabled": False})[0] == 200
+    assert only(port, "app", "surf-a") == []
+    assert call(port, "POST", "/api/plugin-states", {"id": "nobody", "enabled": True})[0] == 400
+    assert call(port, "POST", "/api/plugin-states", {"id": "surf-a", "enabled": True})[0] == 200
+    assert only(port, "app", "surf-a")
+
+
+def test_connections_carry_their_own_label_and_token_hint(port):
+    status, body = call(port, "GET", "/api/connections")
+    for service, c in body["connections"].items():
+        assert c["label"] and c["token_hint"], service

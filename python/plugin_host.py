@@ -136,6 +136,28 @@ def enabled_plugins() -> list[Plugin]:
     return [p for p in plugins() if bool((flags.get(p.id) or {}).get("enabled", p.enabled_by_default))]
 
 
+def states() -> list[dict[str, Any]]:
+    """Every bundled plugin with its on/off state, for Settings › Plugins."""
+    on = {p.id for p in enabled_plugins()}
+    return [{"id": p.id, "name": p.name, "enabled": p.id in on, "enabled_by_default": p.enabled_by_default}
+            for p in plugins()]
+
+
+def set_enabled(plugin_id: str, enabled: bool) -> None:
+    """Turn one plugin on or off: plugins.<id>.enabled in config.json."""
+    if not any(p.id == plugin_id for p in plugins()):
+        raise ValueError("unknown plugin")
+    try:
+        value = json.loads(paths.CONFIG_PATH.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        value = {}
+    if not isinstance(value, dict):
+        value = {}
+    flags = value.setdefault("plugins", {})
+    flags.setdefault(plugin_id, {})["enabled"] = bool(enabled)
+    paths.CONFIG_PATH.write_text(json.dumps(value, indent=2))
+
+
 def views() -> list[dict[str, Any]]:
     """Enabled plugins and their Views, for GET /api/plugins."""
     return [{

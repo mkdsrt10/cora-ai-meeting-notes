@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 import connections
-from surfaces import Action, Contribution, SurfaceContext, SurfaceError, outbox_chips
+from surfaces import Action, Contribution, SurfaceContext, SurfaceError, account_actions, account_row, outbox_chips
 
 from . import composer
 
@@ -32,17 +32,8 @@ def surfaces(ctx: SurfaceContext) -> list[Contribution]:
                 {"type": "text", "muted": True, "text": "Slack messages are sent only from selected Action items, after you confirm the exact text and destination."},
             ]})]
     if ctx.context == "person":
-        return [_account_row(ctx.id or "")]
+        return [account_row(ctx.id or "", "slack", "Slack")]
     return []
-
-
-def _account_row(person_id: str) -> Contribution:
-    import accounts
-    accounts.refresh_users("slack")   # names only; no meeting content
-    state = accounts.account_state(person_id, "slack")
-    account = state.get("account") or {}
-    return Contribution("person.accounts", "annotation", "Slack", id=str(account.get("id") or "") or None,
-                        target=person_id, state=state["state"], detail=account.get("name") or None, icon="slack")
 
 
 def send(ctx) -> dict[str, Any]:
@@ -67,4 +58,4 @@ def save_settings(ctx) -> dict[str, Any]:
     return {"toast": "Slack settings saved."}
 
 
-ACTIONS = {"send": send, "save_settings": save_settings}
+ACTIONS = {"send": send, "save_settings": save_settings, **account_actions("slack")}

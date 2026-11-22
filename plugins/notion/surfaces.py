@@ -13,7 +13,8 @@ from __future__ import annotations
 from typing import Any
 
 import connections
-from surfaces import Action, Contribution, SurfaceContext, SurfaceError, outbox_chips, outbox_footer
+from surfaces import (Action, Contribution, SurfaceContext, SurfaceError, account_actions, account_row, outbox_chips,
+                      outbox_footer)
 
 from . import routes, tasks
 
@@ -44,15 +45,6 @@ def surfaces(ctx: SurfaceContext) -> list[Contribution]:
     if ctx.context == "person" and connected:
         return [account_row(ctx.id or "", "notion", "Notion")]
     return []
-
-
-def account_row(person_id: str, service: str, label: str) -> Contribution:
-    import accounts
-    accounts.refresh_users(service)   # names only; no meeting content
-    state = accounts.account_state(person_id, service)
-    account = state.get("account") or {}
-    return Contribution("person.accounts", "annotation", label, id=str(account.get("id") or "") or None,
-                        target=person_id, state=state["state"], detail=account.get("name") or None, icon=service)
 
 
 def _options(values: list[tuple[str, str]], current: str | None, empty: str = "—") -> list[dict[str, str]]:
@@ -134,4 +126,4 @@ def suggest_again(ctx) -> dict[str, Any]:
 
 
 ACTIONS = {"settings_form": settings_form, "save_settings": save_settings, "refresh_tasks": refresh_tasks,
-           "suggest_again": suggest_again}
+           "suggest_again": suggest_again, **account_actions("notion")}
