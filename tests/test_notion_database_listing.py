@@ -39,7 +39,7 @@ def test_a_link_cora_cannot_see_says_to_share_it(fake_conn):
     def missing(r):
         raise connections.ConnectionFailed("permanent", 404, "object_not_found")
     fake.on("GET", f"/databases/{DB}", missing)
-    with pytest.raises(ValueError, match="Connections"):
+    with pytest.raises(ValueError, match="can.t find that database"):
         routes.database_from_link(fake, DB)
     with pytest.raises(ValueError, match="Copy link"):
         routes.database_from_link(fake, "https://www.notion.so/not-a-database")

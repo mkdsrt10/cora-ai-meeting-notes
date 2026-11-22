@@ -76,8 +76,7 @@ def settings_form(ctx) -> dict[str, Any]:
         {"type": "text", "text": f"Tasks database: {title}" if s.get("database_id") else "No Tasks database picked yet."},
         {"type": "field", "name": "database_link", "label": "Change database" if s.get("database_id") else "Tasks database link",
          "input": "text", "value": "", "reload": True, "placeholder": "https://www.notion.so/…",
-         "help": "In Notion, open your Tasks database and use ⋯ → Copy link, then paste it here. "
-                 "Add Cora under ⋯ → Connections first."}]
+         "help": "In Notion, open your Tasks database and use ⋯ → Copy link, then paste it here."}]
     if s.get("database_id"):
         for key, label, types in MAP:
             blocks.append({"type": "field", "name": f"mapping.{key}", "label": label, "input": "select",

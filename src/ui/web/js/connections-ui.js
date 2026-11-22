@@ -23,7 +23,7 @@ async function renderNotionSettings(slot){
   slot.innerHTML = `<p>${dbId ? `Tasks database: <strong>${esc(settings.database_title || 'Untitled')}</strong>` : 'No Tasks database picked yet.'}</p>
     <div class="settings-field"><label for="notionDatabaseLink">${dbId ? 'Change database' : 'Tasks database link'}</label>
       <input id="notionDatabaseLink" class="auth-input" type="text" autocomplete="off" placeholder="https://www.notion.so/…">
-      <p class="muted">In Notion, open your Tasks database and use ⋯ → Copy link, then paste it here. Add Cora under ⋯ → Connections first.</p></div>
+      <p class="muted">In Notion, open your Tasks database and use ⋯ → Copy link, then paste it here.</p></div>
     ${dbId ? NOTION_MAP.map(([key, label, types]) => `<div class="settings-field"><label for="notionMap-${key}">${esc(label)}</label>
       <select id="notionMap-${key}" data-notion-map="${key}">${optionList(props.filter(p => types.includes(p.type)).map(p => ({ value: p.name, label: p.name })), mapping[key])}</select></div>`).join('')
       + (statusProp && statusProp.type !== 'checkbox' ? `<div class="settings-field"><label for="notionMap-done_value">Status that means done</label>

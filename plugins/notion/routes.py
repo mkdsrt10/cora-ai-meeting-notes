@@ -55,7 +55,7 @@ def database_from_link(conn, link: str) -> dict[str, str]:
         body = conn.request("GET", f"/databases/{db_id}")
     except connections.ConnectionFailed as exc:
         if exc.kind == "permanent":
-            raise ValueError("Notion can't find that database for Cora. In Notion, open it and add Cora under ⋯ → Connections.") from None
+            raise ValueError("Notion can't find that database with your token. Check the link, and that your Notion account can open it.") from None
         raise
     title = "".join(t.get("plain_text", "") for t in body.get("title") or []) or "Untitled"
     return {"id": body.get("id") or db_id, "title": title}
