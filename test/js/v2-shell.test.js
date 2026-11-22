@@ -81,3 +81,46 @@ test('Escape closes the newest overlay only', async () => {
   page.doc.body.dispatchEvent(new Event('keydown', { key: 'Escape' }));
   assert.deepEqual(closed, ['b', 'a']);
 });
+
+test('tour: shown once in v2, walks the slides, saves tour_seen, replayable from Preferences', async () => {
+  const page = loadPage('v2/index.html', { replies: { '/api/onboarding/status': { complete: true } } });
+  await page.flush();
+  assert.equal(page.$('#tourOverlay').hidden, false, 'first start shows the tour');
+  assert.match(text(page.$('#tourStep')), /^1 of \d/);
+  await page.click('#tourNext');
+  assert.match(text(page.$('#tourStep')), /^2 of/);
+  await page.click('#tourSkip');
+  assert.equal(page.$('#tourOverlay').hidden, true);
+  assert.equal(page.store.tour_seen, true);
+
+  const again = loadPage('v2/index.html', { settings: { tour_seen: true } });
+  await again.flush();
+  assert.equal(again.$('#tourOverlay').hidden, true, 'not shown twice');
+  await again.run('go("settings", { panel: "preferences" })');
+  await again.click('[data-take-tour]');
+  assert.equal(again.$('#tourOverlay').hidden, false);
+});
+
+test('a new install is sent to setup in the classic look', async () => {
+  const page = loadPage('v2/index.html', { replies: { '/api/onboarding/status': { complete: false } } });
+  await page.flush();
+  assert.match(text(page.$('#page')), /Finish setting up Cora first/);
+  await page.click('[data-switch-shell="classic"]');
+  assert.deepEqual(page.location.assigned, ['/']);
+});
+
+test('error and empty states: a failed page shows the error with Try again', async () => {
+  let fail = true;
+  const page = loadPage('v2/index.html', { settings: { tour_seen: true }, replies: {
+    '/api/dashboard': { recordings: [] },
+    '/api/recording': () => { if (fail) throw new Error('Recording not found.'); return { id: 'r1', title: 'Back again', analysis_stage: 'ready' }; },
+  } });
+  await page.flush();
+  assert.match(text(page.$('#homeRows')), /No meetings yet/);
+  await page.run('go("meeting", { id: "r1" })');
+  await page.flush();
+  assert.match(text(page.$('[role="alert"]')), /Recording not found\./);
+  fail = false;
+  await page.click('[data-retry-page]');
+  assert.equal(text(page.$('#meetingTitle')), 'Back again');
+});

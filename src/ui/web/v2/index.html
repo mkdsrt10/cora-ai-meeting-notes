@@ -30,13 +30,24 @@
       <div class="grow"></div>
       <div id="topActions"></div>
     </header>
+    <div class="update" id="updateBanner" role="status" hidden>
+      <div><strong id="updateBannerText"></strong> <span class="muted" id="updateBannerReason"></span> <span class="fail" id="updateBannerError"></span></div>
+      <span class="grow"></span><button class="btn q" id="updateLaterBtn" type="button">Later</button><button class="btn pri" id="updateNowBtn" type="button">Update</button>
+    </div>
     <div id="page"></div>
   </main>
 </div>
 <aside class="peek" id="confirmPanel" role="dialog" aria-label="Review suggestion" hidden></aside>
 <div class="bar" id="selectionBar" role="toolbar" aria-label="Selected Action items" hidden></div>
 <div class="scrim" id="palette" hidden></div>
-<div class="tour" id="tour" role="dialog" aria-modal="true" aria-labelledby="tourTitle" hidden></div>
+<div class="tour" id="tourOverlay" role="dialog" aria-modal="true" aria-labelledby="tourTitle" hidden>
+  <div class="tc">
+    <img id="tourImage" alt="">
+    <div class="tb"><div class="muted" id="tourStep"></div><h2 id="tourTitle"></h2><p id="tourBody"></p></div>
+    <div class="tf"><button class="btn q" id="tourSkip" type="button">Skip</button><span class="tour-dots grow" id="tourDots" aria-hidden="true"></span>
+      <button class="btn" id="tourBack" type="button" hidden>Back</button><button class="btn pri" id="tourNext" type="button">Next</button></div>
+  </div>
+</div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <!-- Markup for reused classic panels (js/providers.js binds to it at load);
      Settings moves it into the open panel and parks it here again. -->
@@ -95,6 +106,8 @@
 <script src="/js/model-setup.js"></script>
 <script src="/js/providers.js"></script>
 <script src="/js/transcript.js"></script>
+<script src="/js/tour.js"></script>
+<script src="/js/update-banner.js"></script>
 <script src="/v2/js/confirm.js"></script>
 <script src="/v2/js/meeting.js"></script>
 <script src="/v2/js/settings.js"></script>

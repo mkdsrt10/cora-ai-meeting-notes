@@ -120,9 +120,13 @@ defineSettingsPanel('mcp', { title: 'Claude / ChatGPT (MCP)', async render(host)
 
 defineSettingsPanel('privacy', { title: 'Data & privacy', async render(host){
   const s = store.storage || {};
-  host.innerHTML = `${head('Data & privacy', 'Where your meetings live on this Mac.')}
+  const local = await api('/api/local-stats').catch(() => ({}));
+  host.innerHTML = `${head('Data & privacy', 'Where your meetings live on this Mac, and how fast it processes them.')}
     <div class="kv"><span class="k">Archive size</span><span>${esc(fmtBytes(s.archive_bytes))}</span><span class="k">Audio size</span><span>${esc(fmtBytes(s.recordings_bytes))}</span>
-      <span class="k">Free space</span><span>${esc(fmtBytes(s.disk_free_bytes))}</span><span class="k">Estimated runway</span><span>${s.estimated_days_at_four_hours ?? '—'} days</span></div>
+      <span class="k">Free space</span><span>${esc(fmtBytes(s.disk_free_bytes))}</span><span class="k">Estimated runway</span><span>${s.estimated_days_at_four_hours ?? '—'} days</span>
+      <span class="k">Memory (this session)</span><span>${local.server_memory_mb != null ? `${esc(local.server_memory_mb)} MB` : '—'}</span>
+      <span class="k">Transcribe speed</span><span>${local.transcription_speed_x != null ? `${esc(local.transcription_speed_x)}× realtime` : '—'}</span>
+      <span class="k">LLM throughput</span><span>${local.tokens_per_second != null ? `${esc(local.tokens_per_second)} tok/s` : '—'}</span></div>
     <p><button class="btn" type="button" data-open-data-folder>Open local data folder</button> <button class="btn" type="button" data-go="memory">Open Memory</button></p>`;
 } });
 
@@ -172,6 +176,7 @@ addEventListener('click', async event => {
   if(shell.page !== 'settings') return;
   const t = event.target;
   try{
+    if(t.closest('[data-take-tour]')){ openTour(); return; }
     if(t.closest('[data-save-profile]')){
       const name = $('#setName').value.trim();
       if(name) await api('/api/onboarding/name', { method: 'POST', body: JSON.stringify({ name }) });

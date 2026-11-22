@@ -79,6 +79,37 @@ function feedbackWidget(r){
       <div class="pf-row"><button type="button" class="btn pri sm" data-fb-send>Send</button></div></div></div>`;
 }
 
+const CLOUD_OFFER = {
+  gap: 'Part of this meeting could not be transcribed in the cloud and was left as a gap. Process it in the cloud again?',
+  failed: 'Processing on this Mac failed; this Mac is short of memory for local processing. Process this one in the cloud?',
+  slow: 'Processing on this Mac took longer than the call itself; this Mac is short of memory. Process this one in the cloud?',
+};
+// Notices with the button that fixes each (same as the classic look).
+function notices(r){
+  const out = [];
+  if(r.needs_speaker_confirmation && (r.speaker_profiles || []).length){
+    out.push(`<div class="block rec-actions" data-notice="speaker"><span><strong>Which speaker is you?</strong> This meeting has one audio track, so Cora can't tell your voice from the others.</span>
+      <select class="inp" style="width:auto" id="selfSpeaker" aria-label="Which speaker is you?">${r.speaker_profiles.map(p => `<option value="${esc(p.speaker_id)}"${p.speaker_id === r.suggested_self_speaker_id ? ' selected' : ''}>${esc(p.label?.name || p.speaker_id)} · ${plural(Number(p.turns) || 0, 'turn')}</option>`).join('')}</select>
+      <button type="button" class="btn sm" data-confirm-speaker>This is me</button></div>`);
+  }
+  if(r.capture_notice === 'ax_untrusted') out.push(`<div class="block rec-actions" data-notice="accessibility"><span><strong>Cora couldn't see who was in this call.</strong> Grant Accessibility to Cora in System Settings so meeting apps can tell it who is speaking.</span><button type="button" class="btn sm" data-open-accessibility>Open Accessibility settings</button></div>`);
+  if(r.cloud_offer) out.push(`<div class="block rec-actions" data-notice="cloud"><span>${esc(CLOUD_OFFER[r.cloud_offer] || CLOUD_OFFER.gap)}</span><button type="button" class="btn sm" data-process-cloud>Process in the cloud</button><button type="button" class="btn q sm" data-dismiss-cloud>Not now</button></div>`);
+  if(r.audio_pruned) out.push(`<p class="muted" data-notice="audio">Audio removed to save space (${r.audio_pruned.reason === 'cap' ? `kept at most ${esc(r.audio_pruned.limit)} MB` : `kept ${esc(r.audio_pruned.limit)} days`}). Notes and transcript are kept.</p>`);
+  return out.join('');
+}
+
+function keyPhrases(r){
+  if(PENDING.has(r.analysis_stage) && r.analysis_stage !== 'recording') return '';
+  return `<span class="k">Key phrases</span><span class="v" id="keyPhrases">${(r.key_phrases || []).map(p => `<span class="tag">${esc(p.term)}<button type="button" class="ib" style="width:16px;height:16px" data-remove-phrase="${esc(p.term)}" aria-label="Remove ${esc(p.term)}">×</button></span>`).join('')}
+    <input class="inp" style="width:120px;padding:2px 6px" id="addPhrase" placeholder="+ add" aria-label="Add a key phrase" title="Terms Cora biases transcription toward"></span>`;
+}
+
+function versionRow(r){
+  if(!(r.versions || []).length) return '';
+  const label = s => { const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(s); return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}` : s; };
+  return `<span class="k">Version</span><span class="v"><select class="inp" style="width:auto" id="notesVersion" aria-label="Notes version"><option value="">Current</option>${r.versions.map(v => `<option value="${esc(v)}"${mt.version === v ? ' selected' : ''}>Before reprocess · ${esc(label(v))}</option>`).join('')}</select></span>`;
+}
+
 function processingBanner(r){
   if(r.analysis_stage === 'failed') return `<div class="error-box" role="alert">${esc(r.failure?.message || 'Processing did not finish.')} <button type="button" class="btn sm" data-retry="${esc(r.id)}">Retry</button></div>`;
   if(r.analysis_stage === 'processing') return '<p class="muted"><span class="spin"></span> Processing — the notes and transcript appear here when it finishes.</p>';
@@ -102,7 +133,8 @@ function notesTab(r){
   }else{
     notes = `${PENDING.has(r.analysis_stage) ? '<p class="muted">Notes appear here after the meeting is processed. Type in the Notepad meanwhile.</p>' : '<p class="muted">No notes for this meeting.</p>'}${mt.items.length ? `<h3>Action items</h3>${checklist()}` : ''}`;
   }
-  return `${processingBanner(r)}${r.audio_url ? `<audio class="audio" controls preload="none" src="${esc(r.audio_url)}" aria-label="Meeting audio"></audio>` : ''}
+  if(mt.version && mt.versionNotes !== undefined) return `<p class="muted">An earlier version, from before a reprocess. Read only.</p><div class="notes md" id="notesBody">${mdToHtml(mt.versionNotes)}</div>`;
+  return `${processingBanner(r)}${notices(r)}${r.audio_url ? `<audio class="audio" controls preload="none" src="${esc(r.audio_url)}" aria-label="Meeting audio"></audio>` : ''}
     <div class="notes md" id="notesBody">${notes}</div>${blocks}${footerRow()}${feedbackWidget(r)}`;
 }
 
@@ -168,6 +200,7 @@ function propertyRows(r){
     <span class="k">When</span><span class="v">${esc(fmtDate(r.recorded_at))}${r.duration_seconds ? ` · ${esc(fmtDuration(r.duration_seconds))}` : ''}</span>
     <span class="k">People</span><span class="v">${people.length ? people.map(n => `<span class="tag">${avatar(n)} ${esc(n)}</span>`).join('') : '<span class="muted">No one identified yet</span> <button type="button" class="btn q sm" data-tab-go="participants">Participants</button>'}</span>
     <span class="k">Folder</span><span class="v"><select class="inp" style="width:auto" id="meetingFolder" aria-label="Folder">${folderOptions}</select></span>
+    ${keyPhrases(r)}${versionRow(r)}
     ${r.analysis_stage !== 'ready' ? `<span class="k">Status</span><span class="v"><span class="status ${esc(r.analysis_stage)}">${esc(stageLabel(r.analysis_stage))}</span></span>` : ''}
     ${extra}</div>`;
 }
@@ -218,7 +251,7 @@ async function reloadMeeting(){
 async function renderMeeting(host, params = {}){
   const id = params.id;
   if(!id) return go('home');
-  if(mt.id !== id){ mt.selected = new Set(); mt.tab = params.focus === 'notepad' ? 'notepad' : 'notes'; }
+  if(mt.id !== id){ mt.selected = new Set(); mt.version = ''; mt.versionNotes = undefined; mt.tab = params.focus === 'notepad' ? 'notepad' : 'notes'; }
   if(params.tab) mt.tab = params.tab;
   mt.id = id;
   Object.assign(mt, await loadMeetingData(id));
@@ -425,6 +458,22 @@ addEventListener('click', async event => {
     catch(error){ toast(`Feedback not sent: ${error.message}`, true); }
     return;
   }
+  if(t.closest('[data-confirm-speaker]')){
+    try{ await api('/api/recording/confirm-speaker', { method: 'POST', body: JSON.stringify({ id: mt.record.id, speaker_id: $('#selfSpeaker').value }) }); trackAction('rename_speaker'); toast('Saved: that speaker is you.'); await refreshMeetings(); await reloadMeeting(); }
+    catch(error){ toast(error.message, true); }
+    return;
+  }
+  if(t.closest('[data-open-accessibility]')){ window.electronAPI?.openAccessibilitySettings?.(); return; }
+  if(t.closest('[data-process-cloud]')){
+    if(!confirm('Re-run transcription and notes in the cloud? The current transcript and notes are archived first.')) return;
+    trackAction('reprocess');
+    api('/api/process-recording', { method: 'POST', body: JSON.stringify({ id: mt.record.id, processing: { mode: 'cloud' } }) }).then(() => reloadMeeting()).catch(error => toast(error.message, true));
+    setTimeout(() => refreshMeetings().catch(() => {}), 600);
+    return;
+  }
+  if(t.closest('[data-dismiss-cloud]')){ try{ await api('/api/recording/cloud-offer/dismiss', { method: 'POST', body: JSON.stringify({ id: mt.record.id }) }); await reloadMeeting(); }catch(error){ toast(error.message, true); } return; }
+  const phrase = t.closest('[data-remove-phrase]');
+  if(phrase){ try{ await api('/api/recording/key-phrase', { method: 'POST', body: JSON.stringify({ id: mt.record.id, action: 'remove', term: phrase.dataset.removePhrase }) }); phrase.closest('.tag').remove(); }catch(error){ toast(error.message, true); } return; }
   const hide = t.closest('[data-participant-hide]');
   if(hide){
     const row = hide.closest('[data-raw-name]');
@@ -438,6 +487,13 @@ addEventListener('keydown', event => {
   if(shell.page !== 'meeting') return;
   const t = event.target;
   if((t.id === 'meetingTitle' || t.dataset?.editItem) && event.key === 'Enter'){ event.preventDefault(); t.blur(); }
+  if(t.id === 'addPhrase' && event.key === 'Enter'){
+    event.preventDefault();
+    const term = t.value.trim(); if(!term) return;
+    api('/api/recording/key-phrase', { method: 'POST', body: JSON.stringify({ id: mt.id, action: 'add', term }) })
+      .then(() => { (mt.record.key_phrases ||= []).push({ term, source: 'manual' }); drawMeeting(); $('#addPhrase')?.focus(); }).catch(error => toast(error.message, true));
+    return;
+  }
   if(t.id === 'addItem' && event.key === 'Enter'){
     event.preventDefault();
     const text = t.value.trim(); if(!text) return;
@@ -497,6 +553,13 @@ addEventListener('input', event => {
 addEventListener('change', async event => {
   if(shell.page !== 'meeting' || !mt.record) return;
   const t = event.target;
+  if(t.id === 'notesVersion'){
+    mt.version = t.value;
+    try{ mt.versionNotes = t.value ? (await api(`/api/recording/version?id=${encodeURIComponent(mt.record.id)}&stamp=${encodeURIComponent(t.value)}`)).enhanced_notes : undefined; }
+    catch(error){ toast(error.message, true); mt.versionNotes = undefined; }
+    mt.tab = 'notes'; drawTabs(); drawTab();
+    return;
+  }
   if(t.id === 'meetingFolder'){
     try{ await api('/api/recording/folder', { method: 'POST', body: JSON.stringify({ id: mt.record.id, folder_id: t.value || null }) }); trackAction('file_to_folder'); mt.record.folder_id = t.value || null; await refreshMeetings(); drawMeeting(); }
     catch(error){ toast(error.message, true); }

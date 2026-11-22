@@ -58,7 +58,7 @@ test('document page: breadcrumb, editable title, When/People/Folder rows and plu
   assert.match(text(p.$('#crumb')), /Home.*Weekly product sync/);
   assert.equal(p.$('#meetingTitle').getAttribute('contenteditable'), 'true');
   const props = p.$$('#props .k').map(text);
-  assert.deepEqual(props, ['When', 'People', 'Folder', 'T Tracker']);
+  assert.deepEqual(props, ['When', 'People', 'Folder', 'Key phrases', 'T Tracker']);
   assert.equal(p.$('#props a').getAttribute('href'), 'https://example.invalid/log');
   p.$('#meetingTitle').textContent = 'Pricing sync';
   p.$('#meetingTitle').dispatchEvent(new (require('./v2-dom').Event)('focusout'));
@@ -191,4 +191,20 @@ test('Notepad saves what you type; Participants link to People', async () => {
   await p.click('[data-tab="participants"]');
   await p.change('[data-participant-map]', 'p1');
   assert.deepEqual(p.posts().find((c) => c.url === '/api/recording/participant').body, { id: 'r1', raw_name: 'Alex R', action: 'map', person_id: 'p1' });
+});
+
+test('notices, key phrases and earlier versions, as in the classic look', async () => {
+  const record = { ...REC, needs_speaker_confirmation: true, speaker_profiles: [{ speaker_id: 'S1', label: { name: 'Speaker 1' }, turns: 4 }, { speaker_id: 'S2', turns: 2 }],
+    suggested_self_speaker_id: 'S2', cloud_offer: 'slow', key_phrases: [{ term: 'Team tier' }], versions: ['20261118T120000'] };
+  const p = await meeting({ record });
+  assert.ok(p.$('[data-notice="speaker"]') && p.$('[data-notice="cloud"]'));
+  assert.equal(p.$('#selfSpeaker').value, 'S2');
+  await p.click('[data-confirm-speaker]');
+  assert.deepEqual(p.posts().find((c) => c.url === '/api/recording/confirm-speaker').body, { id: 'r1', speaker_id: 'S2' });
+  await p.click('[data-dismiss-cloud]');
+  assert.ok(p.posts().some((c) => c.url === '/api/recording/cloud-offer/dismiss'));
+  await p.input('#addPhrase', 'Pricing v2');
+  await p.key('Enter', {}, p.$('#addPhrase'));
+  assert.deepEqual(p.posts().find((c) => c.url === '/api/recording/key-phrase').body, { id: 'r1', action: 'add', term: 'Pricing v2' });
+  assert.ok(p.$('#notesVersion'));
 });
