@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.6-beta.1 — 2026-11-23 (pre-beta, owner testing only)
+
+Not offered through the update banner: installed by hand on the owner's Mac to test before 0.4.6 goes to everyone.
+
+- New look (UI shell v2): sidebar, Home, ⌘K command menu, the meeting page as a document with Notes, Transcript and Action items, a selection bar and a confirm panel; Suggested, People, Memory and every Settings panel; light and dark themes with readable contrast. The classic UI is still one switch away.
+- Your own notes live inside Notes ("+ Add your own notes"); Key phrases moved to the ⋯ menu ("Improve transcript spelling…").
+- Recording bar restyled to match: icon buttons, You/Them level meters, stop last.
+- New app icon (a note with a waveform) and a one-colour menu bar icon that follows light and dark menu bars.
+- Connections (personal, local): Notion and Slack plugins. Notion: paste your Tasks database link (no listing of every database), map its properties, link meeting Action items to Tasks or create Tasks, each only after you confirm; done syncs both ways. Works with Notion's multi-source databases (API 2025-09-03). Slack: send selected Action items as one confirmed message.
+- Action items are core records; To-dos is a view of them, and a meeting never shows another meeting's Action items.
+- A meeting's People include everyone on the captured participant list, not only labelled speakers.
+- Live captions during a call (on this Mac, or Google Chirp on your Vertex project), a draft transcript and draft notes while recording, and `cora_get_live_transcript` over MCP. On-device captions are English-first; mixed Hindi–English is weak.
+- Context sources for notes (People, Prior meetings, Work context), behind a setting.
+
 ## 0.4.5 — 2026-11-17
 
 - Settings > Beta says when this copy of Cora cannot share with the Cora team, under the "Share usage" switch: built without the team's receiver (update or reinstall from the team setup page), or enterprise lockdown. With sharing working it shows when Cora last sent, how many Usage events are waiting, or the last send error. `GET /api/beta/status` adds `sharing_off_reason` (`lockdown`, `switched_off`, `no_receiver`). Until now a `--team` copy built without the receiver showed the switch on while nothing ever left the Mac ([#25](https://github.com/mkdsrt10/cora-ai-meeting-notes/issues/25)).
