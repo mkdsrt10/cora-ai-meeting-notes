@@ -453,9 +453,14 @@ function liveCall() {
   }
   if (host === 'zoom.us' || host.endsWith('.zoom.us')) {
     /* Zoom web client: joined means the footer Leave/End control exists; the
-       pre-join screen and the /j/ launch page have only Join/Launch buttons. */
-    const live = !!document.querySelector('button.footer__leave-btn')
-      || buttons(document).some(b => /^(?:leave|end)(?: the)?(?: meeting)?$/i.test(text(b)));
+       pre-join screen and the /j/ launch page have only Join/Launch buttons.
+       Since Nov 2026 app.zoom.us/wc runs the whole client in a same-origin
+       iframe, so the tab and its readable iframes are all asked. */
+    const docs = [document].concat(Array.from(document.querySelectorAll('iframe')).map(f => {
+      try { return f.contentDocument; } catch (e) { return null; }
+    }).filter(Boolean));
+    const live = docs.some(d => !!d.querySelector('button.footer__leave-btn, .footer__leave-btn-container button')
+      || buttons(d).some(b => /^(?:leave|end)(?: the)?(?: meeting)?$/i.test(text(b))));
     return { live, label: 'Zoom' };
   }
   /* Meet: joined means a Leave call control exists; the green room has none.
@@ -493,15 +498,23 @@ let googleMeetSnapshotJS = #"""
     /* Zoom web client: names from video tiles and the participants panel; */
     /* the active-speaker tile gives the current speaker. */
     if (host === 'zoom.us' || host.endsWith('.zoom.us')) {
-        const zoomName = el => clean(el && el.innerText).replace(/\s*\((?:host|co-host|me|guest)[^)]*\)\s*$/i, '');
-        document.querySelectorAll('.participants-item__display-name, .video-avatar__avatar-name, [class*="avatar-name"]').forEach(el => {
-            const name = zoomName(el);
-            if (name && name.length <= 60) names.add(name);
+        /* app.zoom.us/wc (Nov 2026) runs the client in a same-origin iframe: */
+        /* read the tab and every readable iframe. A tile's name is the first */
+        /* line of its video-avatar footer (speaker bar, gallery, share view). */
+        const docs = [document].concat([...document.querySelectorAll('iframe')].map(f => {
+            try { return f.contentDocument; } catch (e) { return null; }
+        }).filter(Boolean));
+        const zoomName = el => clean(String((el && el.innerText) || '').split(/\n/)[0]).replace(/\s*\((?:host|co-host|me|guest)[^)]*\)\s*$/i, '');
+        docs.forEach(d => {
+            d.querySelectorAll('.participants-item__display-name, .video-avatar__avatar-name, [class*="avatar-name"], .video-avatar__avatar-footer').forEach(el => {
+                const name = zoomName(el);
+                if (name && name.length <= 60) names.add(name);
+            });
+            const activeTile = d.querySelector('.speaker-active-container__video-frame .video-avatar__avatar-footer, .speaker-active-container__video-frame .video-avatar__avatar-name, [class*="speaker-active"] [class*="avatar-name"]');
+            if (activeTile && zoomName(activeTile)) { names.add(zoomName(activeTile)); speaking.add(zoomName(activeTile)); }
         });
-        const activeTile = document.querySelector('.speaker-active-container__video-frame .video-avatar__avatar-name, [class*="speaker-active"] [class*="avatar-name"]');
-        if (activeTile && zoomName(activeTile)) { names.add(zoomName(activeTile)); speaking.add(zoomName(activeTile)); }
-        const live = !!document.querySelector('.footer__leave-btn, button[aria-label^="Leave"]');
-        return JSON.stringify({active: live, participants: [...names], speaking_names: [...speaking], meeting_title: document.title});
+        const zoomTitle = docs.map(d => d.title).find(t => t && !/^zoom$/i.test(t)) || document.title;
+        return JSON.stringify({active: liveCall().live, participants: [...names], speaking_names: [...speaking], meeting_title: zoomTitle});
     }
     let scope = document;
     let slackTitle = '';

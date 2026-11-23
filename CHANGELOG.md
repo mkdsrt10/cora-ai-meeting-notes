@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.6-beta.4 — 2026-11-23 (pre-beta, owner testing only)
+
+- Zoom in a browser is detected again and its participant names are captured. Zoom's web client (app.zoom.us/wc) now runs inside an iframe, so Cora saw neither the Leave button nor the name tiles: no "Zoom call detected" prompt and no People. The live check and the name reader now look inside the client's iframe and read each tile's name (speaker bar, gallery and share views). Checked on a live call: detected as live, every participant named.
+- The empty Participants tab no longer talks only about Google Meet.
+
 ## 0.4.6-beta.3 — 2026-11-23 (pre-beta, owner testing only)
 
 - Hinglish live captions catch quiet speech: the speech detector's floor is lower (about −50 dBFS). On the first real call with beta.2 it ended segments early and skipped quiet stretches, catching 52% of your words; the same audio now gives 83% (character error rate 0.39 → 0.15).

@@ -175,7 +175,7 @@ function transcriptTab(){
 function participantsTab(r){
   const list = r.participants || [];
   const warnings = (r.participant_capture?.warnings || []).map(w => `<p class="error-box">${esc(w)}</p>`).join('');
-  if(!list.length) return `${warnings}<p class="muted">No participant names captured yet. For Google Meet, Cora needs Accessibility or browser capture.</p>`;
+  if(!list.length) return `${warnings}<p class="muted">No participant names captured yet. Cora reads names from the meeting window or browser tab: it needs Accessibility, and for a browser, Allow JavaScript from Apple Events.</p>`;
   const people = mt.people || [];
   return warnings + list.map(p => `<div class="participant row-set" data-raw-name="${esc(p.raw_name)}">
     <div><input class="inp" value="${esc(p.display_name)}" aria-label="Name for ${esc(p.raw_name)}" data-participant-rename></div>

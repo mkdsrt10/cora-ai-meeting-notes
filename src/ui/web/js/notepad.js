@@ -71,7 +71,7 @@ async function renderParticipants(record){
   const turnNotice = capture && !capture.live && capture.speaker_events === 0
     ? '<p class="muted">No live speaker-name events were captured. Participant names alone cannot identify each remote voice. Keeping the Meet tab visible can help Accessibility capture; browser capture status is shown above when available.</p>' : '';
   if(!participants.length){
-    host.innerHTML = warnings + turnNotice + '<p class="muted">No participant names captured yet. For Google Meet, Cora needs access to the meeting page through Accessibility or browser capture.</p>';
+    host.innerHTML = warnings + turnNotice + '<p class="muted">No participant names captured yet. Cora reads names from the meeting window (Zoom, Teams, Slack) or the browser tab (Meet, Zoom web, Slack): it needs Accessibility, and for a browser, Allow JavaScript from Apple Events.</p>';
     return;
   }
   let people = [];

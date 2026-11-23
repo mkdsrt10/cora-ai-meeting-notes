@@ -83,3 +83,28 @@ test('the snippet survives being flattened onto one line', () => {
   assert.doesNotThrow(() => new vm.Script(LIVE_CALL_JS.replace(/\n/g, ' ')));
   assert.ok(!/(^|[^:])\/\//.test(LIVE_CALL_JS), 'no // line comments');
 });
+
+// Zoom web client (app.zoom.us/wc, Nov 2026): the whole client is a same-origin iframe.
+const { frameDoc } = require('./fake-page');
+
+test('Zoom web: a Leave control inside the client iframe makes the tab live', () => {
+  const leave = el({ sel: ['.footer__leave-btn-container button', BUTTON], text: 'Leave' });
+  const frame = el({ sel: ['iframe'], contentDocument: frameDoc([leave]) });
+  assert.deepEqual(ask('app.zoom.us', [frame]), { live: true, label: 'Zoom' });
+});
+
+test('Zoom web: the pre-join screen (Join only, in the iframe or the tab) is not live', () => {
+  const join = el({ sel: [BUTTON], text: 'Join' });
+  assert.deepEqual(ask('app.zoom.us', [el({ sel: ['iframe'], contentDocument: frameDoc([join]) })]), { live: false, label: 'Zoom' });
+  assert.deepEqual(ask('app.zoom.us', [join]), { live: false, label: 'Zoom' });
+});
+
+test('Zoom web: an iframe the tab may not read is skipped, not an error', () => {
+  const blocked = el({ sel: ['iframe'] });
+  Object.defineProperty(blocked, 'contentDocument', { get() { throw new Error('SecurityError'); } });
+  assert.deepEqual(ask('app.zoom.us', [blocked]), { live: false, label: 'Zoom' });
+});
+
+test('Zoom web: the older top-level footer Leave button still counts', () => {
+  assert.deepEqual(ask('zoom.us', [el({ sel: ['button.footer__leave-btn'] })]), { live: true, label: 'Zoom' });
+});

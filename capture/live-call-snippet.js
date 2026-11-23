@@ -34,9 +34,14 @@ const LIVE_CALL_JS = `function liveCall() {
   }
   if (host === 'zoom.us' || host.endsWith('.zoom.us')) {
     /* Zoom web client: joined means the footer Leave/End control exists; the
-       pre-join screen and the /j/ launch page have only Join/Launch buttons. */
-    const live = !!document.querySelector('button.footer__leave-btn')
-      || buttons(document).some(b => /^(?:leave|end)(?: the)?(?: meeting)?$/i.test(text(b)));
+       pre-join screen and the /j/ launch page have only Join/Launch buttons.
+       Since Nov 2026 app.zoom.us/wc runs the whole client in a same-origin
+       iframe, so the tab and its readable iframes are all asked. */
+    const docs = [document].concat(Array.from(document.querySelectorAll('iframe')).map(f => {
+      try { return f.contentDocument; } catch (e) { return null; }
+    }).filter(Boolean));
+    const live = docs.some(d => !!d.querySelector('button.footer__leave-btn, .footer__leave-btn-container button')
+      || buttons(d).some(b => /^(?:leave|end)(?: the)?(?: meeting)?$/i.test(text(b))));
     return { live, label: 'Zoom' };
   }
   /* Meet: joined means a Leave call control exists; the green room has none.

@@ -12,9 +12,10 @@ function matching(elements, group) {
   return descendants(elements).filter((e) => e.sel.some((s) => wanted.includes(s)));
 }
 
-function el({ sel = [], attrs = {}, text = '', children = [] } = {}) {
+function el({ sel = [], attrs = {}, text = '', children = [], contentDocument } = {}) {
   return {
     sel,
+    contentDocument,
     children,
     innerText: text,
     getAttribute: (name) => (name in attrs ? attrs[name] : null),
@@ -29,4 +30,9 @@ function runPage(hostname, elements = []) {
   return vm.runInNewContext(PAGE_EXPRESSION, { document, location: { hostname } });
 }
 
-module.exports = { el, runPage };
+/** A same-origin iframe's document holding these elements (for el({ contentDocument })). */
+function frameDoc(elements = []) {
+  return { querySelector: (g) => matching(elements, g)[0] || null, querySelectorAll: (g) => matching(elements, g) };
+}
+
+module.exports = { el, runPage, frameDoc };
