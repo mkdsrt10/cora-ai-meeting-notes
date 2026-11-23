@@ -88,3 +88,36 @@ def test_a_model_that_is_not_downloaded_pauses_captions_without_downloading():
 
     code = lw.run("sys", iter(()), missing, "not/here", emit=lambda k, p: lines.append((k, p)))
     assert code == 3 and lines == [("LIVE_ERROR", {"track": "sys", "code": "model_missing"})]
+
+
+def test_audio_that_arrives_while_the_model_loads_is_kept_not_dropped():
+    import threading
+    loaded = threading.Event()
+    seen = []
+
+    def slow_factory():
+        loaded.wait(0.5)          # the model takes a while; the reader keeps reading meanwhile
+        return lambda audio: seen.append(len(audio)) or "pehle se bol raha hoon"
+
+    consumed = []
+
+    def chunks():
+        for chunk in _chunks(("s", 2), ("q", 1)):
+            consumed.append(1)
+            yield chunk
+
+    lines = []
+    code = lw.run("sys", chunks(), slow_factory, "fake/model", emit=lambda k, p: lines.append((k, p)))
+    assert code == 0 and len(consumed) == 30
+    finals = [p for k, p in lines if k == "LIVE_FINAL"]
+    assert [f["text"] for f in finals] == ["pehle se bol raha hoon"] and finals[0]["start"] == 0.0
+
+
+def test_a_quiet_remote_speaker_still_opens_a_segment():
+    quiet = (0.006 * np.sin(np.linspace(0, 400 * np.pi, lw.CHUNK))).astype(np.float32)   # RMS ~0.004
+    lines = []
+    engine = lw.WhisperLive("sys", lambda audio: "haan ji", emit=lambda k, p: lines.append((k, p)))
+    for chunk in [quiet] * 10 + [SILENCE] * 10:
+        engine.feed(chunk)
+    engine.finish()
+    assert [p["text"] for k, p in lines if k == "LIVE_FINAL"] == ["haan ji"]

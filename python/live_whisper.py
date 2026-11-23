@@ -57,7 +57,9 @@ class Vad:
     """Energy VAD with an adaptive noise floor (enough for a close mic and a
     clean system track; the batch path keeps its own VAD)."""
 
-    def __init__(self, min_threshold: float = 0.006, ratio: float = 3.0):
+    # 0.003 RMS (about -50 dBFS): a quiet remote speaker on the system track
+    # peaked near 0.03 with most speech under 0.006 (Nov 2026 call).
+    def __init__(self, min_threshold: float = 0.003, ratio: float = 3.0):
         self.floor = min_threshold / ratio
         self.min_threshold, self.ratio = min_threshold, ratio
 
@@ -69,7 +71,18 @@ class Vad:
         return is_speech
 
 
-def mlx_recognizer(model: str) -> Callable:
+def vocabulary_prompt() -> str:
+    """The same curated vocabulary + known people the batch path gives Whisper
+    as initial_prompt (pipeline/vocabulary.py), shorter for short live chunks.
+    Empty when it cannot be read: captions still run."""
+    try:
+        from pipeline.vocabulary import build_vocabulary_prompt
+        return build_vocabulary_prompt(max_chars=400)
+    except Exception:
+        return ""
+
+
+def mlx_recognizer(model: str, prompt: str = "") -> Callable:
     """audio (float32 numpy) -> text, with the batch path's decode settings."""
     os.environ["HF_HUB_OFFLINE"] = "1"
     import mlx_whisper
@@ -86,7 +99,7 @@ def mlx_recognizer(model: str) -> Callable:
         result = mlx_whisper.transcribe(
             audio, path_or_hf_repo=model, language="en", condition_on_previous_text=False,
             temperature=(0.0, 0.2, 0.4), compression_ratio_threshold=2.4, logprob_threshold=-1.0,
-            no_speech_threshold=0.5, verbose=None)
+            no_speech_threshold=0.5, initial_prompt=prompt or None, verbose=None)
         text = " ".join(s.get("text", "").strip() for s in result.get("segments") or [])
         return transliterate(collapse_repetition_loops(text))
     return recognize
@@ -203,19 +216,9 @@ def _stdin_chunks(stdin):
 
 def run(track: str, chunks, recognize_factory: Callable[[], Callable], model: str,
         emit: Callable[[str, dict], None] = emit_line, realtime: bool = False) -> int:
-    try:
-        recognize = recognize_factory()
-    except FileNotFoundError:
-        emit("LIVE_ERROR", {"track": track, "code": "model_missing"})
-        return 3
-    except Exception as exc:
-        emit("LIVE_ERROR", {"track": track, "code": "model_load_failed_" + type(exc).__name__.lower()[:40]})
-        return 3
-    emit("LIVE_ENGINE", {"track": track, "engine": ENGINE, "model": model})
-    engine = WhisperLive(track, recognize, emit)
-    # A reader thread stamps each chunk's arrival (paced at real time for --wav
-    # --realtime), so a decode slower than real time shows up as lag_ms and the
-    # engine skips partials to catch up instead of falling further behind.
+    # The reader starts before the model loads (several seconds): audio from
+    # the start of the call queues here instead of backing up in dual-capture,
+    # which drops a backlog over 3 s. The first captions are late, not lost.
     inbox: "queue.Queue" = queue.Queue()
 
     def reader():
@@ -227,6 +230,18 @@ def run(track: str, chunks, recognize_factory: Callable[[], Callable], model: st
         inbox.put(None)
 
     threading.Thread(target=reader, daemon=True).start()
+    try:
+        recognize = recognize_factory()
+    except FileNotFoundError:
+        emit("LIVE_ERROR", {"track": track, "code": "model_missing"})
+        return 3
+    except Exception as exc:
+        emit("LIVE_ERROR", {"track": track, "code": "model_load_failed_" + type(exc).__name__.lower()[:40]})
+        return 3
+    emit("LIVE_ENGINE", {"track": track, "engine": ENGINE, "model": model})
+    engine = WhisperLive(track, recognize, emit)
+    # Each chunk carries its arrival time, so a decode slower than real time
+    # shows up as lag_ms and the engine skips partials to catch up.
     try:
         while (item := inbox.get()) is not None:
             engine.feed(*item, decode=inbox.empty())
@@ -243,9 +258,11 @@ def main() -> int:
     parser.add_argument("--model", required=True, help="Hugging Face repo id or local MLX model folder")
     parser.add_argument("--wav", help="read this file instead of stdin (test and eval seam)")
     parser.add_argument("--realtime", action="store_true", help="pace --wav at real time")
+    parser.add_argument("--no-vocabulary", action="store_true", help="no curated vocabulary prompt (A/B evals)")
     args = parser.parse_args()
     chunks = _wav_chunks(args.wav) if args.wav else _stdin_chunks(sys.stdin.buffer)
-    return run(args.track, chunks, lambda: mlx_recognizer(args.model), args.model, realtime=args.realtime)
+    prompt = "" if args.no_vocabulary else vocabulary_prompt()
+    return run(args.track, chunks, lambda: mlx_recognizer(args.model, prompt), args.model, realtime=args.realtime)
 
 
 if __name__ == "__main__":

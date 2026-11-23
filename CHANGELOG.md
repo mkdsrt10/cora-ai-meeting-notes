@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.6-beta.3 — 2026-11-23 (pre-beta, owner testing only)
+
+- Hinglish live captions catch quiet speech: the speech detector's floor is lower (about −50 dBFS). On the first real call with beta.2 it ended segments early and skipped quiet stretches, catching 52% of your words; the same audio now gives 83% (character error rate 0.39 → 0.15).
+- Hinglish live captions use your vocabulary (curated terms and known people), like the full transcription does.
+- Speech at the very start of a call is no longer lost while the Hinglish model loads: it waits and is captioned a few seconds late.
+
 ## 0.4.6-beta.2 — 2026-11-23 (pre-beta, owner testing only)
 
 - Live captions: new choice "On this Mac · Hinglish (Whisper Turbo)" in Settings › Processing & models. It runs the Whisper Turbo Hinglish model on this Mac during the call (nothing leaves the Mac; the model is never downloaded mid-call), offered on Apple Silicon with 16 GB or more once the model is downloaded under Models. On today's Hinglish calls it caught 68–73% of the words in the full transcript against 17–24% for Apple's on-device engine, with captions about 0.75 s behind; it uses about 4 GB of memory and 15–20% CPU while recording. If the model goes missing, captions pause; another engine is never swapped in.
