@@ -17,7 +17,11 @@ from pipeline.transcriber import ENGINES
 MODES = ('local_light', 'local_thorough', 'cloud')
 # Live transcript engine (docs/specs/live-transcript.md), independent of
 # `transcription`: off, on this Mac, or Google Chirp streaming on Vertex.
-LIVE_MODES = ('off', 'on_device', 'cloud_vertex')
+LIVE_MODES = ('off', 'on_device', 'on_device_hinglish', 'cloud_vertex')
+# on_device_hinglish: python/live_whisper.py with this MLX model, on this Mac.
+# Measured best of the local live engines on Hinglish calls (Nov 2026).
+LIVE_HINGLISH_MODEL = 'mayank-dubey-ai/whisper-large-v3-turbo-hinglish-mlx'
+LIVE_HINGLISH_MIN_GB = 16   # one model copy per track, about 2 GB each
 PROVIDERS = PRESETS  # Text model provider presets
 TEMPLATES = {
     'general': ('General meeting', 'Capture outcomes, discussion, decisions and unresolved questions.'),
@@ -103,16 +107,43 @@ def live_choices():
     Vertex backend, never under lockdown, and in the Team build only when
     config.json sets live_cloud_offered. Plus a one-line note on each."""
     import live_cloud
-    offered = ['off', 'on_device'] + (['cloud_vertex'] if live_cloud.offered() else [])
+    hinglish = live_hinglish_refusal()
+    offered = (['off', 'on_device'] + ([] if hinglish else ['on_device_hinglish'])
+               + (['cloud_vertex'] if live_cloud.offered() else []))
     note = ('On this Mac: captions stay on this Mac; English works best, mixed Hindi–English is weak.'
+            + (' On this Mac · Hinglish: Whisper Turbo Hinglish on this Mac, much better with mixed Hindi–English;'
+               ' uses about 4 GB of memory and some CPU during the call.' if not hinglish else
+               ' For Hinglish captions on this Mac, download "Whisper Turbo Hinglish" under Models.'
+               if hinglish == 'model_missing' else '')
             + (' Cloud (Vertex): your call audio streams to Google Speech-to-Text (Chirp) on your Vertex project'
                ' for the whole call, badged "Live: Cloud"; better with mixed languages.' if 'cloud_vertex' in offered else '')
             + ' The recording and the full transcript after stop are unaffected.')
     return dict(offered=offered, note=note)
 
 
+def live_hinglish_refusal():
+    """None when Hinglish live captions can run on this Mac now, else why not:
+    not_apple_silicon, low_memory (under LIVE_HINGLISH_MIN_GB) or model_missing
+    (never downloaded here: the engine runs offline)."""
+    hw = dict(memory_gb=round(_memory_bytes() / 1024**3, 1), architecture=platform.machine())
+    if hw['architecture'] != 'arm64':
+        return 'not_apple_silicon'
+    if hw['memory_gb'] < LIVE_HINGLISH_MIN_GB:
+        return 'low_memory'
+    from pipeline.config import model_ready
+    return None if model_ready(LIVE_HINGLISH_MODEL) else 'model_missing'
+
+
 def check_live(live):
-    """Saving Cloud live: refused under lockdown and off the Vertex backend."""
+    """Saving Cloud live: refused under lockdown and off the Vertex backend.
+    Saving Hinglish live: refused when this Mac cannot run it now."""
+    if live == 'on_device_hinglish':
+        code = live_hinglish_refusal()
+        if code == 'model_missing':
+            raise ValueError('Download "Whisper Turbo Hinglish" under Models first')
+        if code:
+            raise ValueError('Hinglish live captions need an Apple Silicon Mac with 16 GB of memory or more')
+        return
     if live != 'cloud_vertex':
         return
     import live_cloud

@@ -43,3 +43,11 @@ def test_meetings_mode_reports_per_track_and_hinglish_apart():
     assert out["hinglish"]["overlap_mic"]["recall"] == 0.667
     assert out["other"]["lag_ms_p50"] == 800 and out["other"]["lag_ms_p95"] == 1200
     assert "ship" not in json.dumps(out)
+
+
+def test_cer_forgives_small_hinglish_spelling_differences_more_than_word_overlap():
+    ref, live = "haan theek hai kal milte hain", "haan thik hai kal milte hai"
+    assert tool.cer(ref, ref) == 0.0
+    assert 0 < tool.cer(live, ref) < 0.15
+    assert tool.overlap(live, ref)["recall"] < 0.7
+    assert tool.cer("", ref) == 1.0

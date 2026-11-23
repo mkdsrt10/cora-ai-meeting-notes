@@ -176,11 +176,12 @@ function createCaptureHelperFactory(bins, dirs, { exitTimeoutMs = EXIT_TIMEOUT_M
 
 // dual-capture arguments for a Live transcript engine (docs/specs/live-transcript.md):
 //   { engine: 'on_device', locale? }        live-engine beside dual-capture
-//   { engine: 'cloud', command: [exe, ...] } a streaming adapter speaking the same
-//                                            LIVE_* grammar (python/live_cloud.py)
+//   { engine: 'cloud'|'whisper', command: [exe, ...] }
+//                                            an engine process speaking the same LIVE_*
+//                                            grammar (python/live_cloud.py, python/live_whisper.py)
 function liveArgs(live) {
   const out = ['--live'];
-  if (live.engine === 'cloud' && Array.isArray(live.command) && live.command.length) {
+  if (Array.isArray(live.command) && live.command.length) {
     out.push('--live-engine', live.command[0]);
     for (const arg of live.command.slice(1)) out.push('--live-arg', String(arg));
   } else if (live.locale) {

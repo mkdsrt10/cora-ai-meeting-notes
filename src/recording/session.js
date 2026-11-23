@@ -138,7 +138,7 @@ const STARTED_FROM = new Set(['new_note', 'tray', 'call_prompt', 'continue']);
 // `live`, null when off). Never rejects: an unreadable setting is off.
 async function resolveLive(live) {
   const mode = await Promise.resolve().then(() => live.mode()).catch(() => 'off');
-  if (mode !== 'on_device' && mode !== 'cloud_vertex') return { mode: 'off', helper: null };
+  if (!LIVE_MODES.has(mode)) return { mode: 'off', helper: null };
   const helper = await Promise.resolve().then(() => live.helperOptions(mode)).catch((err) => {
     console.warn('[Cora live] live engine not available:', err && err.message);
     return null;
@@ -149,7 +149,7 @@ async function resolveLive(live) {
   return helper ? { mode, helper } : { mode: 'off', helper: null };
 }
 
-const LIVE_MODES = new Set(['on_device', 'cloud_vertex']);
+const LIVE_MODES = new Set(['on_device', 'on_device_hinglish', 'cloud_vertex']);
 
 function createRecordingSession({ startHelper, api, clock, queue, people = {}, microphone = null, live: liveAdapter = null, newRecordingId = recordingIdAt, permissions = {}, resources = null }) {
   const events = new EventEmitter();

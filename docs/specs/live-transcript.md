@@ -93,6 +93,7 @@ Capture helper ──► recording file (unchanged, canonical)
   - a LocalAgreement-style stabilizer emits only word prefixes that agree across hypotheses and never retracts stable text;
   - Apple Speech is the fallback (restarted every ~1 minute, its per-request cap); Apple's newer on-device transcriber is tried on macOS 26+ behind an availability check.
 - Model: measure English-only base vs a multilingual CoreML model (small or large-v3-turbo) for Hinglish; pick by the L4 eval.
+- Added Nov 2026: `on_device_hinglish` runs `python/live_whisper.py` (MLX Whisper Turbo Hinglish, already downloaded, offline) with the same LIVE_* lines. Measured on three real Hinglish call excerpts against the full Gemini transcript: word recall 0.68–0.73 vs 0.17–0.24 for SpeechTranscriber and 0.50–0.60 for Tara; final-caption lag p50 ~0.75 s; ~4 GB RSS for both tracks.
 - New stdout lines in the existing helper grammar: `LIVE_PARTIAL` and `LIVE_FINAL` carrying track, start, end, text. `SPEAKER_ACTIVE` stays as is and supplies the remote speaker hint.
 - A file-input mode runs the live engine on a WAV fixture and emits the same lines (the test seam).
 

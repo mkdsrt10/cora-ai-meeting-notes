@@ -11,7 +11,7 @@ as JSON under <data dir>/research/live-transcript-eval/ (outside the repo).
            overlap against a reference text per fixture.
 
              tools/eval_live_transcript.py engine --mic you.wav --mic-ref "text" [--sys them.wav --sys-ref "text"]
-               [--engine-arg --locale --engine-arg en-IN] [--label NAME]
+               [--live-engine EXE] [--engine-arg --locale --engine-arg en-IN] [--label NAME]
 
   meetings Live vs full transcript on Recordings that have both: word overlap
            per track (mic = You, sys = everyone else), Hinglish meetings
@@ -52,6 +52,22 @@ def overlap(live: str, reference: str) -> dict:
     return {"live_words": sum(a.values()), "ref_words": sum(b.values()),
             "recall": round(common / max(1, sum(b.values())), 3),
             "precision": round(common / max(1, sum(a.values())), 3)}
+
+
+def cer(live: str, reference: str) -> float:
+    """Character error rate of the live text against the reference, on lowercase
+    letters, digits and single spaces (kinder than word overlap to Hinglish
+    spelling variants such as theek/thik)."""
+    a, b = (" ".join(words(t)) for t in (live, reference))
+    if not b:
+        return 0.0
+    prev = list(range(len(a) + 1))
+    for i, cb in enumerate(b, 1):
+        cur = [i] + [0] * len(a)
+        for j, ca in enumerate(a, 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb))
+        prev = cur
+    return round(prev[-1] / len(b), 3)
 
 
 def pct(values: list[float], p: float):
@@ -107,7 +123,7 @@ def _sockets(pids: list[int]) -> int:
 def engine_mode(args) -> dict:
     subprocess.run(["make", "capture/dual-capture", "capture/live-engine"], cwd=ROOT, check=True, capture_output=True)
     cmd = [str(ROOT / "capture" / "dual-capture"), "--live-test", args.mic] + ([args.sys] if args.sys else [])
-    cmd += ["--live-engine", str(ROOT / "capture" / "live-engine")]
+    cmd += ["--live-engine", args.live_engine or str(ROOT / "capture" / "live-engine")]
     for extra in args.engine_arg or []:
         cmd += ["--live-arg", extra]
     started = time.monotonic()
@@ -156,6 +172,11 @@ def engine_mode(args) -> dict:
         if ref:
             text = " ".join(p["text"] for p in finals if p["track"] == track)
             result[f"overlap_{track}"] = overlap(text, ref)
+            result[f"cer_{track}"] = cer(text, ref)
+    if args.ref:   # both tracks against one reference (e.g. the full transcript of that stretch), in time order
+        ref = Path(args.ref).read_text()
+        text = " ".join(p["text"] for p in sorted(finals, key=lambda p: p["start"]))
+        result["overlap_all"], result["cer_all"] = overlap(text, ref), cer(text, ref)
     return result
 
 
@@ -202,6 +223,9 @@ def main() -> int:
     e.add_argument("--mic-ref")
     e.add_argument("--sys-ref")
     e.add_argument("--engine-arg", action="append")
+    e.add_argument("--ref", help="file: reference text for both tracks together")
+    e.add_argument("--live-engine", help="engine executable (default capture/live-engine); e.g. the venv python "
+                   "with --engine-arg python/live_whisper.py --engine-arg --model --engine-arg <model>")
     e.add_argument("--label", default="fixtures")
     m = sub.add_parser("meetings")
     m.add_argument("ids", nargs="*")

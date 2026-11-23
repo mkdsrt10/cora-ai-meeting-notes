@@ -285,3 +285,38 @@ def test_merged_continuation_keeps_one_live_record_and_deletes_the_child(fake_te
     texts = [(x["text"], x["start"]) for x in live_transcript.read_all("live-parent")]
     assert texts[0] == ("Parent words.", 0)
     assert texts[1][0] == "Child words." and texts[1][1] >= 1
+
+
+# --- Hinglish live on this Mac (python/live_whisper.py) ----------------------
+
+def _hinglish_env(monkeypatch, *, gb=32, arch="arm64", ready=True):
+    import pipeline.config as pcfg
+    monkeypatch.setattr(processing, "_memory_bytes", lambda: gb * 1024**3)
+    monkeypatch.setattr(processing.platform, "machine", lambda: arch)
+    monkeypatch.setattr(pcfg, "model_ready", lambda model: ready and model == processing.LIVE_HINGLISH_MODEL)
+
+
+def test_hinglish_live_is_offered_only_when_this_mac_can_run_it(monkeypatch):
+    _hinglish_env(monkeypatch)
+    assert "on_device_hinglish" in processing.live_choices()["offered"]
+    assert processing.live_hinglish_refusal() is None
+    for kwargs, code in (({"ready": False}, "model_missing"), ({"gb": 8}, "low_memory"), ({"arch": "x86_64"}, "not_apple_silicon")):
+        _hinglish_env(monkeypatch, **kwargs)
+        assert processing.live_hinglish_refusal() == code
+        assert "on_device_hinglish" not in processing.live_choices()["offered"]
+    _hinglish_env(monkeypatch, ready=False)
+    assert "Whisper Turbo Hinglish" in processing.live_choices()["note"]
+
+
+def test_hinglish_live_saves_and_the_start_reads_its_model(port, monkeypatch):
+    _hinglish_env(monkeypatch)
+    status, body = call(port, "POST", "/api/processing", {"mode": "local_light", "live": "on_device_hinglish"})
+    assert status == 200 and body["preferences"]["live"] == "on_device_hinglish"
+    assert call(port, "GET", "/api/live/settings") == (200, {
+        "mode": "on_device_hinglish", "refused": None, "model": processing.LIVE_HINGLISH_MODEL})
+    # the model went missing after saving: the start is refused, never swapped
+    _hinglish_env(monkeypatch, ready=False)
+    assert call(port, "GET", "/api/live/settings")[1]["refused"] == "model_missing"
+    status, _ = call(port, "POST", "/api/processing", {"mode": "local_light", "live": "on_device_hinglish"})
+    assert status == 400
+    call(port, "POST", "/api/processing", {"mode": "local_light", "live": "off"})

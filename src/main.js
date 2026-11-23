@@ -141,6 +141,12 @@ const recording = createRecordingSession({
     },
     helperOptions: (mode) => {
       if (mode === 'on_device') return { engine: 'on_device' };
+      // Hinglish on this Mac: python/live_whisper.py with an already-downloaded
+      // MLX model (same LIVE_* grammar); not runnable here -> captions pause.
+      if (mode === 'on_device_hinglish') {
+        if (!lastLiveSettings || lastLiveSettings.refused) return { blocked: `hinglish_${(lastLiveSettings && lastLiveSettings.refused) || 'unavailable'}` };
+        return { engine: 'whisper', command: [PYTHON_BIN, path.join(ROOT_DIR, 'python', 'live_whisper.py'), '--model', lastLiveSettings.model], env: SERVER_ENV };
+      }
       if (mode !== 'cloud_vertex') return null;
       if (lastLiveSettings && lastLiveSettings.refused) return { blocked: `cloud_${lastLiveSettings.refused}` };
       return { engine: 'cloud', command: [PYTHON_BIN, path.join(ROOT_DIR, 'python', 'live_cloud.py')], env: SERVER_ENV };

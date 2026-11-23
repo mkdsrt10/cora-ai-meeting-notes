@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.6-beta.2 — 2026-11-23 (pre-beta, owner testing only)
+
+- Live captions: new choice "On this Mac · Hinglish (Whisper Turbo)" in Settings › Processing & models. It runs the Whisper Turbo Hinglish model on this Mac during the call (nothing leaves the Mac; the model is never downloaded mid-call), offered on Apple Silicon with 16 GB or more once the model is downloaded under Models. On today's Hinglish calls it caught 68–73% of the words in the full transcript against 17–24% for Apple's on-device engine, with captions about 0.75 s behind; it uses about 4 GB of memory and 15–20% CPU while recording. If the model goes missing, captions pause; another engine is never swapped in.
+- `tools/eval_live_transcript.py engine` takes `--live-engine` (any engine speaking the LIVE_* lines) and `--ref` (one reference for both tracks), and reports character error rate next to word overlap.
+
 ## 0.4.6-beta.1 — 2026-11-23 (pre-beta, owner testing only)
 
 Not offered through the update banner: installed by hand on the owner's Mac to test before 0.4.6 goes to everyone.

@@ -99,6 +99,8 @@ def test_lockdown_refusal_never_opens_a_stream(backend, monkeypatch):
 
 
 def test_settings_offer_cloud_only_on_vertex_and_not_by_default_in_the_team_build(port, backend, monkeypatch, config):
+    import processing
+    monkeypatch.setattr(processing, "live_hinglish_refusal", lambda: "model_missing")   # independent of this Mac
     assert "cloud_vertex" in call(port, "GET", "/api/processing")[1]["live"]["offered"]
     backend["status"] = dict(AI_STUDIO)
     offered = call(port, "GET", "/api/processing")[1]["live"]

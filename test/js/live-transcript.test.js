@@ -72,6 +72,34 @@ test('liveArgs: on-device uses the engine beside the helper; cloud passes its co
     ['--live', '--live-engine', '/py', '--live-arg', '/live_cloud.py', '--live-arg', '--x']);
 });
 
+test('liveArgs: the Hinglish engine passes its python command through like cloud', () => {
+  assert.deepEqual(liveArgs({ engine: 'whisper', command: ['/py', '/live_whisper.py', '--model', 'm/x'] }),
+    ['--live', '--live-engine', '/py', '--live-arg', '/live_whisper.py', '--live-arg', '--model', '--live-arg', 'm/x']);
+});
+
+test('Hinglish live: the session starts the whisper engine, writes its lines, and never shows the cloud badge', async () => {
+  const command = ['/py', '/live_whisper.py', '--model', 'm/x'];
+  const { session, helpers } = setup({ mode: 'on_device_hinglish', helperOptions: () => ({ engine: 'whisper', command }) });
+  session.start({});
+  await flush();
+  const h = helpers.last();
+  assert.deepEqual(h.opts.live, { engine: 'whisper', command });
+  h.send(line('LIVE_ENGINE {"track":"mic","engine":"mlx_whisper","model":"m/x"}'));
+  h.send(text('FINAL', { track: 'mic', start: 0, end: 1, text: 'haan theek hai.' }));
+  assert.deepEqual([session.state().live.mode, session.state().live.state, session.state().live.cloud],
+    ['on_device_hinglish', 'running', false]);
+  await session.stop('user');
+});
+
+test('Hinglish live refused (model not downloaded): captions pause with the reason, no engine is swapped in', async () => {
+  const { session, helpers } = setup({ mode: 'on_device_hinglish', helperOptions: () => ({ blocked: 'hinglish_model_missing' }) });
+  session.start({});
+  await flush();
+  assert.equal('live' in helpers.last().opts, false);
+  assert.deepEqual([session.state().live.state, session.state().live.code], ['paused', 'hinglish_model_missing']);
+  await session.stop('user');
+});
+
 test('live off: the helper gets no live option and no file is opened', async () => {
   const { session, helpers, files } = setup({ mode: 'off' });
   session.start({});

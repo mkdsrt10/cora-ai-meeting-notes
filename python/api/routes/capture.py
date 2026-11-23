@@ -78,14 +78,18 @@ def post_api_recording_live_entry(req, path: str, body: dict) -> None:
 def get_api_live_settings(req, path: str, query: dict) -> None:
     """The Live transcript engine a Recording starting now would use (read by
     Electron at each start and for the Call prompt badge):
-    {mode: off | on_device | cloud_vertex, refused: null | code}. A refused
-    cloud engine is never swapped for the on-device one: captions pause."""
+    {mode: off | on_device | on_device_hinglish | cloud_vertex, refused: null | code,
+    model? (on_device_hinglish)}. A refused engine is never swapped for another
+    one: captions pause with the code."""
     import processing
     mode = processing.preferences().get("live", "off")
     refused = None
     if mode == "cloud_vertex":
         import live_cloud
         refused = live_cloud.refusal()
+    if mode == "on_device_hinglish":
+        refused = processing.live_hinglish_refusal()
+        return req.send_json({"mode": mode, "refused": refused, "model": processing.LIVE_HINGLISH_MODEL})
     return req.send_json({"mode": mode, "refused": refused})
 
 

@@ -67,7 +67,7 @@ function applyProcessingMode(host, mode){
 function liveField(pref, live){
   const option = (id, name) => `<option value="${esc(id)}" ${id === (pref.live || 'off') ? 'selected' : ''}>${esc(name)}</option>`;
   const offered = live?.offered || ['off', 'on_device'];
-  const names = { off: 'Off', on_device: 'On this Mac', cloud_vertex: 'Cloud · Google Chirp (Vertex)' };
+  const names = { off: 'Off', on_device: 'On this Mac', on_device_hinglish: 'On this Mac · Hinglish (Whisper Turbo)', cloud_vertex: 'Cloud · Google Chirp (Vertex)' };
   const options = offered.concat(offered.includes(pref.live) || !pref.live ? [] : [pref.live]).map(id => option(id, names[id] || id)).join('');
   return `<label>Live captions while recording<select class="recording-select" data-processing="live">${options}</select></label>
     <p class="muted">${esc(live?.note || 'On this Mac: captions stay on this Mac; English works best, mixed Hindi–English is weak. The recording and the full transcript after stop are unaffected.')}</p>`;
