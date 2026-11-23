@@ -905,7 +905,9 @@ app.whenReady().then(async () => {
   menuBar.ensureLoginItemDefault();
 
   const { nativeImage } = require('electron');
-  const icon = nativeImage.createFromPath(ICON_PATH).resize({ width: 16, height: 16 });
+  // Menu bar: a one-colour template image (with @2x) that macOS tints for light and dark menu bars.
+  const icon = nativeImage.createFromPath(path.join(path.dirname(ICON_PATH), 'trayTemplate.png'));
+  icon.setTemplateImage(true);
   tray = new Tray(icon);
   tray.setToolTip(APP_NAME);
   publishState();
