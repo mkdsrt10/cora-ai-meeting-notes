@@ -81,6 +81,7 @@ async function loadProcessingControls(hostId, { manual = false, embedded = false
   if (!host) return null;
   const [data, creds] = await Promise.all([api('/api/processing'), api('/api/credentials/status').catch(() => null)]);
   const pref = data.preferences;
+  savedLiveMode = pref.live ?? null;
   const rec = data.recommendation || null;
   const mode = initialProcessingMode(pref, rec, preferRecommended);
   const option = (id, name, selected, disabled = false) => `<option value="${esc(id)}" ${id === selected ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${esc(name)}</option>`;
@@ -142,8 +143,16 @@ function readProcessingControls(hostId) {
   return result;
 }
 
+// The live mode last loaded into the controls: a save that changes it is a
+// setting_changed of its own (key live), beside processing_mode.
+let savedLiveMode = null;
+
 async function saveProcessingControls(hostId) {
   const options = readProcessingControls(hostId);
   await api('/api/processing', {method:'POST', body:JSON.stringify(options)});
   trackSettingChanged('processing_mode', options.mode);
+  if (options.live !== undefined && options.live !== savedLiveMode) {
+    trackSettingChanged('live', options.live);
+    savedLiveMode = options.live;
+  }
 }

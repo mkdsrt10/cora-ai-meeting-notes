@@ -50,7 +50,12 @@ function parseLiveLine(kind, json) {
   }
   if (kind === 'ERROR') return { type: 'liveStatus', track, state: 'paused', code: String(p.code || 'engine_error') };
   if (!['running', 'lagging', 'paused', 'stopped'].includes(p.state)) return null;
-  return { type: 'liveStatus', track, state: p.state, code: p.code ? String(p.code) : null, droppedS: num(p.dropped_s) };
+  const ev = { type: 'liveStatus', track, state: p.state, code: p.code ? String(p.code) : null, droppedS: num(p.dropped_s) };
+  // The helper's live mic echo canceller (stopped status only; counts, no audio).
+  if (p.state === 'stopped' && num(p.echo_far_s) != null) {
+    ev.echo = { delayMs: num(p.echo_delay_ms), reductionDb: num(p.echo_reduction_db), farS: num(p.echo_far_s) };
+  }
+  return ev;
 }
 
 // One line of helper stdout -> a typed event, or null for chatter.

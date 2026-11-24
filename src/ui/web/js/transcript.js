@@ -97,7 +97,8 @@ function liveLabel(tv){
 
 window.electronAPI?.onLiveCaption?.(c => {
   if(!liveView || !c || (c.recordingId !== liveView.id && c.chunkId !== liveView.id)) return;
-  liveView.lines.set(liveKey(c), { recording_id: c.chunkId, track: c.track, seg: c.seg, speaker: c.speaker,
+  if(c.dropped) liveView.lines.delete(liveKey(c));   // a mic echo of the other side
+  else liveView.lines.set(liveKey(c), { recording_id: c.chunkId, track: c.track, seg: c.seg, speaker: c.speaker,
     start: c.start, end: c.end, text: c.text, final: c.final });
   const shown = selectedRecording();
   if(shown?.id === liveView.id && shown.transcript_view?.source === 'live') drawLiveTranscript(liveView, liveLabel(shown.transcript_view));

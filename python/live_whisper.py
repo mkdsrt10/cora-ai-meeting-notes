@@ -18,6 +18,12 @@ How it works:
 - Decode settings match the batch path (pipeline/transcribe.py): language "en",
   capped temperature ladder, explicit thresholds, then collapse_repetition_loops
   and Devanagari -> Roman (pipeline/romanize.transliterate).
+- Made-up text: the stabilizer keeps a final's start equal to its stable partial,
+  so a hallucination two early decodes agree on survives into the final (Nov 2026
+  call: "So, I think I think I" twelve times, in place of the speaker's words).
+  Partials wait for MIN_PARTIAL_S of audio, and decoded segments that Whisper
+  itself scores as junk are dropped (keep_segment). no_speech_prob is no help
+  here: the Hinglish fine-tunes report 0.0 on every segment.
 
 Never leaves this Mac: the Hugging Face hub is put offline before the model
 loads, so a model that is not already downloaded is LIVE_ERROR model_missing
@@ -28,6 +34,7 @@ from __future__ import annotations
 import argparse
 import os
 import queue
+import re
 import sys
 import threading
 import time
@@ -45,6 +52,9 @@ CLOSE_SILENCE_S = 0.6
 MAX_SEGMENT_S = 12.0
 PRE_ROLL_S = 0.3
 MIN_SPEECH_S = 0.3           # shorter blips are dropped, not decoded
+MIN_PARTIAL_S = 2.0          # no partial decode on less audio than this (hallucinates)
+MIN_LOGPROB = -1.5           # a segment scored below this is dropped (real speech: >= -0.81, Nov 2026 call)
+MAX_COMPRESSION = 3.0        # still this repetitive after the temperature ladder: dropped
 ENGINE = "mlx_whisper"
 
 
@@ -69,6 +79,23 @@ class Vad:
         if not is_speech:
             self.floor = 0.95 * self.floor + 0.05 * level
         return is_speech
+
+
+def keep_segment(segment: dict) -> bool:
+    """A decoded Whisper segment worth showing: not scored as junk (NaN or very
+    low avg_logprob) and not a repetition loop the temperature ladder kept."""
+    logprob = segment.get("avg_logprob")
+    if logprob is None or logprob != logprob or logprob < MIN_LOGPROB:
+        return False
+    return (segment.get("compression_ratio") or 0.0) <= MAX_COMPRESSION
+
+
+_STRAY_PUNCT = re.compile(r"(?:\s+[.!?,]+)+(?=\s|$)")
+
+
+def tidy(text: str) -> str:
+    """Drop the loose ' . !' runs Whisper pads quiet audio with."""
+    return re.sub(r"\s{2,}", " ", _STRAY_PUNCT.sub("", text)).strip()
 
 
 def vocabulary_prompt() -> str:
@@ -100,8 +127,8 @@ def mlx_recognizer(model: str, prompt: str = "") -> Callable:
             audio, path_or_hf_repo=model, language="en", condition_on_previous_text=False,
             temperature=(0.0, 0.2, 0.4), compression_ratio_threshold=2.4, logprob_threshold=-1.0,
             no_speech_threshold=0.5, initial_prompt=prompt or None, verbose=None)
-        text = " ".join(s.get("text", "").strip() for s in result.get("segments") or [])
-        return transliterate(collapse_repetition_loops(text))
+        text = " ".join(s.get("text", "").strip() for s in result.get("segments") or [] if keep_segment(s))
+        return tidy(transliterate(collapse_repetition_loops(text)))
     return recognize
 
 
@@ -164,7 +191,7 @@ class WhisperLive:
         length = len(self.open) * CHUNK / SAMPLE_RATE
         if self.silence_s >= CLOSE_SILENCE_S or length >= MAX_SEGMENT_S:
             self.close()
-        elif decode and length - self.decoded_at >= STEP_S:
+        elif decode and length >= MIN_PARTIAL_S and length - self.decoded_at >= STEP_S:
             self.partial()
 
     def partial(self) -> None:

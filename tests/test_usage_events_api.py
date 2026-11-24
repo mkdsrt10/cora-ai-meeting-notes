@@ -336,3 +336,25 @@ def test_a_bad_request_records_no_error_event(port):
     status, _ = call(port, "POST", "/api/events", {"name": "nope", "payload": {}})
     assert status == 400
     assert exported(port) == []
+
+
+def test_events_added_after_044_carry_ids_and_counts_only(port):
+    """plugin_action (v2 Surface clicks), the echo counts on live_transcript and
+    which shell / live mode on app_started."""
+    bodies = [
+        {"name": "plugin_action", "payload": {"plugin": "slack", "action": "send", "context": "recording", "outcome": "ok"}},
+        {"name": "live_transcript", "payload": {"recording_id": "r1", "mode": "on_device_hinglish", "engine": "whisper",
+                                                "finals": 40, "words": 300, "echo_dropped": 12, "echo_delay_ms": 230,
+                                                "echo_reduction_db": -6, "echo_far_s": 1011}},
+        {"name": "app_started", "payload": {"macos": "15.1", "ui_shell": "v2", "live_mode": "on_device_hinglish"}},
+    ]
+    for body in bodies:
+        assert call(port, "POST", "/api/events", body)[0] == 200
+    leaky = [
+        {"name": "plugin_action", "payload": {"plugin": "slack", "action": "send", "text": "ship it"}},
+        {"name": "plugin_action", "payload": {"plugin": "notion", "action": "account_confirm", "account": "Alex Rivera"}},
+        {"name": "live_transcript", "payload": {"recording_id": "r1", "echo_text": "hello"}},
+    ]
+    for body in leaky:
+        assert call(port, "POST", "/api/events", body)[0] == 400
+    assert [r["payload"] for r in exported(port)] == [b["payload"] for b in bodies]

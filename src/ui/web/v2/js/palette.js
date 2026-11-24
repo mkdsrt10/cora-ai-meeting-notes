@@ -14,7 +14,7 @@ function surfaceCommand(c, group){
     const ctx = currentSurfaceContext();
     const request = { plugin: c.plugin_id, action: c.action?.id, context: ctx.context, id: ctx.id };
     if(c.action?.applies_to === 'selection') request.itemIds = [...selectedItemIds()];
-    return runSurfaceAction(request);
+    return runSurfaceAction(request).then(result => { trackPluginAction(request, result); return result; });
   } };
 }
 
@@ -75,6 +75,7 @@ function openPalette(){
   const host = $('#palette');
   if(palette.open){ $('#paletteInput')?.focus(); return; }
   palette.open = true;
+  trackAction('command_menu');
   palette.returnFocus = document.activeElement;
   host.hidden = false;
   host.innerHTML = `<div class="palette" role="dialog" aria-modal="true" aria-label="Search and commands">

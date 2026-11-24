@@ -49,6 +49,7 @@ ACTIONS: dict[str, str] = {
     "connect_service": DOING,     # Settings › Connections
     "confirm_account": DOING,     # Person page Accounts
     "send_to_slack": DOING,       # opens the Slack composer with selected Action items
+    "plugin_action": DOING,       # the plugin_action event (v2 Surface action click)
     # browsing
     "open_recording": BROWSING,
     "switch_view": BROWSING,
@@ -57,6 +58,7 @@ ACTIONS: dict[str, str] = {
     "toggle_enhanced_raw": BROWSING,
     "open_person": BROWSING,
     "open_settings": BROWSING,
+    "command_menu": BROWSING,     # v2: ⌘K opened
 }
 
 ACTIVE_MIN = "@active_min"  # the reserved row holding the day's active minutes
@@ -99,6 +101,7 @@ def action_for_event(name: str, payload: dict) -> str | None:
         "feedback": "rate",
         "person_added": "add_person",
         "setting_changed": "change_setting",
+        "plugin_action": "plugin_action",
     }.get(name)
 
 

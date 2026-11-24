@@ -123,7 +123,9 @@ No user toggle.
 
 **MCP.** New read-only tool `cora_get_live_transcript(recording_id?, since_cursor?)` returning lines and a new cursor; defaults to the active Recording. Respects the same gates as other MCP reads.
 
-**Usage events.** Counts only: engine, caption delay buckets (p50/p95), dropped seconds, failures by code. No text, no names.
+**Usage events.** Counts only: engine, caption delay buckets (p50/p95), dropped seconds, failures by code., echo counts (mic lines dropped as echoes, the canceller's delay, dB removed and far-end seconds). No text, no names.
+
+**Echo (speakers instead of headphones).** Two layers, live path only; the recorded file keeps the raw mic. (1) The capture helper runs the live mic tap through an echo canceller with the system tap as reference (`EchoCanceller` in capture/DualCapture.swift: bulk delay by envelope cross-correlation, partitioned-block NLMS; a gated-to-zero mic block or a block the filter would make louder passes untouched). `--no-echo-cancel` turns it off; `--aec-test` runs it alone over WAVs. Its counts ride on the stopped `LIVE_STATUS` (`echo_delay_ms`, `echo_reduction_db`, `echo_far_s`). (2) The writer holds each mic final 3 s and drops it when most of its words appear in order in time-overlapping system text; a dropped line is emitted as a caption `{ dropped: true, text: '' }` so views remove its partial.
 
 **Gates.**
 

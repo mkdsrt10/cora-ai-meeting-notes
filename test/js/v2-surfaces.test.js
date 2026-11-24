@@ -122,3 +122,21 @@ test('a returned proposal opens the confirm panel', async () => {
   assert.equal(p.$('#confirmPanel').hidden, false);
   assert.equal(p.$('#confirmPanel').dataset.key, 'k9');
 });
+
+test('a Surface action click sends plugin_action with ids and outcome only', async () => {
+  const p = await page({ 'POST /api/surfaces/action': { toast: 'Done there.' } });
+  draw(p, p.run(`drawContribution(${JSON.stringify(A({ surface: 'app.command', kind: 'action', label: 'Refresh', action: { id: 'refresh', applies_to: 'app' } }))})`));
+  await p.click('[data-surface-action="refresh"]');
+  await p.flush();
+  const sent = p.posts().filter((c) => c.url === '/api/events' && c.body.name === 'plugin_action').map((c) => c.body.payload);
+  assert.deepEqual(sent, [{ plugin: 'p-one', action: 'refresh', context: 'app', outcome: 'ok' }]);
+});
+
+test('a failed Surface action is plugin_action outcome error', async () => {
+  const p = await page({ 'POST /api/surfaces/action': { __status: 409, body: { error: 'not_connected' } } });
+  draw(p, p.run(`drawContribution(${JSON.stringify(A({ surface: 'app.command', kind: 'action', label: 'Send', action: { id: 'send', applies_to: 'app' } }))})`));
+  await p.click('[data-surface-action="send"]');
+  await p.flush();
+  const sent = p.posts().filter((c) => c.url === '/api/events' && c.body.name === 'plugin_action').map((c) => c.body.payload);
+  assert.deepEqual(sent, [{ plugin: 'p-one', action: 'send', context: 'app', outcome: 'error' }]);
+});

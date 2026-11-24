@@ -96,7 +96,7 @@ async function saveTheme(value){
 // ---- shell switch (setting ui_shell: classic | v2) ----
 async function switchShell(target){
   await api('/api/settings', { method: 'POST', body: JSON.stringify({ key: 'ui_shell', value: target }) });
-  trackAction('change_setting');
+  trackSettingChanged('ui_shell', target);   // counts change_setting too (python/activity.py)
   location.assign(SHELL_PATHS[target] || '/');
 }
 
@@ -150,7 +150,7 @@ addEventListener('click', event => {
     if(nav.dataset.folder !== undefined) params.folder = nav.dataset.folder;
     if(nav.dataset.plugin) params.plugin = nav.dataset.plugin;
     if(nav.dataset.pageId) params.page = nav.dataset.pageId;
-    trackAction(nav.dataset.go === 'meeting' ? 'open_recording' : nav.dataset.go === 'settings' ? 'open_settings' : 'switch_view');
+    trackAction({ meeting: 'open_recording', settings: 'open_settings', person: 'open_person' }[nav.dataset.go] || 'switch_view');
     go(nav.dataset.go, params);
     return;
   }

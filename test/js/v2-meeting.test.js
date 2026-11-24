@@ -262,3 +262,21 @@ test('with no notes of your own, one quiet button opens the box; a live meeting 
   p = await meeting({ record: { ...REC, notes: '', analysis_stage: 'recording', enhanced_notes: '' } });
   assert.ok(p.$('#notepadText') && !p.$('[data-write-notes]'));
 });
+
+// --- Usage events the classic detail view already sent ---
+const events = (p, name) => p.posts().filter((c) => c.url === '/api/events' && c.body.name === name).map((c) => c.body.payload);
+
+test('opening a processed meeting sends notes_viewed and action_items_counted once; a reload does not', async () => {
+  const p = await meeting();
+  assert.deepEqual(events(p, 'notes_viewed'), [{ recording_id: 'r1' }]);
+  assert.deepEqual(events(p, 'action_items_counted'), [{ recording_id: 'r1', count: 2 }]);
+  await p.run('reloadMeeting()');
+  await p.flush();
+  assert.equal(events(p, 'notes_viewed').length, 1);
+});
+
+test('a meeting still processing sends neither', async () => {
+  const p = await meeting({ record: { ...REC, analysis_stage: 'processing' } });
+  assert.deepEqual(events(p, 'notes_viewed'), []);
+  assert.deepEqual(events(p, 'action_items_counted'), []);
+});

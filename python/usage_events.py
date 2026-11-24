@@ -23,7 +23,7 @@ QUEUE_MAX_BYTES = 5_000_000
 
 CATALOG: dict[str, frozenset[str]] = {name: frozenset(keys.split()) for name, keys in {
     "app_started": "macos chip ram_gb processing_mode recommended_mode microphone_kind lockdown"
-                   " perm_mic perm_screen perm_accessibility perm_automation",
+                   " perm_mic perm_screen perm_accessibility perm_automation ui_shell live_mode",
     "recording_started": "recording_id meeting_app surface microphone_kind started_from"
                          " perm_mic perm_screen perm_accessibility perm_automation",
     "recording_stopped": "recording_id meeting_app surface duration_s chunks pauses mic_reconnects ended_by"
@@ -32,7 +32,7 @@ CATALOG: dict[str, frozenset[str]] = {name: frozenset(keys.split()) for name, ke
     # Live transcript of one Recording session (docs/specs/live-transcript.md): counts only,
     # never text or names. failures: "code:count,..." of fixed engine codes.
     "live_transcript": "recording_id mode engine finals words lag_p50_ms lag_p95_ms lag_pauses dropped_s"
-                       " failures write_errors",
+                       " failures write_errors echo_dropped echo_delay_ms echo_reduction_db echo_far_s",
     "processing_finished": "recording_id status error_code transcriber_provider transcriber_model text_provider"
                            " text_model transcription_s summarization_s total_s tokens_in tokens_out"
                            " window_fallbacks speech_s silence_s retries peak_rss_mb duration_s"
@@ -71,6 +71,9 @@ CATALOG: dict[str, frozenset[str]] = {name: frozenset(keys.split()) for name, ke
     "model_downloaded": "kind model size_mb seconds outcome",
     "crash_report": "process exception_type signal termination_reason frames",
     "speaker_linked": "source",
+    # A click on a plugin Surface action (UI shell v2): fixed plugin and action
+    # ids only, never values, item text or account names. outcome ok | error.
+    "plugin_action": "plugin action context outcome",
 }.items()}
 
 

@@ -34,7 +34,7 @@ function editRatio(before, after){
 // URLs, free text) is only 'set', and an empty one 'cleared'.
 const SECRET_SETTING = /key|token|secret|password/i;
 const VERBATIM_SETTINGS = new Set(['processing_mode', 'whisper_model_choice', 'liquid_model', 'transcription_engine',
-  'notes_llm_provider', 'openai_asr_model']);
+  'notes_llm_provider', 'openai_asr_model', 'ui_shell', 'live', 'ui_theme']);
 function settingChangedPayload(key, value){
   if(typeof key !== 'string' || !key || SECRET_SETTING.test(key)) return null;
   let shown;

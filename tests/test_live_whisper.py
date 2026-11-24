@@ -121,3 +121,30 @@ def test_a_quiet_remote_speaker_still_opens_a_segment():
         engine.feed(chunk)
     engine.finish()
     assert [p["text"] for k, p in lines if k == "LIVE_FINAL"] == ["haan ji"]
+
+
+def test_no_partial_until_the_segment_has_enough_audio():
+    """A partial on about a second of quiet audio is where Whisper invents text;
+    the stabilizer would then lock it into the final."""
+    lines, calls = _run([("s", lw.MIN_PARTIAL_S - 1.0), ("q", 1)], lambda *_: "haan theek hai")   # + pre-roll + closing silence < MIN_PARTIAL_S
+    assert [k for k, _ in lines] == ["LIVE_FINAL"]
+    assert len(calls) == 1
+    lines, _ = _run([("s", lw.MIN_PARTIAL_S + 1.5), ("q", 1)], _growing)
+    partials = [p for k, p in lines if k == "LIVE_PARTIAL"]
+    assert partials and all(p["end"] - p["start"] >= lw.MIN_PARTIAL_S - lw.PRE_ROLL_S for p in partials)
+
+
+def test_segments_whisper_scores_as_junk_are_dropped():
+    # Nov 2026 call: real speech scored -0.16 .. -0.81; junk NaN, ~-2, or a loop the ladder kept.
+    assert lw.keep_segment({"avg_logprob": -0.81, "compression_ratio": 1.4})
+    assert not lw.keep_segment({"avg_logprob": float("nan"), "compression_ratio": 1.0})
+    assert not lw.keep_segment({"avg_logprob": -2.06, "compression_ratio": 1.0})
+    assert not lw.keep_segment({"avg_logprob": -0.44, "compression_ratio": 18.8})
+    assert not lw.keep_segment({})
+
+
+def test_stray_punctuation_runs_are_tidied_away():
+    assert lw.tidy("So, I'm not sure. . !") == "So, I'm not sure."
+    assert lw.tidy("Okay. . ! . !") == "Okay."
+    assert lw.tidy("Yes, Rob. So, I will review it.") == "Yes, Rob. So, I will review it."
+    assert lw.tidy(" . !") == ""

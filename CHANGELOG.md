@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.6-beta.5 — 2026-11-24 (pre-beta, owner testing only)
+
+- Live captions no longer write the other side's words as yours when you use speakers instead of headphones. The live mic now goes through an echo canceller that uses the call audio as its reference and finds the speaker-to-mic delay by itself; the recorded file keeps the raw mic. On the Nov 23 call (USB mic, desk speakers) the echo lines in the live mic captions fell from 36 to 3 in 25 minutes, and your own voice was untouched. About 0.4% of one CPU core.
+- As a backup, a mic caption that repeats what the other side said at the same moment is held 3 s and then removed from the floating captions and the live transcript.
+- Fewer made-up captions ("So, I think I think I"): no in-progress caption until 2 s of speech, and pieces Whisper itself scores as junk are dropped.
+- Usage events: echo counts on live_transcript; plugin_action for plugin buttons in the new look (ids and ok/error only); notes_viewed and action_items_counted from the new meeting page; which look and live caption mode on app_started; the ⌘K menu and switching looks or live mode are counted.
+
 ## 0.4.6-beta.4 — 2026-11-23 (pre-beta, owner testing only)
 
 - Zoom in a browser is detected again and its participant names are captured. Zoom's web client (app.zoom.us/wc) now runs inside an iframe, so Cora saw neither the Leave button nor the name tiles: no "Zoom call detected" prompt and no People. The live check and the name reader now look inside the client's iframe and read each tile's name (speaker bar, gallery and share views). Checked on a live call: detected as live, every participant named.

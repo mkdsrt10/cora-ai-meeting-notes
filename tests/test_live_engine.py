@@ -144,7 +144,10 @@ def test_helper_relays_both_tracks_from_wav_input():
     assert {p["track"] for k, p in lines if k == "LIVE_ENGINE"} == {"mic", "sys"}
     assert_track_contract(lines, "mic")
     assert_track_contract(lines, "sys")
-    assert lines[-1] == ("LIVE_STATUS", {"state": "stopped", "dropped_s": 0})
+    kind, stopped = lines[-1]
+    assert kind == "LIVE_STATUS" and stopped["state"] == "stopped" and stopped["dropped_s"] == 0
+    # The echo canceller's counts ride on the stopped status (two separate voices: no echo path found).
+    assert {"echo_delay_ms", "echo_reduction_db", "echo_far_s"} <= set(stopped)
 
 
 def test_helper_survives_a_missing_engine():

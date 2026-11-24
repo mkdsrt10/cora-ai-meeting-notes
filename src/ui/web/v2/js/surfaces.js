@@ -126,6 +126,14 @@ function panelValues(host){
 }
 
 // ---- running actions -------------------------------------------------------------
+// plugin_action Usage event for a click or a panel submit (not a panel's own
+// load): fixed ids only, cut to identifier characters.
+function trackPluginAction(request, result){
+  const id = v => String(v || '').replace(/[^a-z0-9_.-]/gi, '').slice(0, 64);
+  track('plugin_action', { plugin: id(request.plugin), action: id(request.action), context: id(request.context || 'app'),
+    outcome: result ? 'ok' : 'error' });
+}
+
 async function runSurfaceAction(request){
   const { plugin, action, context = 'app', id = null, itemIds = [], values = {} } = request;
   try{
@@ -177,7 +185,9 @@ addEventListener('click', async event => {
   if(submit && panelHost){
     const action = submit.dataset.panelSubmit || submit.dataset.panelButton;
     submit.disabled = true;
-    const result = await runSurfaceAction({ plugin: panelHost.dataset.plugin, action, context: 'app', values: panelValues(panelHost) });
+    const submitted = { plugin: panelHost.dataset.plugin, action, context: 'app', values: panelValues(panelHost) };
+    const result = await runSurfaceAction(submitted);
+    trackPluginAction(submitted, result);
     submit.disabled = false;
     if(result?.panel) replacePanel(panelHost, { plugin_id: panelHost.dataset.plugin, panel: { load: panelHost.dataset.load, ...result.panel } });
     return;
@@ -191,6 +201,7 @@ addEventListener('click', async event => {
     if(appliesTo === 'action_item') request.itemIds = [act.dataset.target || act.closest('[data-item]')?.dataset.item].filter(Boolean);
     if(act.dataset.values){ try{ request.values = JSON.parse(act.dataset.values); }catch(error){ request.values = {}; } }
     const result = await runSurfaceAction(request);
+    trackPluginAction(request, result);
     if(result?.refresh) document.dispatchEvent(new Event('surfacesrefresh'));
   }
 });

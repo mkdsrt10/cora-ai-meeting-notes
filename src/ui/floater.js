@@ -163,6 +163,10 @@ function addCaption(c) {
   if (!c || typeof c.text !== 'string') return;
   const key = `${c.chunkId}:${c.track}:${c.seg}`;
   const at = captions.findIndex((x) => x.key === key);
+  if (c.dropped) {   // the mic line was an echo of the other side
+    if (at >= 0) { captions.splice(at, 1); renderCaptions(); }
+    return;
+  }
   const entry = { key, who: c.who || (c.track === 'mic' ? 'You' : 'Them'), text: c.text, final: Boolean(c.final) };
   if (at >= 0) captions[at] = entry; else captions.push(entry);
   if (captions.length > 8) captions = captions.slice(-8);

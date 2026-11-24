@@ -179,9 +179,11 @@ function recordUsage(name, payload) {
 async function recordAppStarted() {
   let processingMode = null;
   let recommendedMode = null;
+  let liveMode = null;
   try {
     const processing = JSON.parse(await fetchJson('/api/processing'));
     processingMode = processing.preferences.mode;
+    liveMode = processing.preferences.live || null;
     recommendedMode = (processing.recommendation && processing.recommendation.recommended_mode) || null;
   } catch {}
   let configText = null;
@@ -192,6 +194,8 @@ async function recordAppStarted() {
     processingMode,
     recommendedMode,
     microphone: await fetchSetting('microphone'),
+    uiShell: await fetchSetting('ui_shell'),
+    liveMode,
     lockdown: lockdownEnabled({ env: process.env, configText }),
     permissions: permissionSnapshot(permissionStatus()),
   }));

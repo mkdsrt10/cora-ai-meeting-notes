@@ -115,6 +115,10 @@ test('⌘K lists pages, meetings, Cora and plugin actions, and runs the chosen o
   const post = p.posts().find((c) => c.url === '/api/surfaces/action');
   assert.deepEqual([post.body.plugin_id, post.body.action_id], ['p-one', 'refresh']);
   assert.equal(p.$('#palette').hidden, true);
+  await p.flush();
+  assert.ok(p.posts().some((c) => c.url === '/api/activity' && c.body.action === 'command_menu'), 'opening ⌘K is counted');
+  assert.deepEqual(p.posts().filter((c) => c.url === '/api/events' && c.body.name === 'plugin_action').map((c) => c.body.payload),
+    [{ plugin: 'p-one', action: 'refresh', context: 'app', outcome: 'ok' }]);
 
   await p.key('k', { metaKey: true });
   await p.input('#paletteInput', 'design');

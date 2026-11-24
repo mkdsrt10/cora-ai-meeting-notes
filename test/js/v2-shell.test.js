@@ -21,6 +21,9 @@ test('Back to the classic look writes ui_shell=classic and opens the classic pag
   await page.click('[data-switch-shell="classic"]');
   assert.equal(page.store.ui_shell, 'classic');
   assert.deepEqual(page.location.assigned, ['/']);
+  await page.flush();
+  const changed = page.posts().filter((c) => c.url === '/api/events' && c.body.name === 'setting_changed').map((c) => c.body.payload);
+  assert.deepEqual(changed, [{ key: 'ui_shell', value: 'classic' }]);
 });
 
 test('theme follows the system until overridden, and the override is saved', async () => {

@@ -28,7 +28,10 @@ function permissionSnapshot(status = {}, automation = null) {
 
 // recommendedMode: python/processing.py recommend() for this Mac (GET /api/processing).
 // permissions: permissionSnapshot(...) (perm_* keys), or omitted.
-function appStartedPayload({ os, systemVersion, processingMode, recommendedMode = null, microphone, lockdown, permissions = {} }) {
+// uiShell: the ui_shell setting (classic | v2); liveMode: the live setting
+// (off, on_device, on_device_hinglish, cloud_vertex, ...), each a fixed choice.
+function appStartedPayload({ os, systemVersion, processingMode, recommendedMode = null, microphone, lockdown, permissions = {},
+  uiShell = null, liveMode = null }) {
   const cpus = os.cpus() || [];
   return {
     macos: systemVersion || os.release(),
@@ -39,6 +42,8 @@ function appStartedPayload({ os, systemVersion, processingMode, recommendedMode 
     microphone_kind: microphoneKind(microphone),
     lockdown: Boolean(lockdown),
     ...permissions,
+    ui_shell: typeof uiShell === 'string' ? uiShell.slice(0, 32) : null,
+    live_mode: typeof liveMode === 'string' ? liveMode.slice(0, 32) : null,
   };
 }
 

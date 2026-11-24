@@ -22,14 +22,68 @@
 // caption delay for the line, for the eval) }. Finals as they come;
 // a partial only when its segment never got a final (engine stopped mid-sentence). Lines continue
 // across Chunks; times never go backwards per track.
+//
+// Echo: on speakers, the mic hears the other side a moment after the system track does (Nov 2026
+// call: 64 of 183 mic lines repeated a remote speaker, ~230 ms behind). A mic final is held for
+// ECHO_HOLD_MS, then dropped when most of its words appear, in order, in system lines that overlap
+// it in time (your own reply to something said seconds earlier is kept). A dropped segment gets one
+// caption { dropped: true, text: '' } so views remove its partial; counted as echoDropped.
 
 const LAG_PAUSE_MS = 6000;       // captions this far behind speech count as paused
 const LAG_RESUME_MS = 3000;
 const ENGINE_START_MS = 30000;   // no engine line by then: paused
 const SPEAKER_HINT_MS = 10000;   // a remote name this recent labels Them lines
 const NON_NAMES = new Set(['you', 'participant', '']);
+const ECHO_HOLD_MS = 3000;       // a mic final waits this long for the system track to catch up
+const ECHO_SLACK_S = 1.5;        // an echo overlaps its system line in time, give or take this much
+const ECHO_KEEP_S = 60;          // system lines kept for matching
+const ECHO_MIN_WORDS = 3;        // shorter mic lines ("okay") are never called echo
+const ECHO_SHARE = 0.6;          // share of the mic line's words found, in order, in the system text
 
 const round3 = (x) => Math.round(x * 1000) / 1000;
+const words = (text) => String(text || '').toLowerCase().replace(/['’]/g, '').split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+// The mic hears the speakers muffled, so its copy is a rough re-hearing ("finished" for "finish",
+// "a bit progress" for "a good progress"): words match when equal, one edit apart, or sharing 4 letters of stem.
+function sameWord(a, b) {
+  if (a === b) return true;
+  if (a.length >= 4 && b.length >= 4 && a.slice(0, 4) === b.slice(0, 4)) return true;
+  if (Math.min(a.length, b.length) < 3 || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && a[i] === b[i]) i += 1;
+  const tailA = a.slice(i + 1), tailB = b.slice(i + 1);
+  return tailA === tailB || a.slice(i) === b.slice(i + 1) || a.slice(i + 1) === b.slice(i);
+}
+
+// Longest in-order match of `mine` inside some stretch of `theirs` (words may be skipped on either side).
+function bestInOrder(mine, theirs) {
+  let best = 0;
+  const span = mine.length + 3;
+  for (let at = 0; at < Math.max(1, theirs.length - mine.length + 1); at += 1) {
+    const win = theirs.slice(at, at + span);
+    const row = new Array(win.length + 1).fill(0);
+    for (const m of mine) {
+      let diag = 0;
+      for (let j = 1; j <= win.length; j += 1) {
+        const up = row[j];
+        row[j] = sameWord(m, win[j - 1]) ? diag + 1 : Math.max(row[j], row[j - 1]);
+        diag = up;
+      }
+    }
+    best = Math.max(best, row[win.length]);
+  }
+  return best;
+}
+
+// Is a mic line (text, start, end in session seconds) mostly a re-hearing of system lines that overlap it?
+function isEcho(text, start, end, sysLines) {
+  const mine = words(text);
+  if (mine.length < ECHO_MIN_WORDS) return false;
+  const near = sysLines.filter((s) => s.end >= start - ECHO_SLACK_S && s.start <= end + ECHO_SLACK_S)
+    .sort((a, b) => a.start - b.start);
+  if (!near.length) return false;
+  return bestInOrder(mine, near.flatMap((s) => words(s.text))) / mine.length >= ECHO_SHARE;
+}
 
 function createLiveTranscript({ key, mode, file = null, clock, selfName = () => null, onCaption = () => {}, onStatus = () => {} }) {
   const tracks = { mic: newTrack(), sys: newTrack() };
@@ -39,7 +93,10 @@ function createLiveTranscript({ key, mode, file = null, clock, selfName = () => 
   let fileOk = Boolean(file);
   let remote = null;              // { name, at }
   let ended = false;
-  const counts = { finals: 0, partials: 0, lags: [], droppedS: 0, failures: {}, lagPauses: 0, words: 0, writeErrors: 0 };
+  const counts = { finals: 0, partials: 0, lags: [], droppedS: 0, failures: {}, lagPauses: 0, words: 0, writeErrors: 0, echoDropped: 0,
+    echoDelayMs: null, echoReductionDb: null, echoFarS: 0 };
+  let sysLines = [];              // recent system finals, session seconds: { start, end, text }
+  const held = new Set();         // mic finals waiting out ECHO_HOLD_MS: { out, caption, timer }
   let status = { state: 'starting', mode, engine: null, code: null, cloud: mode === 'cloud_vertex' };
   let startTimer = clock.setTimeout(() => {
     if (!tracks.mic.engine && !tracks.sys.engine && status.state !== 'paused') pause('engine_start_timeout');
@@ -118,21 +175,71 @@ function createLiveTranscript({ key, mode, file = null, clock, selfName = () => 
     }
     const speaker = speakerFor(ev.track);
     const out = line(t, fixed, ev.final, speaker);
+    const caption = { recordingId: key, chunkId, track: ev.track, who: ev.track === 'mic' ? 'You' : (speaker || 'Them'),
+      speaker, seg: ev.seg, start: out.start, end: out.end, text: ev.text, final: ev.final };
     if (ev.final) {
       out.start = Math.max(out.start, t.lastFinalEnd);
       out.end = Math.max(out.end, out.start);
       t.lastFinalEnd = out.end;
       t.open = null;
-      counts.finals += 1;
-      counts.words += ev.text.split(/\s+/).filter(Boolean).length;
-      write(out);
+      Object.assign(caption, { start: out.start, end: out.end });
+      if (ev.track === 'sys') {
+        sysLines = sysLines.filter((s) => s.end >= out.end - ECHO_KEEP_S);
+        sysLines.push({ start: out.start, end: out.end, text: out.text });
+      }
+      if (ev.track === 'mic') hold(out, caption);
+      else keep(out, caption);
+    } else if (ev.track === 'mic' && isEcho(out.text, out.start, out.end, sysNow())) {
+      t.open = null;
+      drop(caption, false);
     } else {
       t.open = out;
       counts.partials += 1;
+      onCaption(caption);
     }
-    onCaption({ recordingId: key, chunkId, track: ev.track, who: ev.track === 'mic' ? 'You' : (speaker || 'Them'),
-      speaker, seg: ev.seg, start: out.start, end: out.end, text: ev.text, final: ev.final });
     setStatus({ ...overall(), engine });
+  }
+
+  // System finals plus the system segment still being spoken (an echo can arrive before its source's final).
+  function sysNow() {
+    return tracks.sys.open ? [...sysLines, tracks.sys.open] : sysLines;
+  }
+
+  function keep(out, caption) {
+    counts.finals += 1;
+    counts.words += out.text.split(/\s+/).filter(Boolean).length;
+    write(out);
+    onCaption(caption);
+  }
+
+  function drop(caption, isLine = true) {
+    if (isLine) counts.echoDropped += 1;   // dropped lines; a withdrawn partial is not one
+    onCaption({ ...caption, text: '', final: true, dropped: true });
+  }
+
+  function settle(h) {
+    held.delete(h);
+    if (h.timer != null) clock.clearTimeout(h.timer);
+    if (isEcho(h.out.text, h.out.start, h.out.end, sysNow())) drop(h.caption);
+    else keep(h.out, h.caption);
+  }
+
+  // One helper (Chunk) stopped: fold its echo canceller counts in. Delay is the
+  // last one found; reduction is weighted by each Chunk's far-end seconds.
+  function addEcho(echo) {
+    if (typeof echo.delayMs === 'number' && echo.delayMs >= 0) counts.echoDelayMs = echo.delayMs;
+    const far = typeof echo.farS === 'number' ? echo.farS : 0;
+    if (far > 0 && typeof echo.reductionDb === 'number') {
+      const before = counts.echoFarS;
+      counts.echoReductionDb = ((counts.echoReductionDb ?? 0) * before + echo.reductionDb * far) / (before + far);
+    }
+    counts.echoFarS += far;
+  }
+
+  function hold(out, caption) {
+    const h = { out, caption, timer: null };
+    held.add(h);
+    h.timer = clock.setTimeout(() => { h.timer = null; if (!ended) settle(h); }, ECHO_HOLD_MS);
   }
 
   function flushOpen() {
@@ -169,6 +276,7 @@ function createLiveTranscript({ key, mode, file = null, clock, selfName = () => 
         setStatus({ ...overall(), engine });
       } else if (ev.type === 'liveStatus') {
         if (typeof ev.droppedS === 'number' && ev.state === 'stopped') counts.droppedS += ev.droppedS;
+        if (ev.state === 'stopped' && ev.echo) addEcho(ev.echo);
         if (ev.state === 'paused') pause(ev.code || 'engine_error', ev.track && tracks[ev.track] ? ev.track : null);
         else if (ev.state === 'lagging') pause(ev.code || 'lagging', ev.track && tracks[ev.track] ? ev.track : null);
         else if (ev.state === 'running' && tracks[ev.track]) {
@@ -187,6 +295,7 @@ function createLiveTranscript({ key, mode, file = null, clock, selfName = () => 
     status: () => ({ ...status }),
     end() {
       if (ended) return null;
+      for (const h of [...held]) settle(h);
       flushOpen();
       ended = true;
       if (startTimer != null) { clock.clearTimeout(startTimer); startTimer = null; }
@@ -242,6 +351,12 @@ function liveUsagePayload(recordingId, summary) {
     dropped_s: Math.round((summary.droppedS || 0) * 10) / 10,
     failures,
     write_errors: summary.writeErrors,
+    // Echo handling: mic lines dropped as echoes of the other side, and the
+    // capture helper's canceller (delay found, dB removed, far-end seconds).
+    echo_dropped: summary.echoDropped || 0,
+    echo_delay_ms: typeof summary.echoDelayMs === 'number' ? summary.echoDelayMs : null,
+    echo_reduction_db: typeof summary.echoReductionDb === 'number' ? Math.round(summary.echoReductionDb) : null,
+    echo_far_s: Math.round(summary.echoFarS || 0),
   };
 }
 
@@ -251,5 +366,5 @@ function liveCloudWillRun(settings) {
   return Boolean(settings && settings.mode === 'cloud_vertex' && !settings.refused);
 }
 
-module.exports = { createLiveTranscript, createLiveTranscriptFiles, liveCloudWillRun, liveUsagePayload, lagBucket,
-  LAG_PAUSE_MS, ENGINE_START_MS };
+module.exports = { createLiveTranscript, createLiveTranscriptFiles, liveCloudWillRun, liveUsagePayload, lagBucket, isEcho,
+  LAG_PAUSE_MS, ENGINE_START_MS, ECHO_HOLD_MS };

@@ -54,11 +54,11 @@ def events(name=None):
 
 def test_the_action_list_is_a_fixed_set_of_snake_case_ids_each_doing_or_browsing():
     import activity
-    assert 20 <= len(activity.ACTIONS) <= 30
+    assert 20 <= len(activity.ACTIONS) <= 35
     assert all(a.replace("_", "").isalpha() and a == a.lower() for a in activity.ACTIONS)
     assert set(activity.ACTIONS.values()) == {"doing", "browsing"}
     assert {a for a, k in activity.ACTIONS.items() if k == "browsing"} == {
-        "open_recording", "switch_view", "search", "filter", "toggle_enhanced_raw", "open_person", "open_settings"}
+        "open_recording", "switch_view", "search", "filter", "toggle_enhanced_raw", "open_person", "open_settings", "command_menu"}
 
 
 def test_renderer_and_main_only_count_ids_in_the_list():
@@ -109,6 +109,7 @@ def test_an_unknown_action_is_refused():
     ("notes_exported", {"recording_id": "r1", "kind": "copy"}, "copy_notes"),
     ("person_added", {"source": "people_page"}, "add_person"),
     ("setting_changed", {"key": "retain_audio", "value": "true"}, "change_setting"),
+    ("plugin_action", {"plugin": "notion", "action": "account_confirm", "context": "person", "outcome": "ok"}, "plugin_action"),
 ])
 def test_an_existing_event_that_marks_a_doing_action_counts_it_once(name, payload, action):
     import activity

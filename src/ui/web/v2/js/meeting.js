@@ -270,6 +270,14 @@ async function reloadMeeting(){
   drawMeeting();
 }
 
+// notes_viewed and action_items_counted, as the classic detail view sends
+// them: once each time a processed meeting is opened (not on reloads).
+function trackMeetingViewed(record, items){
+  if(!record?.id || PENDING.has(record.analysis_stage) || record.analysis_stage === 'failed') return;
+  track('notes_viewed', { recording_id: record.id });
+  track('action_items_counted', { recording_id: record.id, count: (items || []).length });
+}
+
 async function renderMeeting(host, params = {}){
   const id = params.id;
   if(!id) return go('home');
@@ -291,6 +299,7 @@ async function renderMeeting(host, params = {}){
   setSelectionProvider(() => mt.selected);
   confirmState.onChange = reloadMeeting;
   drawMeeting();
+  trackMeetingViewed(mt.record, mt.items);
   if(params.focus === 'notepad') $('#notepadText')?.focus();
   api('/api/people').then(r => { mt.people = r.people || []; if(mt.tab === 'participants') drawTab(); }).catch(() => {});
 }

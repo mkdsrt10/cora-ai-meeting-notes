@@ -3,6 +3,7 @@ import ScreenCaptureKit
 import AVFoundation
 import CoreMedia
 import CoreAudio
+import Accelerate
 
 // MARK: - Microphone resolution
 //
@@ -124,9 +125,12 @@ final class LiveFeed {
     private var dropping = false                 // (lock) inside a drop episode
     private(set) var droppedSeconds = 0.0        // (lock)
     private var pendingLine = Data()
+    private let canceller: EchoCanceller?        // shared by both feeds; nil = no echo cancelling
+    private var nextPos: Int?                    // (feed queue) timeline position of the next sample
 
-    init(track: String) {
+    init(track: String, canceller: EchoCanceller? = nil) {
         self.track = track
+        self.canceller = canceller
         queue = DispatchQueue(label: "Cora.LiveFeed.\(track)", qos: .utility)
     }
 
@@ -182,11 +186,12 @@ final class LiveFeed {
         guard frames > 0, let desc = CMSampleBufferGetFormatDescription(sampleBuffer),
               let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc)?.pointee, asbd.mSampleRate > 0 else { return }
         let seconds = Double(frames) / asbd.mSampleRate
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         guard admit(seconds) else { return }
         queue.async { [self] in
             defer { lock.withLock { backlog -= seconds } }
             guard let pcm = Self.pcmBuffer(sampleBuffer, frames: frames) else { return }
-            write(convert(pcm))
+            deliver(convert(pcm), atSeconds: pts.isValid ? pts.seconds : nil)
         }
     }
 
@@ -196,7 +201,27 @@ final class LiveFeed {
         guard admit(seconds) else { return }
         queue.async { [self] in
             defer { lock.withLock { backlog -= seconds } }
-            write(convert(pcm))
+            deliver(convert(pcm), atSeconds: nil)
+        }
+    }
+
+    /// Feed queue only. Places the samples on the shared timeline (presentation
+    /// time, or straight after the previous buffer when that is within 50 ms or
+    /// there is no time), then: sys -> engine + echo reference; mic -> echo
+    /// canceller -> engine.
+    private func deliver(_ samples: [Float], atSeconds seconds: Double?) {
+        guard let canceller = canceller, !samples.isEmpty else { write(samples); return }
+        var pos = nextPos ?? 0
+        if let seconds = seconds {
+            let stamped = canceller.position(atSeconds: seconds)
+            if nextPos == nil || abs(stamped - pos) > 800 { pos = stamped }
+        }
+        nextPos = pos + samples.count
+        if track == "sys" {
+            write(samples)
+            canceller.reference(samples, at: pos)
+        } else {
+            write(canceller.process(samples, at: pos))
         }
     }
 
@@ -277,6 +302,7 @@ final class LiveFeed {
     func close(timeout: TimeInterval) {
         lock.withLock { closing = true }
         queue.sync {
+            if track == "mic", let canceller = canceller { write(canceller.flush()) }
             if stdinFD >= 0 { Darwin.close(stdinFD); stdinFD = -1 }
         }
         guard process.isRunning else { return }
@@ -289,9 +315,296 @@ final class LiveFeed {
     }
 }
 
+// MARK: - Live mic echo canceller
+//
+// With speakers instead of headphones the mic hears the other side ~0.1-0.3 s
+// later, and the live mic engine transcribes it as the user's own words. The
+// recorded file keeps the raw mic (batch processing ducks it with ffmpeg); only
+// the live mic tap goes through this canceller, with the system track's live
+// tap as the reference. Partitioned-block frequency-domain NLMS (256-sample
+// blocks, 8 partitions = 128 ms of echo path after a bulk delay found by
+// envelope cross-correlation). Safeguards: a block the mic's own gate zeroed
+// passes untouched and does not adapt; a block whose output would be louder
+// than its input passes untouched (a diverged filter never adds sound); while
+// the residual is much louder than the echo estimate (the user talking over
+// the other side) adaptation slows 20x. Positions are 16 kHz samples on one
+// timeline shared by both tracks (presentation times on the host clock).
+final class EchoCanceller {
+    static let rate = 16000
+    static let n = 256                    // block (16 ms)
+    static let partitions = 8             // echo path covered after the bulk delay: 128 ms
+    static let mu: Float = 0.5
+    static let defaultDelay = 1920        // 120 ms until the estimator finds the real one
+    static let maxDelay = 9600            // 600 ms
+    static let headroom = 480             // the filter starts 30 ms before the measured delay
+    static let holdLimit = 8000           // mic waits at most 0.5 s for the reference
+    static let envHop = 160               // 10 ms envelope frames for the delay estimator
+    static let envKeep = 500              // 5 s of envelope
+    static let estimateEvery = 200        // frames (2 s)
+
+    private let lock = NSLock()
+    private let fftSize = 2 * EchoCanceller.n
+    private let forward: vDSP_DFT_Setup
+    private let inverse: vDSP_DFT_Setup
+
+    // Reference (system track), a 4 s ring indexed by timeline position.
+    private var ref = [Float](repeating: 0, count: 4 * EchoCanceller.rate)
+    private var refLow = Int.max          // first position ever written
+    private var refEnd = 0                // one past the newest position written
+
+    // Mic samples waiting for their reference.
+    private var pending: [Float] = []
+    private var pendingPos = 0
+    private var origin: Double?           // host seconds at timeline position 0
+
+    // Filter state.
+    private var delay = EchoCanceller.defaultDelay
+    private var prevX = [Float](repeating: 0, count: EchoCanceller.n)
+    private var xr: [[Float]], xi: [[Float]], wr: [[Float]], wi: [[Float]]
+    private var head = 0                  // newest partition in xr/xi
+    private var power: [Float]
+
+    // Delay estimator: envelope frames keyed by frame number (position / envHop).
+    private var micEnv: [Int: Float] = [:]
+    private var sysEnv: [Int: Float] = [:]
+    private var lastEstimateFrame = 0
+    private var candidate: Int?
+    private(set) var delayFound = false
+
+    // Stats for LIVE_STATUS "stopped" (counts only).
+    private var farIn = 0.0, farOut = 0.0, farBlocks = 0
+
+    init() {
+        let p = EchoCanceller.partitions, size = 2 * EchoCanceller.n
+        forward = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(size), .FORWARD)!
+        inverse = vDSP_DFT_zop_CreateSetup(forward, vDSP_Length(size), .INVERSE)!
+        let zeros = [[Float]](repeating: [Float](repeating: 0, count: size), count: p)
+        xr = zeros; xi = zeros; wr = zeros; wi = zeros
+        power = [Float](repeating: 1e-6, count: size)
+    }
+
+    deinit {
+        vDSP_DFT_DestroySetup(forward)
+        vDSP_DFT_DestroySetup(inverse)
+    }
+
+    /// The timeline position of a buffer presented at `seconds` (host clock).
+    func position(atSeconds seconds: Double) -> Int {
+        lock.withLock {
+            if origin == nil { origin = seconds }
+            return Int(((seconds - origin!) * Double(EchoCanceller.rate)).rounded())
+        }
+    }
+
+    /// System track samples (16 kHz mono) starting at timeline position `pos`.
+    func reference(_ samples: [Float], at pos: Int) {
+        lock.withLock {
+            let cap = ref.count
+            if pos > refEnd, refEnd > 0 {
+                for p in max(refEnd, pos - cap)..<pos { ref[p % cap] = 0 }
+            }
+            for (i, s) in samples.enumerated() where pos + i >= 0 { ref[(pos + i) % cap] = s }
+            refLow = min(refLow, max(0, pos))
+            refEnd = max(refEnd, pos + samples.count)
+            addEnvelope(samples, at: pos, into: &sysEnv)
+        }
+    }
+
+    /// Mic samples (16 kHz mono) at timeline position `pos` -> the cancelled
+    /// samples ready to hand to the engine (may lag the input by up to
+    /// `holdLimit` while the reference catches up; never reorders or loses audio).
+    func process(_ samples: [Float], at pos: Int) -> [Float] {
+        lock.withLock {
+            var out: [Float] = []
+            if !pending.isEmpty, pos != pendingPos + pending.count {
+                out += drain(force: true)          // a gap (mic reconnect): finish what is waiting
+            }
+            if pending.isEmpty { pendingPos = pos }
+            pending += samples
+            addEnvelope(samples, at: pos, into: &micEnv)
+            maybeEstimateDelay()
+            out += drain(force: false)
+            return out
+        }
+    }
+
+    /// End of input: everything still waiting, cancelled where a reference exists.
+    func flush() -> [Float] {
+        lock.withLock { drain(force: true) }
+    }
+
+    /// Counts for the stopped status: measured delay, echo reduction, seconds of far-end audio.
+    func stats() -> [String: Any] {
+        lock.withLock {
+            let reduction = farIn > 0 && farOut > 0 ? 10 * log10(farOut / farIn) : 0
+            return ["echo_delay_ms": delayFound ? (delay + EchoCanceller.headroom) * 1000 / EchoCanceller.rate : -1,
+                    "echo_reduction_db": Int(reduction.rounded()),
+                    "echo_far_s": farBlocks * EchoCanceller.n / EchoCanceller.rate]
+        }
+    }
+
+    // MARK: lock held below
+
+    private func drain(force: Bool) -> [Float] {
+        let n = EchoCanceller.n
+        var out: [Float] = []
+        while pending.count >= n {
+            let ready = refEnd >= pendingPos + n - delay
+            if !ready && !force && pending.count < EchoCanceller.holdLimit { break }
+            out += cancel(Array(pending[0..<n]), at: pendingPos)
+            pending.removeFirst(n)
+            pendingPos += n
+        }
+        if force, !pending.isEmpty {                // a final partial block passes as is
+            out += pending
+            pendingPos += pending.count
+            pending.removeAll()
+        }
+        return out
+    }
+
+    private func referenceBlock(at start: Int) -> [Float] {
+        let cap = ref.count
+        return (start..<(start + EchoCanceller.n)).map { p in
+            (p >= refLow && p < refEnd && p >= refEnd - cap && p >= 0) ? ref[p % cap] : 0
+        }
+    }
+
+    private func cancel(_ d: [Float], at pos: Int) -> [Float] {
+        let n = EchoCanceller.n, size = fftSize, p = EchoCanceller.partitions
+        let x = referenceBlock(at: pos - delay)
+
+        // Newest reference spectrum: DFT of [previous block, this block].
+        head = (head + p - 1) % p
+        dft(prevX + x, [Float](repeating: 0, count: size), forward, into: &xr[head], &xi[head])
+        prevX = x
+
+        // Echo estimate y = last n samples of IDFT(sum W_k X_k).
+        var yr = [Float](repeating: 0, count: size), yi = [Float](repeating: 0, count: size)
+        for k in 0..<p {
+            let h = (head + k) % p
+            for j in 0..<size {
+                yr[j] += wr[k][j] * xr[h][j] - wi[k][j] * xi[h][j]
+                yi[j] += wr[k][j] * xi[h][j] + wi[k][j] * xr[h][j]
+            }
+        }
+        var tr = [Float](repeating: 0, count: size), ti = [Float](repeating: 0, count: size)
+        dft(yr, yi, inverse, into: &tr, &ti)
+        let y = (n..<size).map { tr[$0] / Float(size) }
+        let e = zip(d, y).map { $0 - $1 }
+
+        let dd = energy(d), ee = energy(e), yy = energy(y), xx = energy(x)
+        let silent = dd < Float(n) * 1e-10          // the mic's own gate zeroed this block
+        let out = (silent || ee > dd) ? d : e
+        let farActive = xx >= Float(n) * 1e-7
+        if farActive && !silent {
+            farBlocks += 1
+            farIn += Double(dd); farOut += Double(energy(out))
+        }
+
+        for j in 0..<size { power[j] = 0.9 * power[j] + 0.1 * (xr[head][j] * xr[head][j] + xi[head][j] * xi[head][j]) }
+        guard farActive && !silent else { return out }
+        let step = ee < 4 * yy ? EchoCanceller.mu : EchoCanceller.mu * 0.05
+
+        // Gradient: E = DFT([0, e]); G_k = step conj(X_k) E / (P power), constrained to n taps.
+        var er = [Float](repeating: 0, count: size), ei = [Float](repeating: 0, count: size)
+        dft([Float](repeating: 0, count: n) + e, [Float](repeating: 0, count: size), forward, into: &er, &ei)
+        var gr = [Float](repeating: 0, count: size), gi = [Float](repeating: 0, count: size)
+        for k in 0..<p {
+            let h = (head + k) % p
+            for j in 0..<size {
+                let scale = step / (Float(p) * power[j] + 1e-6)
+                gr[j] = scale * (xr[h][j] * er[j] + xi[h][j] * ei[j])
+                gi[j] = scale * (xr[h][j] * ei[j] - xi[h][j] * er[j])
+            }
+            dft(gr, gi, inverse, into: &tr, &ti)
+            for j in 0..<n { tr[j] /= Float(size); ti[j] /= Float(size) }
+            for j in n..<size { tr[j] = 0; ti[j] = 0 }
+            dft(tr, ti, forward, into: &gr, &gi)
+            for j in 0..<size { wr[k][j] += gr[j]; wi[k][j] += gi[j] }
+        }
+        return out
+    }
+
+    private func dft(_ inR: [Float], _ inI: [Float], _ setup: vDSP_DFT_Setup, into outR: inout [Float], _ outI: inout [Float]) {
+        vDSP_DFT_Execute(setup, inR, inI, &outR, &outI)
+    }
+
+    private func energy(_ v: [Float]) -> Float {
+        var s: Float = 0
+        vDSP_svesq(v, 1, &s, vDSP_Length(v.count))
+        return s
+    }
+
+    private func addEnvelope(_ samples: [Float], at pos: Int, into env: inout [Int: Float]) {
+        let hop = EchoCanceller.envHop
+        var frame = Int((Double(pos) / Double(hop)).rounded(.down))
+        var i = frame * hop - pos
+        while i + hop <= samples.count {
+            if i >= 0 {
+                let slice = Array(samples[i..<(i + hop)])
+                env[frame] = (energy(slice) / Float(hop)).squareRoot()
+            }
+            i += hop; frame += 1
+        }
+        let oldest = frame - EchoCanceller.envKeep
+        if env.count > EchoCanceller.envKeep + 50 { env = env.filter { $0.key >= oldest } }
+    }
+
+    /// Every 2 s: the lag (0-600 ms) where the mic envelope best follows the
+    /// system envelope. A lag seen twice in a row (within 30 ms) with a clear
+    /// correlation becomes the bulk delay; the filter restarts if it moved > 40 ms.
+    private func maybeEstimateDelay() {
+        guard let last = micEnv.keys.max(), last - lastEstimateFrame >= EchoCanceller.estimateEvery else { return }
+        lastEstimateFrame = last
+        let maxLag = EchoCanceller.maxDelay / EchoCanceller.envHop
+        let frames = (last - 400)...last
+        let mic = frames.map { micEnv[$0] ?? 0 }
+        guard (mic.max() ?? 0) > 0.001 else { return }
+        var best = (corr: Float(0), lag: 0)
+        for lag in 0...maxLag {
+            let sys = frames.map { sysEnv[$0 - lag] ?? 0 }
+            guard (sys.max() ?? 0) > 0.01 else { continue }
+            let c = correlation(mic, sys)
+            if c > best.corr { best = (c, lag) }
+        }
+        guard best.corr > 0.4 else { candidate = nil; return }
+        if let c = candidate, abs(c - best.lag) <= 3 {
+            let newDelay = max(0, best.lag * EchoCanceller.envHop - EchoCanceller.headroom)
+            if !delayFound || abs(newDelay - delay) > 640 {
+                delay = newDelay
+                for k in 0..<EchoCanceller.partitions {
+                    wr[k] = [Float](repeating: 0, count: fftSize); wi[k] = wr[k]
+                }
+            }
+            delayFound = true
+        }
+        candidate = best.lag
+    }
+
+    private func correlation(_ a: [Float], _ b: [Float]) -> Float {
+        let n = Float(a.count)
+        let ma = a.reduce(0, +) / n, mb = b.reduce(0, +) / n
+        var num: Float = 0, da: Float = 0, db: Float = 0
+        for i in 0..<a.count {
+            let x = a[i] - ma, y = b[i] - mb
+            num += x * y; da += x * x; db += y * y
+        }
+        return da > 0 && db > 0 ? num / (da * db).squareRoot() : 0
+    }
+}
+
 struct LiveConfig {
     var enginePath: String
     var engineArgs: [String]
+    var echoCancel = true
+}
+
+/// The stopped status: dropped seconds plus the echo canceller's counts.
+func liveStoppedStatus(dropped: Double, canceller: EchoCanceller?) -> [String: Any] {
+    var payload: [String: Any] = ["state": "stopped", "dropped_s": (dropped * 10).rounded() / 10]
+    if let stats = canceller?.stats() { payload.merge(stats) { $1 } }
+    return payload
 }
 
 @available(macOS 13.0, *)
@@ -327,13 +640,16 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
     // Live transcript taps (nil unless --live). See LiveFeed.
     var liveMic: LiveFeed?
     var liveSys: LiveFeed?
+    var echoCanceller: EchoCanceller?
 
     init(requestedDeviceID: String?, live: LiveConfig? = nil) {
         self.requestedDeviceID = requestedDeviceID
         super.init()
         if let live = live {
-            liveMic = LiveFeed(track: "mic")
-            liveSys = LiveFeed(track: "sys")
+            let canceller = live.echoCancel ? EchoCanceller() : nil
+            echoCanceller = canceller
+            liveMic = LiveFeed(track: "mic", canceller: canceller)
+            liveSys = LiveFeed(track: "sys", canceller: canceller)
             _ = liveMic?.start(enginePath: live.enginePath, extraArgs: live.engineArgs)
             _ = liveSys?.start(enginePath: live.enginePath, extraArgs: live.engineArgs)
         }
@@ -569,7 +885,7 @@ class DualRecorder: NSObject, SCStreamOutput, AVCaptureAudioDataOutputSampleBuff
         }
         group.wait()
         let dropped = feeds.reduce(0) { $0 + $1.droppedSeconds }
-        if !feeds.isEmpty { liveStatus(["state": "stopped", "dropped_s": (dropped * 10).rounded() / 10]) }
+        if !feeds.isEmpty { liveStatus(liveStoppedStatus(dropped: dropped, canceller: echoCanceller)) }
     }
     
     // AVCaptureSession (Mic) Delegate
@@ -786,6 +1102,12 @@ guard #available(macOS 13.0, *) else {
 //   dual-capture --live-test <mic.wav> [<sys.wav>] [--live-engine <path>] [--live-arg <arg>]...
 //                                                no capture: push the WAVs through the same taps at
 //                                                real time (test seam), then exit 0
+//   --no-echo-cancel                             with --live/--live-test: the live mic tap skips the
+//                                                echo canceller (it is on by default)
+//   dual-capture --aec-test <mic.wav> <sys.wav> <out.wav>
+//                                                run only the echo canceller over 16 kHz mono WAVs as
+//                                                fast as possible, write the result, print one
+//                                                AEC_STATS line (test seam)
 var positionalArgs: [String] = []
 var deviceArg: String?
 var listDevicesMode = false
@@ -793,6 +1115,8 @@ var liveMode = false
 var liveTestMode = false
 var liveEnginePath: String?
 var liveEngineArgs: [String] = []
+var echoCancel = true
+var aecTestMode = false
 let args = CommandLine.arguments
 var argIndex = 1
 while argIndex < args.count {
@@ -810,6 +1134,10 @@ while argIndex < args.count {
         if argIndex + 1 < args.count { liveEnginePath = args[argIndex + 1]; argIndex += 1 }
     } else if arg == "--live-arg" {
         if argIndex + 1 < args.count { liveEngineArgs.append(args[argIndex + 1]); argIndex += 1 }
+    } else if arg == "--no-echo-cancel" {
+        echoCancel = false
+    } else if arg == "--aec-test" {
+        aecTestMode = true
     } else {
         positionalArgs.append(arg)
     }
@@ -822,11 +1150,57 @@ signal(SIGPIPE, SIG_IGN)
 let liveConfig: LiveConfig? = liveMode ? LiveConfig(
     enginePath: liveEnginePath ?? URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
         .deletingLastPathComponent().appendingPathComponent("live-engine").path,
-    engineArgs: liveEngineArgs) : nil
+    engineArgs: liveEngineArgs, echoCancel: echoCancel) : nil
+
+/// --aec-test: a function so the output file is closed (header written) before exit.
+func runAECTest(_ positionalArgs: [String]) -> Int32 {
+    guard positionalArgs.count == 3,
+          let micFile = try? AVAudioFile(forReading: URL(fileURLWithPath: positionalArgs[0])),
+          let sysFile = try? AVAudioFile(forReading: URL(fileURLWithPath: positionalArgs[1])),
+          micFile.processingFormat.sampleRate == 16000, sysFile.processingFormat.sampleRate == 16000 else {
+        print("Error: --aec-test needs <mic.wav> <sys.wav> <out.wav>, 16 kHz")
+        return 1
+    }
+    let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
+    guard let outFile = try? AVAudioFile(forWriting: URL(fileURLWithPath: positionalArgs[2]), settings: format.settings) else {
+        print("Error: cannot write \(positionalArgs[2])")
+        return 1
+    }
+    func samples(_ file: AVAudioFile, _ frames: AVAudioFrameCount) -> [Float] {
+        guard let pcm = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frames),
+              (try? file.read(into: pcm, frameCount: frames)) != nil, let ch = pcm.floatChannelData else { return [] }
+        return Array(UnsafeBufferPointer(start: ch[0], count: Int(pcm.frameLength)))
+    }
+    func append(_ out: [Float]) {
+        guard !out.isEmpty, let pcm = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(out.count)) else { return }
+        pcm.frameLength = AVAudioFrameCount(out.count)
+        out.withUnsafeBufferPointer { pcm.floatChannelData![0].update(from: $0.baseAddress!, count: out.count) }
+        try? outFile.write(from: pcm)
+    }
+    let canceller = EchoCanceller()
+    var pos = 0
+    while true {
+        let mic = samples(micFile, 1600), sys = samples(sysFile, 1600)
+        if mic.isEmpty { break }
+        if !sys.isEmpty { canceller.reference(sys, at: pos) }
+        append(canceller.process(mic, at: pos))
+        pos += mic.count
+    }
+    append(canceller.flush())
+    let stats = canceller.stats()
+    if let data = try? JSONSerialization.data(withJSONObject: stats, options: [.sortedKeys]), let json = String(data: data, encoding: .utf8) {
+        print("AEC_STATS \(json)")
+    }
+    return 0
+}
+
+if aecTestMode { exit(runAECTest(positionalArgs)) }
 
 if liveTestMode {
     // Test seam: the WAVs stand in for the mic and system tracks.
-    let feeds = [LiveFeed(track: "mic"), LiveFeed(track: "sys")]
+    // The echo canceller only when there is a system WAV to cancel against.
+    let canceller = echoCancel && positionalArgs.count > 1 ? EchoCanceller() : nil
+    let feeds = [LiveFeed(track: "mic", canceller: canceller), LiveFeed(track: "sys", canceller: canceller)]
     var files: [(LiveFeed, AVAudioFile)] = []
     for (feed, path) in zip(feeds, positionalArgs) {
         guard let file = try? AVAudioFile(forReading: URL(fileURLWithPath: path)) else {
@@ -863,7 +1237,7 @@ if liveTestMode {
     let group = DispatchGroup()
     for feed in feeds { DispatchQueue.global().async(group: group) { feed.close(timeout: 5) } }
     group.wait()
-    liveStatus(["state": "stopped", "dropped_s": (feeds.reduce(0) { $0 + $1.droppedSeconds } * 10).rounded() / 10])
+    liveStatus(liveStoppedStatus(dropped: feeds.reduce(0) { $0 + $1.droppedSeconds }, canceller: canceller))
     exit(0)
 }
 

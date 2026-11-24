@@ -7,7 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createRecordingSession } = require('../../src/recording/session');
-const { createLiveTranscriptFiles, LAG_PAUSE_MS, ENGINE_START_MS } = require('../../src/recording/live-transcript');
+const { createLiveTranscriptFiles, LAG_PAUSE_MS, ENGINE_START_MS, ECHO_HOLD_MS } = require('../../src/recording/live-transcript');
 const { parseHelperLine, liveArgs } = require('../../src/recording/capture-helper');
 const { fakeClock, fakeHelpers, fakeApi, flush } = require('./fakes');
 
@@ -140,8 +140,9 @@ test('JSONL: finals in order with Chunk ids, continuing across pause/resume', as
   assert.equal(Object.keys(files.files).length, 1);
   assert.equal(f.closed, true);
   assert.deepEqual(f.lines.map((l) => [l.recording_id, l.track, l.start, l.end, l.text, l.final]), [
-    [first, 'mic', 0.5, 1.4, 'Good morning.', true],
+    // a mic final is written after its echo hold (ECHO_HOLD_MS), so after a system final sent with it
     [first, 'sys', 1.6, 3, 'Morning to you.', true],
+    [first, 'mic', 0.5, 1.4, 'Good morning.', true],
     // second Chunk started 15 s into the session (10 s recorded + 5 s paused)
     [second, 'mic', 15.2, 16, 'Back again.', true],
     // a partial whose segment never got a final is kept, marked not final
@@ -231,7 +232,7 @@ test('paused notice: engine failure, lag, or no engine at all; captions resume',
 
 test('recording unaffected: a failing file, garbage events and a dead live setting', async () => {
   const files = fakeFiles({ failAppend: true });
-  const { session, helpers, enqueued, captions } = setup({ files });
+  const { session, helpers, enqueued, captions, clock: liveClock } = setup({ files });
   session.start({});
   await flush();
   const id = session.state().recordingId;
@@ -241,6 +242,7 @@ test('recording unaffected: a failing file, garbage events and a dead live setti
   h.send({ type: 'liveStatus' });
   h.send({ type: 'level', mic: -20, sys: -30 });
   assert.equal(session.state().phase, 'recording');
+  await liveClock.advance(ECHO_HOLD_MS);
   assert.deepEqual(captions.map((c) => c.text), ['Still captioned.']);
   await session.stop('user');
   assert.deepEqual(enqueued, [id]);
@@ -418,9 +420,9 @@ test('live_transcript Usage event: counts, delay buckets, failures; never text o
   h.send({ type: 'speakerActive', name: 'Priya Rao', app: 'Zoom' });
   h.send(line('LIVE_ENGINE {"track":"mic","engine":"speech_transcriber","fallback_from":"whisperkit","reason":"not_built"}'));
   [400, 900, 1200, 1800, 7000].forEach((lag, i) =>
-    h.send(text('FINAL', { track: i % 2 ? 'sys' : 'mic', seg: i, start: i, end: i + 0.5, text: `secret words ${i}`, lag_ms: lag })));
+    h.send(text('FINAL', { track: i % 2 ? 'sys' : 'mic', seg: i, start: i, end: i + 0.5, text: `secret ${['one two', 'three four', 'five six', 'seven eight', 'nine ten'][i]}`, lag_ms: lag })));
   h.send(line('LIVE_STATUS {"track":"sys","state":"paused","code":"engine_exit_9"}'));
-  h.send(line('LIVE_STATUS {"state":"stopped","dropped_s":1.5}'));
+  h.send(line('LIVE_STATUS {"state":"stopped","dropped_s":1.5,"echo_delay_ms":230,"echo_reduction_db":-6,"echo_far_s":600}'));
   await clock.advance(1000);
   await session.stop('user');
   await flush();
@@ -429,6 +431,7 @@ test('live_transcript Usage event: counts, delay buckets, failures; never text o
     recording_id: id, mode: 'on_device', engine: 'speech_transcriber', finals: 5, words: 15,
     lag_p50_ms: 1500, lag_p95_ms: 10000, lag_pauses: 1, dropped_s: 1.5,
     failures: 'fallback_whisperkit:1,engine_exit_9:1', write_errors: 0,
+    echo_dropped: 0, echo_delay_ms: 230, echo_reduction_db: -6, echo_far_s: 600,
   });
   const flat = JSON.stringify(ev);
   assert.ok(!/secret|Priya/.test(flat));
@@ -447,6 +450,7 @@ test('lag buckets and an empty summary', () => {
   assert.equal(lagBucket(undefined), null);
   const p = liveUsagePayload('r', { mode: 'cloud_vertex', engine: null, finals: 0, words: 0, lags: [], lagPauses: 0, droppedS: 0, failures: {}, writeErrors: 0 });
   assert.deepEqual([p.engine, p.lag_p50_ms, p.failures], ['none', null, '']);
+  assert.deepEqual([p.echo_dropped, p.echo_delay_ms, p.echo_reduction_db, p.echo_far_s], [0, null, null, 0]);
 });
 
 test('helper costs include live engines running under dual-capture', () => {
@@ -458,4 +462,71 @@ test('helper costs include live engines running under dual-capture', () => {
     { pid: 300, ppid: 100, cpu: 1, rssKb: 2048, name: 'python3' },
   ] });
   assert.deepEqual([s.helpersCpu, s.helpersRssKb], [28, 10240 + 102400 + 51200]);
+});
+
+// --- Mic echo of the other side (speakers, no headset): dropped, never written or kept as a caption.
+const { createLiveTranscript, isEcho } = require('../../src/recording/live-transcript');
+
+function echoRig() {
+  const clock = fakeClock();
+  const lines = [];
+  const captions = [];
+  const live = createLiveTranscript({ key: 'k', mode: 'on_device', clock, file: { append: (o) => lines.push(o), close() {} },
+    onCaption: (c) => captions.push(c) });
+  let seg = { mic: 0, sys: 0 };
+  const say = (track, start, end, text, final = true) => live.event({ type: 'liveText', track, seg: final ? seg[track]++ : seg[track],
+    start, end, text, final, lagMs: 500 });
+  return { clock, live, lines, captions, say };
+}
+
+test('echo: a mic line repeating the system track is dropped, its partial withdrawn', async () => {
+  const { clock, live, lines, captions, say } = echoRig();
+  say('sys', 10, 14, 'Go ahead, Ashish finish the update, I am sure there will be questions.');
+  say('mic', 10.3, 12, 'Go ahead, Ashish finish', false);
+  say('mic', 10.3, 13, 'Go ahead, Ashish finished the update, I am sure.');
+  await clock.advance(ECHO_HOLD_MS);
+  assert.deepEqual(lines.map((l) => l.track), ['sys']);
+  const mic = captions.filter((c) => c.track === 'mic');
+  assert.ok(mic.length && mic.every((c) => c.dropped && c.text === ''));
+  assert.equal(live.end().echoDropped, 1);   // one line; its withdrawn partial is not counted
+});
+
+test('echo: the system final may land after the mic final; the hold waits for it', async () => {
+  const { clock, live, lines, say } = echoRig();
+  say('mic', 5.2, 7, 'think of this as an ERP migration');
+  await clock.advance(1000);
+  say('sys', 5, 8, 'Do you all agree? Think of this as an ERP migration.');
+  await clock.advance(ECHO_HOLD_MS);
+  assert.deepEqual(lines.map((l) => l.track), ['sys']);
+  assert.equal(live.end().finals, 1);
+});
+
+test('echo: your own words are kept, even with common words the other side used', async () => {
+  const { clock, live, lines, captions, say } = echoRig();
+  say('sys', 0, 4, 'So I think we should go ahead with the plan for the customer.');
+  say('mic', 4.5, 8, 'Where does the precision build fall, custom or baseline?');
+  say('mic', 8.5, 9, 'Okay.');
+  say('mic', 9.5, 11, 'I think we should wait.');
+  assert.deepEqual(lines.map((l) => l.track), ['sys']);       // held, not yet written
+  await clock.advance(ECHO_HOLD_MS);
+  assert.deepEqual(lines.filter((l) => l.track === 'mic').map((l) => l.text),
+    ['Where does the precision build fall, custom or baseline?', 'Okay.', 'I think we should wait.']);
+  assert.equal(captions.filter((c) => c.dropped).length, 0);
+  assert.equal(live.end().echoDropped, 0);
+});
+
+test('echo: lines still held at stop are settled and written before the file closes', () => {
+  const { live, lines, say } = echoRig();
+  say('mic', 1, 2, 'Last thing before we stop.');
+  const summary = live.end();
+  assert.deepEqual(lines.map((l) => l.text), ['Last thing before we stop.']);
+  assert.equal(summary.finals, 1);
+});
+
+test('echo: matching needs nearby time and shared word pairs', () => {
+  const sys = [{ start: 100, end: 104, text: 'the cost engine will follow deterministic rules' }];
+  assert.equal(isEcho('the cost engine will follow', 101, 103, sys), true);
+  assert.equal(isEcho('the cost engine will follow', 130, 132, sys), false);      // too far apart
+  assert.equal(isEcho('engine cost the follow will', 101, 103, sys), false);      // same words, no pairs
+  assert.equal(isEcho('cost engine', 101, 103, sys), false);                      // too short to judge
 });
