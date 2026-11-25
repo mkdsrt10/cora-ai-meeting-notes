@@ -26,6 +26,8 @@ addPaletteProvider(query => {
     { group: 'Go to', label: 'People', run: () => go('people') },
     { group: 'Go to', label: 'Memory', run: () => go('memory') },
     { group: 'Go to', label: 'Settings', hint: '⌘,', run: () => go('settings') },
+    { group: 'Cora', label: 'Request a feature on GitHub', hint: 'Browser', run: () => { trackAction('request_feature'); window.open(GITHUB_LINKS.feature, '_blank', 'noopener'); } },
+    { group: 'Cora', label: 'Star Cora on GitHub', hint: 'Browser', run: () => { trackAction('open_github'); window.open(GITHUB_LINKS.star, '_blank', 'noopener'); } },
     ...surfacesOf(store.appSurfaces, 'app.nav').map(c => ({ group: 'Go to', label: c.label, run: () => go('page', { plugin: c.plugin_id, page: c.id }) })),
     ...store.folders.map(f => ({ group: 'Folders', label: f.name, run: () => go('home', { folder: f.id }) })),
   ];

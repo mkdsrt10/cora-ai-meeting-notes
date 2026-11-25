@@ -7,7 +7,7 @@ body:
       value: "Please don't attach real recordings, transcripts or screenshots with meeting content. For security issues use private reporting (see SECURITY.md)."
   - type: textarea
     id: what
-    attributes: {label: What happened?, description: What did you expect instead?}
+    attributes: {label: "What happened?", description: "What did you expect instead?"}
     validations: {required: true}
   - type: textarea
     id: steps

@@ -50,6 +50,8 @@ ACTIONS: dict[str, str] = {
     "confirm_account": DOING,     # Person page Accounts
     "send_to_slack": DOING,       # opens the Slack composer with selected Action items
     "plugin_action": DOING,       # the plugin_action event (v2 Surface action click)
+    "request_feature": DOING,     # opens a GitHub feature request in the browser
+    "report_bug": DOING,          # opens a GitHub bug report in the browser
     # browsing
     "open_recording": BROWSING,
     "switch_view": BROWSING,
@@ -59,6 +61,7 @@ ACTIONS: dict[str, str] = {
     "open_person": BROWSING,
     "open_settings": BROWSING,
     "command_menu": BROWSING,     # v2: ⌘K opened
+    "open_github": BROWSING,      # the repo or its ideas list, in the browser
 }
 
 ACTIVE_MIN = "@active_min"  # the reserved row holding the day's active minutes

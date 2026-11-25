@@ -23,6 +23,23 @@ defineSettingsPanel('appearance', {
   },
 });
 
+// Help & feedback: the public GitHub repo. Issues are public, so the panel
+// says not to paste meeting content or customer names.
+function githubLink(kind, label, track){
+  return `<a class="btn" href="${esc(GITHUB_LINKS[kind])}" target="_blank" rel="noopener" data-track="${track}">${esc(label)}</a>`;
+}
+defineSettingsPanel('help', {
+  title: 'Help & feedback',
+  render(host){
+    host.innerHTML = `<h2>Help &amp; feedback</h2><p class="sub">Cora is open source on GitHub. These open in your browser.</p>
+      <div class="row-set"><div><strong>Request a feature</strong><small>Describe the problem it solves. Others can 👍 it, and the most-voted ideas get built first.</small></div>${githubLink('feature', 'Request a feature', 'request_feature')}</div>
+      <div class="row-set"><div><strong>Vote on ideas</strong><small>Open feature requests, most 👍 first.</small></div>${githubLink('ideas', 'See ideas', 'open_github')}</div>
+      <div class="row-set"><div><strong>Report a bug</strong><small>What happened, what you expected, your Cora and macOS version.</small></div>${githubLink('bug', 'Report a bug', 'report_bug')}</div>
+      <div class="row-set"><div><strong>Star Cora on GitHub</strong><small>Helps other people find it.</small></div>${githubLink('star', '★ Star on GitHub', 'open_github')}</div>
+      <p class="muted">GitHub issues are public: never paste meeting transcripts, notes, customer names or screenshots of them. For something private, use Send feedback under Beta.</p>`;
+  },
+});
+
 async function renderSettings(host, params = {}){
   setCrumb([{ label: 'Settings' }]);
   const panels = [];

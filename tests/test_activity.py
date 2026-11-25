@@ -54,11 +54,11 @@ def events(name=None):
 
 def test_the_action_list_is_a_fixed_set_of_snake_case_ids_each_doing_or_browsing():
     import activity
-    assert 20 <= len(activity.ACTIONS) <= 35
+    assert 20 <= len(activity.ACTIONS) <= 40
     assert all(a.replace("_", "").isalpha() and a == a.lower() for a in activity.ACTIONS)
     assert set(activity.ACTIONS.values()) == {"doing", "browsing"}
     assert {a for a, k in activity.ACTIONS.items() if k == "browsing"} == {
-        "open_recording", "switch_view", "search", "filter", "toggle_enhanced_raw", "open_person", "open_settings", "command_menu"}
+        "open_recording", "switch_view", "search", "filter", "toggle_enhanced_raw", "open_person", "open_settings", "command_menu", "open_github"}
 
 
 def test_renderer_and_main_only_count_ids_in_the_list():

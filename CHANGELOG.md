@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.6-beta.6 — 2026-11-25 (pre-beta, owner testing only)
+
+- Request a feature and Star us on GitHub, in the new look's sidebar above Settings; a new Settings › Help & feedback panel (request a feature, vote on ideas, report a bug, star); both also in ⌘K, and request / bug / star links in the classic Settings. They open the public GitHub repo in your browser; nothing about you or your meetings is put in the link. Issues are public, so every entry point says not to paste meeting content or customer names.
+- GitHub: the feature request form asks for the problem, area and how much it would help, and points to existing ideas to 👍 first; the bug report form works again (it did not parse).
+
 ## 0.4.6-beta.5 — 2026-11-24 (pre-beta, owner testing only)
 
 - Live captions no longer write the other side's words as yours when you use speakers instead of headphones. The live mic now goes through an echo canceller that uses the call audio as its reference and finds the speaker-to-mic delay by itself; the recorded file keeps the raw mic. On the Nov 23 call (USB mic, desk speakers) the echo lines in the live mic captions fell from 36 to 3 in 25 minutes, and your own voice was untouched. About 0.4% of one CPU core.

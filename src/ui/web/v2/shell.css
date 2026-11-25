@@ -48,6 +48,7 @@ kbd{font:500 10.5px/1 ui-monospace,SFMono-Regular,Menlo,monospace;padding:2px 5p
 .search kbd{margin-left:auto}
 .nav{display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:7px;border:0;background:none;color:var(--ink2);text-align:left;width:100%;min-width:0}
 .nav:hover{background:var(--hover)}
+a.nav{text-decoration:none}
 .nav.on{background:var(--hover);color:var(--ink);font-weight:550}
 .nav .ico{width:16px;text-align:center;flex:none;color:var(--ink3)}
 .nav .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

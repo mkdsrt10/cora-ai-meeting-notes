@@ -1,17 +1,48 @@
 name: Feature request
-description: Suggest an idea
+description: Suggest an idea for Cora
+title: "[Idea]: "
 labels: [enhancement]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! Before you write, check whether someone already asked: [open ideas, most 👍 first](https://github.com/mkdsrt10/cora-ai-meeting-notes/issues?q=is%3Aissue+is%3Aopen+label%3Aenhancement+sort%3Areactions-%2B1-desc). A 👍 on an existing idea counts as a vote.
+
+        **This issue is public.** Never paste meeting transcripts, notes, customer or colleague names, or screenshots that show them.
   - type: textarea
     id: problem
-    attributes: {label: What problem would this solve?}
+    attributes:
+      label: What problem would this solve?
+      description: What were you trying to do, and what got in the way?
+      placeholder: "After a sales call I copy the action items into Notion by hand…"
     validations: {required: true}
   - type: textarea
     id: idea
-    attributes: {label: Proposed solution}
+    attributes:
+      label: Proposed solution
+      description: What would you like Cora to do? Sketches welcome (no meeting content).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Recording and call detection
+        - Live captions
+        - Transcript and speakers
+        - Notes and action items
+        - Search, People and Memory
+        - Integrations (Slack, Notion, calendar, …)
+        - Settings, install and updates
+        - Something else
+    validations: {required: true}
   - type: dropdown
     id: privacy
     attributes:
       label: Does it need to send data off the Mac?
       options: ["No — fully local", "Yes — opt-in only", "Not sure"]
     validations: {required: true}
+  - type: dropdown
+    id: importance
+    attributes:
+      label: How much would this help you?
+      options: ["Nice to have", "I'd use it every week", "It blocks me from using Cora more"]

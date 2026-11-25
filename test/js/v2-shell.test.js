@@ -127,3 +127,30 @@ test('error and empty states: a failed page shows the error with Try again', asy
   await page.click('[data-retry-page]');
   assert.equal(text(page.$('#meetingTitle')), 'Back again');
 });
+
+test('Request a feature: a sidebar link to the public GitHub form, opened in the browser and counted', async () => {
+  const page = loadPage('v2/index.html');
+  await page.flush();
+  const link = page.$('#requestFeature');
+  assert.equal(link.getAttribute('href'), 'https://github.com/mkdsrt10/cora-ai-meeting-notes/issues/new?template=feature_request.yml');
+  assert.equal(link.getAttribute('target'), '_blank');
+  assert.equal(link.getAttribute('rel'), 'noopener');
+  assert.equal(link.getAttribute('data-track'), 'request_feature');
+  assert.equal(page.run('GITHUB_LINKS.feature'), link.getAttribute('href'));
+  const star = page.$('#starRepo');
+  assert.equal(star.getAttribute('href'), page.run('GITHUB_LINKS.star'));
+  assert.equal(star.getAttribute('target'), '_blank');
+  assert.equal(star.getAttribute('data-track'), 'open_github');
+  assert.match(text(star), /Star us on GitHub/);
+});
+
+test('Settings › Help & feedback: feature, ideas, bug and star links, with the public-issue warning', async () => {
+  const page = loadPage('v2/index.html');
+  await page.flush();
+  await page.run('go("settings", { panel: "help" })');
+  await page.flush();
+  const hrefs = page.$$('#settingsPanel a.btn').map((a) => a.getAttribute('href'));
+  assert.equal(hrefs.length, 4);
+  assert.ok(hrefs.every((h) => h.startsWith('https://github.com/mkdsrt10/cora-ai-meeting-notes')));
+  assert.match(text(page.$('#settingsPanel')), /never paste meeting transcripts/);
+});
