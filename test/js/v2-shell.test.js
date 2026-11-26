@@ -154,3 +154,30 @@ test('Settings › Help & feedback: feature, ideas, bug and star links, with the
   assert.ok(hrefs.every((h) => h.startsWith('https://github.com/mkdsrt10/cora-ai-meeting-notes')));
   assert.match(text(page.$('#settingsPanel')), /never paste meeting transcripts/);
 });
+
+test('What\'s new after an update: a card with the highlights; a vote is sent and it closes', async () => {
+  const page = loadPage('v2/index.html', { replies: { '/api/pulse': { whats_new: { version: '1.0.0', title: 'What\'s new in Cora 1.0', items: ['One', 'Two'] }, csat_due: true }, 'POST /api/pulse/whats-new': { ok: true } } });
+  await page.flush();
+  await page.run('showPulse()');
+  await page.flush();
+  assert.match(text(page.$('#pulseCard')), /What's new in Cora 1\.0\s*One\s*Two\s*Was this helpful\?/);
+  await page.click('[data-pulse-helpful="up"]');
+  await page.flush();
+  assert.equal(page.$('#pulseCard'), null);
+  assert.deepEqual(page.posts().find((c) => c.url === '/api/pulse/whats-new').body, { version: '1.0.0', helpful: 'up' });
+});
+
+test('CSAT when due: pick a score, add a comment, send; nothing goes until a score is picked', async () => {
+  const page = loadPage('v2/index.html', { replies: { '/api/pulse': { whats_new: null, csat_due: true }, 'POST /api/pulse/csat': { ok: true } } });
+  await page.flush();
+  await page.run('showPulse()');
+  await page.flush();
+  assert.match(text(page.$('#pulseCard')), /How satisfied are you with Cora\?/);
+  assert.ok(page.$('[data-pulse-send]').disabled);
+  await page.click('[data-pulse-score="4"]');
+  page.$('[data-pulse-comment]').value = 'Faster notes';
+  await page.click('[data-pulse-send]');
+  await page.flush();
+  assert.deepEqual(page.posts().find((c) => c.url === '/api/pulse/csat').body, { trigger: 'periodic', score: 4, comment: 'Faster notes' });
+  assert.equal(page.$('#pulseCard'), null);
+});

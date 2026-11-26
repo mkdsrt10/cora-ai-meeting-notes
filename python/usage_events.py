@@ -17,7 +17,7 @@ from pathlib import Path
 import db
 
 MAX_STRING = 200
-LONG_STRINGS = {("feedback", "comment"): 500, ("crash_report", "frames"): 500}
+LONG_STRINGS = {("feedback", "comment"): 500, ("crash_report", "frames"): 500, ("csat", "comment"): 500}
 QUEUE_MAX_AGE_DAYS = 7
 QUEUE_MAX_BYTES = 5_000_000
 
@@ -74,6 +74,11 @@ CATALOG: dict[str, frozenset[str]] = {name: frozenset(keys.split()) for name, ke
     # A click on a plugin Surface action (UI shell v2): fixed plugin and action
     # ids only, never values, item text or account names. outcome ok | error.
     "plugin_action": "plugin action context outcome",
+    # What's new card closed after an update (python/pulse.py): was it helpful.
+    "whats_new": "version helpful",
+    # Satisfaction survey: 1-5, optional comment (the person's own words, typed
+    # after a "no customer names" hint), or later / never.
+    "csat": "score comment outcome trigger version meetings",
 }.items()}
 
 
