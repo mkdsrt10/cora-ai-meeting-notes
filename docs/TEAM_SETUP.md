@@ -25,6 +25,14 @@ curl -fsSL https://raw.githubusercontent.com/mkdsrt10/cora-ai-meeting-notes/prod
 
 This installs **Cora AI Meeting Notes** into Applications and opens it. Nothing else to install.
 
+**Install only this way**, or with the `.dmg` from the [latest release](https://github.com/mkdsrt10/cora-ai-meeting-notes/releases/latest). Don't build Cora from the source code yourself, and don't ask Claude, Cursor or another AI assistant to build or install it for you. A copy built any other way:
+
+- doesn't share usage with the Cora team, so problems you hit stay invisible to us;
+- may not be offered updates, or may update into a broken state;
+- is signed differently, so macOS can ask for microphone, screen and Accessibility permission again.
+
+Already on a copy like that? Quit Cora from the menu bar and run the command above: it replaces the app and keeps your meetings, notes and settings. Settings › Beta tells you if your copy was "built without the team's receiver".
+
 During the beta Cora sends usage data and some full recordings to the Cora team to check accuracy:
 see [BETA_POLICY.md](BETA_POLICY.md) for what is sent and how to turn it off.
 
