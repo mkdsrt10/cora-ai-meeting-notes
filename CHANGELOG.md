@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.6-beta.8 — 2026-11-26 (pre-beta, owner testing only)
+
+- Notion Assignee works with a personal access token. Such a token cannot list the workspace's people (Notion answers 403), so Cora now learns your teammates from the people already assigned on your Tasks (names only) and keeps them across refreshes; you come from the token's owner. Click Settings › Notion › Refresh Tasks once, then Suggest again (Notion) on a meeting.
+- The Notion setup guide covers personal access tokens.
+
 ## 0.4.6-beta.7 — 2026-11-26 (pre-beta, owner testing only)
 
 - Notion Assignee is filled in: Cora now fetches your workspace's people when it makes suggestions (it only did so from a Person page, so the list was empty and every Task showed "Unassigned"). Your own items default to you; someone else's to their confirmed Notion account, or to the one Notion user whose full name matches; everyone in the workspace can be picked. A personal Notion token is recognized as you.

@@ -76,8 +76,8 @@ def _fetch(service: str) -> list[tuple[str, str, bool]]:
         except connections.ConnectionFailed:
             if not owner.get("id"):
                 raise          # no list (no "read user information" capability) and no self either
-        if owner.get("id") and owner.get("name") and not any(uid == owner["id"] for uid, _, _ in users):
-            users.append((str(owner["id"]), str(owner["name"]), True))   # at least you
+        if owner.get("id") and not any(uid == owner["id"] for uid, _, _ in users):
+            users.append((str(owner["id"]), str(owner.get("name") or "You"), True))   # at least you
     else:
         me = conn.request("POST", "/auth.test")
         cursor = ""
@@ -102,7 +102,7 @@ def refresh_users(service: str, *, force: bool = False) -> bool:
         return False
     with db.get_db() as c:
         _ensure(c)
-        row = c.execute("SELECT MAX(fetched_at) AS at FROM service_users WHERE service = ?", (service,)).fetchone()
+        row = c.execute("SELECT MAX(fetched_at) AS at FROM service_users WHERE service = ? AND fetched_at != ''", (service,)).fetchone()
     if not force and row and row["at"] and _now() - dt.datetime.fromisoformat(row["at"]) < STALE_AFTER:
         return False
     try:
@@ -112,11 +112,31 @@ def refresh_users(service: str, *, force: bool = False) -> bool:
     now = _now().isoformat()
     with db.get_db() as c:
         _ensure(c)
-        c.execute("DELETE FROM service_users WHERE service = ?", (service,))
+        # Fetched rows are replaced; people only seen on Tasks (remember_users) stay.
+        c.execute("DELETE FROM service_users WHERE service = ? AND fetched_at != ''", (service,))
         c.executemany("INSERT OR REPLACE INTO service_users (service, external_id, name, is_self, fetched_at) "
                       "VALUES (?, ?, ?, ?, ?)", [(service, uid, name[:200], int(me), now) for uid, name, me in users])
         c.commit()
     return True
+
+
+def remember_users(service: str, people: list[tuple[str, str]]) -> int:
+    """People seen on the service's own records (e.g. Notion Task assignees),
+    for when its user list is not readable (a personal Notion token has no
+    "read user information"). Names only. Never overrides a fetched row or
+    who is you; returns how many were new."""
+    people = [(str(uid), str(name)[:200]) for uid, name in people if uid and name]
+    if not people:
+        return 0
+    with db.get_db() as c:
+        _ensure(c)
+        before = c.execute("SELECT COUNT(*) FROM service_users WHERE service = ?", (service,)).fetchone()[0]
+        # fetched_at '' marks "seen, not fetched", so refresh_users still fetches when due.
+        c.executemany("INSERT OR IGNORE INTO service_users (service, external_id, name, is_self, fetched_at) "
+                      "VALUES (?, ?, ?, 0, '')", [(service, uid, name) for uid, name in people])
+        after = c.execute("SELECT COUNT(*) FROM service_users WHERE service = ?", (service,)).fetchone()[0]
+        c.commit()
+    return after - before
 
 
 def users(service: str) -> list[dict[str, Any]]:

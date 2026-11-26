@@ -137,3 +137,30 @@ def test_assignee_for_owner_you_confirmed_or_unique_full_name(services):
     assert accounts.assignee_for_owner("Odalys Brennt", "notion")[1] == "name"
     assert accounts.assignee_for_owner("Odalys", "notion") == (None, "")        # first name alone: two people
     assert accounts.assignee_for_owner("Zed Nobody", "notion") == (None, "")
+
+
+def test_an_integration_token_without_user_info_is_still_you_via_its_owner(services):
+    """A token whose /users/me is a bot owned by you, with /users refused (403)."""
+    import connections
+    notion, _ = services
+    notion.on("GET", "/users/me", {"object": "user", "type": "bot", "id": "bot-1", "name": "Cora",
+                                   "bot": {"owner": {"type": "user", "user": {"object": "user", "type": "person",
+                                                                              "id": "n-me", "name": "Mayank Tester"}}}})
+    notion.fail[("GET", "/users")] = connections.ConnectionFailed("auth", status=403, code="restricted_resource")
+    assert accounts.refresh_users("notion", force=True)
+    assert accounts.self_user("notion") == {"id": "n-me", "name": "Mayank Tester", "is_self": True}
+
+
+def test_people_seen_on_tasks_become_choices_and_survive_a_refresh(services):
+    import connections
+    notion, _ = services
+    assert accounts.remember_users("notion", [("n-odalys", "Odalys Brennt"), ("n-teo", "Teodor Lee"), ("", "x")]) == 2
+    names = {u["name"] for u in accounts.users("notion")}
+    assert names == {"Odalys Brennt", "Teodor Lee"}
+    notion.on("GET", "/users/me", {"type": "bot", "bot": {"owner": {"user": {"id": "n-me", "name": "Mayank Tester"}}}})
+    notion.fail[("GET", "/users")] = connections.ConnectionFailed("auth", status=403, code="restricted_resource")
+    assert accounts.refresh_users("notion", force=False)          # seen-only rows do not count as fetched
+    by_id = {u["id"]: u for u in accounts.users("notion")}
+    assert by_id["n-me"]["is_self"] and {"n-odalys", "n-teo"} <= set(by_id)
+    assert accounts.remember_users("notion", [("n-me", "Someone Else")]) == 0
+    assert accounts.user("notion", "n-me")["name"] == "Mayank Tester"   # never overrides you

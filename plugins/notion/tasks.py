@@ -142,6 +142,19 @@ def _value(prop: dict) -> Any:
     return None
 
 
+def remember_assignees(pages: list[dict], mapping: dict[str, str]) -> None:
+    """The people assigned on your Tasks become Assignee choices (names only),
+    so a personal token, which cannot list the workspace's users, still offers
+    your teammates."""
+    import accounts
+    people = {}
+    for page in pages:
+        for p in (_prop(page, mapping.get("assignee")).get("people") or []):
+            if p.get("id") and p.get("name") and p.get("type", "person") == "person":
+                people[p["id"]] = p["name"]
+    accounts.remember_users("notion", list(people.items()))
+
+
 def is_done(status: Any, done_value: str | None) -> bool:
     if isinstance(status, bool):
         return status
@@ -194,6 +207,7 @@ def refresh(*, force: bool = False) -> bool:
         return False
     now = _now().isoformat()
     rows = [parse_page(p, s["mapping"]) for p in pages if p.get("id") and not p.get("archived")]
+    remember_assignees(pages, s["mapping"])
     with db.get_db() as c:
         _ensure(c)
         c.execute("DELETE FROM notion_tasks")

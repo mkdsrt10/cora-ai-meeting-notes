@@ -183,7 +183,7 @@ def test_create_assignee_from_you_a_confirmed_account_or_a_unique_full_name(port
     venue, pizza, deck, caterer = process("n-assign")
     field = {f["name"]: f for f in venue["fields"]}
     assert field["assignee"]["value"] == "n-quill" and field["due"]["value"] == "2026-11-20"   # exact full name
-    assert {o["value"] for o in field["assignee"]["options"]} == {"", "n-me", "n-quill"}       # everyone is offered
+    assert {"", "n-me", "n-quill"} <= {o["value"] for o in field["assignee"]["options"]}       # everyone is offered
     assert field["assignee"]["options"][1] == {"value": "n-me", "label": "Mira Testwell (you)"}
     assert {f["name"]: f for f in deck["fields"]}["assignee"]["value"] == "n-me"               # your own item
     assert {f["name"]: f for f in caterer["fields"]}["assignee"]["value"] == ""                # first name only
@@ -350,3 +350,20 @@ def test_an_unlinked_todo_done_raises_nothing(port, notion, fake_text):
     item = action_items.for_recording("n-unlinked")[0]["id"]
     call(port, "POST", f"/api/action-items/{item}", {"done": True})
     assert done_proposals(port, "n-unlinked") == []
+
+
+def test_assignees_on_your_tasks_become_assignee_choices(port, notion, fake_text):
+    """A personal token cannot list the workspace's users: the people already
+    assigned on your Tasks are offered instead (names only)."""
+    import connections
+    from plugins.notion import tasks
+    named = page("t-named", "Write the launch post", assignee="n-wren")
+    named["properties"]["Assignee"]["people"] = [{"object": "user", "id": "n-wren", "type": "person", "name": "Wren Okafor"}]
+    notion.routes[("POST", "/data_sources/ds1/query")] = lambda r: {"results": TASKS + [named], "has_more": False}
+    notion.fail[("GET", "/users")] = connections.ConnectionFailed("auth", status=403, code="restricted_resource")
+    tasks.refresh(force=True)
+    assert accounts.user("notion", "n-wren") == {"id": "n-wren", "name": "Wren Okafor", "is_self": False}
+    fake_text.reply = model(lambda t: {"decision": "create", "confidence": 0.9})
+    recording("n-seen", ["Proofread the launch post (Owner: Wren Okafor)"])
+    field = {f["name"]: f for f in process("n-seen")[0]["fields"]}["assignee"]
+    assert field["value"] == "n-wren" and "n-wren" in {o["value"] for o in field["options"]}

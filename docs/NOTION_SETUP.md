@@ -11,8 +11,10 @@ About 5 minutes. You need Cora 0.4.6 or later, in the new look (Settings › App
 3. Under **Capabilities**, tick:
    - **Read content**, **Update content**, **Insert content**: to read your Tasks and create new ones.
    - **Read comments**, **Insert comments**: linking an action item to an existing Task adds a comment.
-   - **Read user information without email addresses**: so the **Assignee** list shows your teammates. Without it Cora can still assign Tasks to you, but nobody else.
+   - **Read user information without email addresses**, if offered: Cora can then list everyone in the workspace for **Assignee**. Without it (a personal access token has no such option), Cora offers you plus everyone already assigned on your Tasks.
 4. Copy the **Internal integration secret** (starts with `ntn_` or `secret_`).
+
+A personal access token works too: paste it the same way in step 3.
 
 ## 2. Give it your Tasks database
 
@@ -53,7 +55,7 @@ After a meeting is processed:
 |---|---|
 | "Connect it in Settings › Connections first" | The token is missing or was revoked. Paste it again. |
 | No Tasks, or "0 Tasks cached" | The database isn't connected to the integration (step 2), or the link points to a linked view. Open the source database and copy its link. |
-| Assignee only offers "Unassigned" and you | The integration lacks **Read user information** (step 1.3). Tick it, then **Refresh Tasks**. |
+| Assignee only offers "Unassigned" and you | Cora learns teammates from the people assigned on your Tasks. Click **Refresh Tasks** in Settings › Notion, then **Suggest again (Notion)** on the meeting. Someone never assigned on any Task can't be offered unless the token can read user information. |
 | Old suggestions still show the old choices | Open the meeting's **⋯** › **Suggest again (Notion)**. |
 
 Questions or ideas: **Settings › Help & feedback** › Request a feature. Issues are public, so don't paste meeting content or customer names.

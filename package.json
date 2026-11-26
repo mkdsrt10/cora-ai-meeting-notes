@@ -1,7 +1,7 @@
 {
   "name": "cora",
   "productName": "Cora AI Meeting Notes",
-  "version": "0.4.6-beta.7",
+  "version": "0.4.6-beta.8",
   "description": "Cora AI Meeting Notes — local-first meeting capture, transcription and notes for macOS",
   "main": "src/main.js",
   "scripts": {
