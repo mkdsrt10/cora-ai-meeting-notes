@@ -42,6 +42,8 @@ backups/
 
 # Compiled native helpers — built from source by `make build-native`
 capture/dual-capture
+capture/live-engine
+capture/live-engine-whisperkit/.build/
 capture/mic-watch
 capture/speaker-watch
 bin/mac-ocr
@@ -56,3 +58,5 @@ coach_data.json
 # App build output (scripts/build-app.sh)
 build/
 dist/
+# Version stamp + beta receiver token; lives only inside the built app
+build-info.json

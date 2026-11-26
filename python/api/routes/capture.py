@@ -1,23 +1,14 @@
-"""Live capture control: start/stop/pause/resume, live entries, screenshots."""
+"""Live Recording rows written by the Electron Recording session
+(src/recording/session.js): pending row, status, continuation status and the
+live feed. Capture itself is driven only from Electron."""
 from __future__ import annotations
 import datetime as dt
-import subprocess
 from pathlib import Path
 
 from api.router import route
-from pathlib import Path
-import datetime as dt
 import db
-import paths
-import subprocess
-from api.core import ARCHETYPES, INBOX, safe_folder, safe_id
+from api.core import archetypes, safe_id
 from api.views import PENDING_TITLES
-
-
-@route("GET", '/api/unprocessed-recording')
-def get_api_unprocessed_recording(req, path: str, query: dict) -> None:
-    rec = db.get_unprocessed_recording()
-    return req.send_json({"id": rec["id"]} if rec else {})
 
 
 @route("POST", '/api/recording/start')
@@ -29,7 +20,7 @@ def post_api_recording_start(req, path: str, body: dict) -> None:
     if archetype_id is not None:
         try:
             aid = int(archetype_id)
-            archetype = ARCHETYPES.get(aid)
+            archetype = archetypes().get(aid)
         except (ValueError, TypeError):
             pass
     meeting_tool = str(body.get("meeting_tool") or "").strip() or None
@@ -59,86 +50,6 @@ def post_api_recording_continuation_status(req, path: str, body: dict) -> None:
     return req.send_json({"ok": True})
 
 
-@route("POST", '/api/recording/stop')
-def post_api_recording_stop(req, path: str, body: dict) -> None:
-    subprocess.run(["pkill", "-INT", "dual-capture"], check=False)
-    return req.send_json({"ok": True})
-
-
-@route("POST", '/api/recording/trigger-start')
-def post_api_recording_trigger_start(req, path: str, body: dict) -> None:
-    check = subprocess.run(["pgrep", "-f", "dual-capture"], capture_output=True, text=True)
-    if check.returncode == 0 and check.stdout.strip():
-        return req.send_json({"ok": False, "error": "Already recording."})
-    continues_id = str(body.get("continues_recording_id") or "").strip() or None
-    timestamp = dt.datetime.now().strftime("%Y-%m-%dT%H-%M-%S-%f")[:-3] + "Z"
-    recording_id = f"meeting_{timestamp}"
-    out_file = INBOX / f"{recording_id}.mov"
-    INBOX.mkdir(parents=True, exist_ok=True)
-    capture_bin = paths.CAPTURE_DIR / "dual-capture"
-    if not capture_bin.exists():
-        return req.send_json({"ok": False, "error": f"Capture binary not found at {capture_bin}"}, 500)
-    db.create_pending_recording(
-        recording_id,
-        source_stem=recording_id,
-        recorded_at=dt.datetime.now().astimezone().isoformat(),
-        status="recording",
-        continues_recording_id=continues_id,
-    )
-    if continues_id:
-        db.set_continuation_status(continues_id, "recording", child_id=recording_id)
-    subprocess.Popen([str(capture_bin), str(out_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return req.send_json({"ok": True, "id": recording_id})
-
-
-@route("POST", '/api/recording/pause')
-def post_api_recording_pause(req, path: str, body: dict) -> None:
-    rec_id = str(body.get("id", "")).strip()
-    subprocess.run(["pkill", "-INT", "dual-capture"], check=False)
-    if rec_id:
-        db.set_pending_recording_status(rec_id, "paused")
-    return req.send_json({"ok": True, "status": "paused"})
-
-
-@route("POST", '/api/recording/resume')
-def post_api_recording_resume(req, path: str, body: dict) -> None:
-    rec_id = str(body.get("id", "")).strip()
-    timestamp = dt.datetime.now().strftime("%Y-%m-%dT%H-%M-%S-%f")[:-3] + "Z"
-    new_recording_id = f"meeting_{timestamp}"
-    out_file = INBOX / f"{new_recording_id}.mov"
-    INBOX.mkdir(parents=True, exist_ok=True)
-    capture_bin = paths.CAPTURE_DIR / "dual-capture"
-    if not capture_bin.exists():
-        return req.send_json({"ok": False, "error": f"Capture binary not found at {capture_bin}"}, 500)
-    db.create_pending_recording(
-        new_recording_id,
-        source_stem=new_recording_id,
-        recorded_at=dt.datetime.now().astimezone().isoformat(),
-        status="recording",
-        continues_recording_id=rec_id or None,
-    )
-    if rec_id:
-        db.set_continuation_status(rec_id, "recording", child_id=new_recording_id)
-    subprocess.Popen([str(capture_bin), str(out_file)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return req.send_json({"ok": True, "id": new_recording_id, "status": "recording"})
-
-
-@route("POST", '/api/recording/screenshot')
-def post_api_recording_screenshot(req, path: str, body: dict) -> None:
-    folder = safe_folder(body.get("id", ""))
-    import screenshot_engine
-    meta = db.get_recording_data(folder.name, "metadata") or {}
-    started = meta.get("source_modified_at") or meta.get("processed_at")
-    elapsed = None
-    if started:
-        try:
-            elapsed = (dt.datetime.now().astimezone() - dt.datetime.fromisoformat(started)).total_seconds()
-        except Exception:
-            elapsed = None
-    entry = screenshot_engine.capture_and_ocr(folder, elapsed_sec=elapsed)
-    return req.send_json({"ok": True, "screenshot": entry})
-
-
 @route("POST", '/api/recording/live-entry')
 def post_api_recording_live_entry(req, path: str, body: dict) -> None:
     # Called by the Electron main process right after a manual
@@ -161,3 +72,46 @@ def post_api_recording_live_entry(req, path: str, body: dict) -> None:
         image_path=Path(str(body.get("image_path", ""))).name or None,
     )
     return req.send_json({"ok": True})
+
+
+@route("GET", '/api/live/settings')
+def get_api_live_settings(req, path: str, query: dict) -> None:
+    """The Live transcript engine a Recording starting now would use (read by
+    Electron at each start and for the Call prompt badge):
+    {mode: off | on_device | on_device_hinglish | cloud_vertex, refused: null | code,
+    model? (on_device_hinglish)}. A refused engine is never swapped for another
+    one: captions pause with the code."""
+    import processing
+    mode = processing.preferences().get("live", "off")
+    refused = None
+    if mode == "cloud_vertex":
+        import live_cloud
+        refused = live_cloud.refusal()
+    if mode == "on_device_hinglish":
+        refused = processing.live_hinglish_refusal()
+        return req.send_json({"mode": mode, "refused": refused, "model": processing.LIVE_HINGLISH_MODEL})
+    return req.send_json({"mode": mode, "refused": refused})
+
+
+@route("GET", '/api/recording/live-transcript')
+def get_api_recording_live_transcript(req, path: str, query: dict) -> None:
+    """Live transcript lines after `since` (a byte cursor from the previous
+    read; 0 = from the start) and the new cursor. Local only: the file never
+    leaves this Mac through this route."""
+    import live_transcript
+    rec_id = safe_id(str(query.get("id", [""])[0]))
+    try:
+        since = int(query.get("since", ["0"])[0] or 0)
+    except ValueError:
+        raise ValueError("Invalid cursor") from None
+    lines, cursor = live_transcript.read(live_transcript.path_for(rec_id), since)
+    return req.send_json({"id": rec_id, "lines": lines, "cursor": cursor})
+
+
+@route("POST", '/api/recording/draft-notes')
+def post_api_recording_draft_notes(req, path: str, body: dict) -> None:
+    """Draft notes from the Live transcript, called by the Recording session
+    at stop before the Recording is handed to processing. {ok, reason?}."""
+    import live_draft_notes
+    rec_id = safe_id(str(body.get("id", "")))
+    return req.send_json(live_draft_notes.generate(rec_id))

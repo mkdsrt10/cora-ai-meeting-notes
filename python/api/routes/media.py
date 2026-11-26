@@ -77,7 +77,10 @@ def get_media_screenshot_prefix(req, path: str, query: dict) -> None:
 
 
 def serve_static(req, path: str, query: dict) -> None:
-    """Fallback for GET: the web UI's own files."""
+    """Fallback for GET: the web UI's own files. /v2/ is the UI shell v2 page
+    (docs/specs/ui-shell-v2.md), served beside the classic one."""
+    if path in {"/v2", "/v2/"}:
+        path = "/v2/index.html"
     target = STATIC / ("index.html" if path in {"/", ""} else path.lstrip("/"))
     target = target.resolve()
     target.relative_to(STATIC.resolve())

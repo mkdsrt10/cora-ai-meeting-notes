@@ -28,6 +28,8 @@ RECORDINGS = paths.RECORDINGS_DIR
 
 import db
 import credentials
+import recording_export
+import recording_stage
 
 
 def _recording_folder(recording_id: str) -> Optional[Path]:
@@ -52,22 +54,7 @@ mcp = MCPServer(
 )
 
 
-def _resolve_speaker_name(speaker_id: str, speaker_labels: dict[str, Any], identity: dict[str, Any]) -> str:
-    """Resolve a raw speaker_1/speaker_2 ID into a human-friendly name."""
-    self_id = identity.get("speaker_id")
-    if self_id and speaker_id == self_id:
-        self_name = identity.get("identity") or db.get_setting("pending_self_name") or "You"
-        return f"{self_name} (Self)"
-
-    entry = speaker_labels.get("speakers", {}).get(speaker_id, {})
-    if entry.get("name"):
-        parts = [entry["name"]]
-        if entry.get("role"):
-            parts.append(entry["role"])
-        if entry.get("organization"):
-            parts.append(f"({entry['organization']})")
-        return " — ".join(parts)
-    return speaker_id
+_resolve_speaker_name = recording_export.speaker_name
 
 
 @mcp.tool()
@@ -118,6 +105,60 @@ def cora_get_live_status() -> dict[str, Any]:
     }
 
 
+def _active_recording_id() -> Optional[str]:
+    """The Recording being captured right now (its current chunk), if any."""
+    for rec in db.get_all_recordings():
+        if rec.get("status") in {"recording", "paused"}:
+            return rec["id"]
+    return None
+
+
+@mcp.tool()
+def cora_get_live_transcript(recording_id: str = "", since_cursor: str = "") -> dict[str, Any]:
+    """Read the Live transcript of a meeting while it is happening (captions from
+    "You" on the microphone and "Them" on system audio, a second or two behind
+    speech; a draft, replaced by the full transcript after the meeting).
+
+    Returns only the lines after `since_cursor` and a new `cursor` to pass next
+    time, so repeated calls return just what was said since the last read.
+
+    Args:
+        recording_id: The recording ID. Empty = the meeting being recorded now.
+        since_cursor: The `cursor` from your previous call ("" = from the start).
+    """
+    import live_transcript
+    rec_id = (recording_id or "").strip() or _active_recording_id()
+    if not rec_id:
+        raise ValueError("No meeting is being recorded right now; pass a recording_id.")
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", rec_id):
+        raise ValueError(f"Recording not found: {rec_id}")
+    rec = db.get_recording(rec_id) or db.get_recording_by_live_id(rec_id)
+    path = live_transcript.path_for(rec_id)
+    if not rec and path is None:
+        raise ValueError(f"Recording not found: {rec_id}")
+    # A cursor is "<recording id>@<byte offset>"; one from another recording starts over.
+    since = 0
+    cursor_id, _, offset = (since_cursor or "").rpartition("@")
+    if cursor_id == rec_id and offset.isdigit():
+        since = int(offset)
+    lines, cursor = live_transcript.read(path, since)
+    status = (rec or {}).get("status")
+    return {
+        "recording_id": rec_id,
+        "recording": status in {"recording", "paused"},
+        "lines": [{
+            "speaker": "You" if line.get("track") == "mic" else (line.get("speaker") or "Them"),
+            "track": line.get("track"),
+            "start": line.get("start"),
+            "end": line.get("end"),
+            "text": line.get("text"),
+            "final": bool(line.get("final")),
+        } for line in lines],
+        "cursor": f"{rec_id}@{cursor}",
+        "note": None if path else "No Live transcript for this meeting (live captions are off, or nothing was said yet).",
+    }
+
+
 @mcp.tool()
 def cora_list_recordings(
     limit: int = 20,
@@ -135,8 +176,9 @@ def cora_list_recordings(
 
     Args:
         limit: Maximum number of recordings to return (1-100, default 20).
-        stage: Optional filter by analysis stage ('recording', 'needs_diarization',
-               'needs_speaker_confirmation', 'ready_for_coaching', 'coached').
+        stage: Optional filter by analysis stage ('recording', 'processing', 'paused',
+               'needs_diarization', 'needs_speaker_confirmation', 'ready'; with the
+               coaching plugin enabled, 'ready_for_coaching' or 'coached' instead of 'ready').
         archetype: Optional substring filter for archetype (e.g. 'Technical Steering',
                    'Strategic L10', 'Client Solutioning', 'Standup', '1:1').
         meeting_tool: Optional exact-ish filter for which app the meeting was in
@@ -163,18 +205,7 @@ def cora_list_recordings(
         meta = r.get("metadata") or {}
         labels = r.get("speaker_labels") or {}
 
-        # Determine stage
-        rec_status = r.get("status")
-        if rec_status in {"recording", "processing"}:
-            current_stage = rec_status
-        elif not diarization or not diarization.get("segments"):
-            current_stage = "needs_diarization"
-        elif not identity.get("speaker_id"):
-            current_stage = "needs_speaker_confirmation"
-        elif not coaching or not coaching.get("executive_assessment"):
-            current_stage = "ready_for_coaching"
-        else:
-            current_stage = "coached"
+        current_stage = recording_stage.stage(r)
 
         if stage and current_stage.lower() != stage.lower():
             continue
@@ -610,8 +641,11 @@ def cora_get_action_items(status: str = "pending", limit: int = 40) -> list[dict
         status: Filter by status: 'pending', 'done', or 'all'.
         limit: Maximum items to return (default 40).
     """
+    # Action items are core records (ADR 0004): read them, not the old
+    # To-dos done marks, so done/edits/user-added items match the app.
+    import action_items as core_items
+    core_items.backfill()
     recs = db.get_all_recordings()
-    todo_states = {f"{ts['recording_id']}_{ts['item_index']}": ts for ts in db.get_todo_states()}
     items = []
 
     for r in recs:
@@ -620,31 +654,32 @@ def cora_get_action_items(status: str = "pending", limit: int = 40) -> list[dict
         identity = r.get("identity") or {}
         labels = r.get("speaker_labels") or {}
 
-        for idx, act in enumerate(actions):
-            ts_key = f"{r['id']}_{idx}"
-            is_done = todo_states.get(ts_key, {}).get("done", False)
-
+        for row in core_items.for_recording(r["id"]):
+            is_done = row["done"]
             if status == "pending" and is_done:
                 continue
             if status == "done" and not is_done:
                 continue
 
+            pos = row["position"]
+            act: Any = actions[pos] if row["provenance"] == "ai" and pos is not None and 0 <= pos < len(actions) else {}
             if isinstance(act, str):
                 # Local pipeline (call_summary v2) stores flat bullets like
                 # "Ship the fix (Owner: Priya, Due: Friday)".
                 act = _parse_action_bullet(act)
             owner_id = act.get("owner_speaker_id", "")
-            owner_name = (_resolve_speaker_name(owner_id, labels, identity) if owner_id
-                          else act.get("owner") or "Unassigned")
+            owner_name = (row["owner"] or (_resolve_speaker_name(owner_id, labels, identity) if owner_id
+                                           else act.get("owner")) or "Unassigned")
 
             items.append({
+                "id": row["id"],
                 "recording_id": r["id"],
                 "meeting_title": r.get("title"),
                 "recorded_at": r.get("recorded_at"),
-                "item_index": idx,
-                "action": act.get("action"),
+                "item_index": pos,
+                "action": row["text"],
                 "owner": owner_name,
-                "due_date": act.get("due_date"),
+                "due_date": row["due"] or act.get("due_date"),
                 "timestamp": act.get("timestamp"),
                 "is_done": is_done,
             })

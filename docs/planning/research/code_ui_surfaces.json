@@ -1,0 +1,156 @@
+{
+ "summary": "The renderer is one static page (src/ui/web/index.html) with hard-coded views: Home, recording detail, People, person detail, Memory and Settings. Seventeen classic scripts share one global lexical scope and must load in order (index.html:683-700, enforced by scripts/lint-ui.js). The recording detail is a single \"notepad-card\" with four fixed tabs (Notes/Participants/Timeline/Transcript, index.html:305-336), an action chip row (index.html:259-267) and a disabled \"Ask anything\u2026 Coming soon\" row (index.html:337-340). That row is the obvious slot for a chat surface. Tab, settings-nav and search handlers are bound once at load with `$$()` (notepad.js:21-24, settings.js:5-8, search.js:153), so injected tabs or settings items do nothing until those handlers use event delegation. The CSP is meta-only (index.html:6): `default-src 'self'; script-src 'self'; connect-src 'self'`, no explicit frame-src, which falls back to 'self' and allows 127.0.0.1:8765 frames. Every Python response also sends `X-Frame-Options: DENY` and `CORP: same-origin` (http.py:24-29), so no loopback-served iframe can render today. Auth works like this: every /api and /media request needs the per-launch token, either as the HttpOnly SameSite=Strict `vc_token` cookie Electron sets host-only for 127.0.0.1 (main.js:1005-1011) or as an X-VC-Token header. Host and Origin are pinned to `127.0.0.1|localhost:<port>`; `Origin: null` is rejected (http.py:35-53). Static files are public (http.py:47, media.py:79-84). The preload exposes 18 privileged IPC calls (start/stop/pause recording, screenshot, append-note, mute) on `window.electronAPI` (preload.js:3-22). handleTrusted accepts any frame URL on the dashboard origin (security.js:13-28). The navigation guards cover only main-frame `will-navigate`, and window.open calls shell.openExternal for any https URL from any frame (security.js:30-43). There are no `will-frame-navigate` or webRequest filters, and the Electron main process has no lockdown awareness. Lockdown is Python-only (policy.py:24-49, called from credentials.py:439/671/781, cloud_asr.py, vm_sync.py:32, logs.py:139). The MCP server (mcp_server.py) reads the DB directly and never checks lockdown. The plugin system today is one hard-wired, in-process, fully trusted Python import (plugin_registry.py:19-59) from APP_ROOT/plugins (paths.py:28), inside the signed bundle. It has no manifest, scopes, UI contribution or hooks; the coaching plugin has no UI at all, and the delivery-dashboard handler in navigation.js:7-14 is dead code. The DB has no plugin tables. Options are the unnamespaced `settings` KV (db.py:57-60, which /api/settings exposes for any key), the per-recording `summaries` JSON blob (db.py:53, 412-430) or `todo_state` keyed by list index (db.py:87-94). Conclusion: third-party UI can only be contributed safely as a cross-origin iframe served by Electron on a custom scheme, with `connect-src 'none'` and a MessageChannel RPC bridge that checks scopes in the renderer host and again on the server. Script injection into the main renderer, or anything served from 127.0.0.1 on any port, is equivalent to full compromise.",
+ "key_files": [
+  {
+   "path": "src/ui/web/index.html",
+   "role": "Only UI document. Meta CSP at :6. Sidebar nav :196-200. Recording detail chip row :259-267, notepad tabs/panels :305-336, disabled Ask/chat row :337-340. Settings nav :369-378 and panels :379-557. Classic script list :683-700"
+  },
+  {
+   "path": "src/ui/web/js/core.js",
+   "role": "Shared globals: $/$$, esc() :28, api() fetch helper relying on the cookie :33-38. showView with hard-coded titles/hooks :9-21, :49-62"
+  },
+  {
+   "path": "src/ui/web/js/notepad.js",
+   "role": "Static tab binding :21-24 (blocks dynamic tabs); loadSelectedRecording :7-16"
+  },
+  {
+   "path": "src/ui/web/js/detail.js",
+   "role": "loadNotepad :139-273 computes per-recording button visibility (hook for plugin actions/tabs). renderMarkdownSubset :316-339 is an escape-first renderer, safe for plugin-produced markdown"
+  },
+  {
+   "path": "src/ui/web/js/settings.js",
+   "role": "Static settings-nav binding :5-8; loadSettingsView :12-54"
+  },
+  {
+   "path": "src/ui/web/js/search.js",
+   "role": "getActivePanel hard-codes tab ids :17-27; static tab binding :153"
+  },
+  {
+   "path": "src/preload.js",
+   "role": "contextBridge electronAPI: 18 privileged recording/notes IPC calls, also reachable via parent.electronAPI from any same-origin child frame"
+  },
+  {
+   "path": "src/main/security.js",
+   "role": "isTrustedUrl prefix-matches the whole dashboard origin :13-18; handleTrusted :20-28; main-frame-only will-navigate, webview block, openExternal on any https :30-43"
+  },
+  {
+   "path": "src/main.js",
+   "role": "BrowserWindow sandbox/contextIsolation :293-305 and :63-83. Permission handler allows clipboard only :1000-1003. vc_token cookie set host-only, not port-scoped :1005-1011. Place to register a plugin protocol and webRequest filter"
+  },
+  {
+   "path": "src/main/api-client.js",
+   "role": "DASHBOARD_URL=http://127.0.0.1:8765 :8-10; API_TOKEN generation :16"
+  },
+  {
+   "path": "python/api/http.py",
+   "role": "Global XFO DENY and CORP same-origin :24-29. authorize() Host/Origin/token gate :35-53. JSON-only POST with 1MB cap :64-71. Dispatch :111-139"
+  },
+  {
+   "path": "python/api/auth.py",
+   "role": "Token init (env or minted, 0600 file) :26-38; cookie parsing :41-46; PUBLIC_PATHS"
+  },
+  {
+   "path": "python/api/router.py",
+   "role": "@route exact/prefix registry :16-36; a plugin RPC prefix route attaches here"
+  },
+  {
+   "path": "python/api/routes/settings.py",
+   "role": "Arbitrary-key GET/POST /api/settings :16-18, :243-251 (no allowlist). Credentials save :164-225"
+  },
+  {
+   "path": "python/db.py",
+   "role": "init_db schema :25-157. settings KV :57-60, todo_state by item_index :87-94, summaries blob plus racy update_summary :412-430. No plugin tables"
+  },
+  {
+   "path": "python/policy.py",
+   "role": "enterprise_lockdown via env/config :24-30; require_outbound_allowed :33-35; provider_allowed :38-49"
+  },
+  {
+   "path": "python/plugin_registry.py",
+   "role": "Current plugin system: single hard-coded 'coaching' entry, in-process import :48-59"
+  },
+  {
+   "path": "python/mcp_server.py",
+   "role": "Out-of-process read-only data surface: direct db import :29, ~13 tools :73-660, no lockdown check"
+  },
+  {
+   "path": "python/api/views.py",
+   "role": "recording_item exposes absolute folder_path/folder_uri/audio_url :365-373. dashboard_payload 'plugins' block (coaching only) :522-524"
+  },
+  {
+   "path": "python/pipeline/notes.py",
+   "role": "Hard-coded SUMMARY_FORMATS :16-33, local-only generate_summary_variant :36, hard-coded frontier notes system prompt :349-400. This is where the notes-template engine attaches"
+  },
+  {
+   "path": "python/credentials.py",
+   "role": "_call_configured_llm, policy-gated multi-provider :427-441 (host-brokered LLM for plugins). Keychain helpers :56/:88 for plugin-scoped secrets"
+  },
+  {
+   "path": "python/pipeline/runner.py",
+   "role": "Pipeline completion points for a meeting.processed hook: :339-342 (normal) and :413-415 (continuation merge)"
+  }
+ ],
+ "extension_points": [
+  "src/ui/web/index.html:305-310 / :311-336: append plugin tab buttons (`data-notepad-tab=\"plugin:<id>:<tab>\"`) and panels hosting the plugin iframe. First convert notepad.js:21-24 and search.js:153 to delegated listeners on `.notepad-tabs`, and make search.js:17-27 skip plugin panels.",
+  "src/ui/web/index.html:259-267 (.notepad-chip-row): host-rendered plugin action buttons. Visibility is computed in detail.js loadNotepad() :139-273 next to the reprocess/summarize toggles (:254-261). Labels go through esc()/textContent, icons only from the fixed data-icon set; clicks post `action.invoked` over the plugin's port or run a declarative prompt server-side.",
+  "src/ui/web/index.html:337-340: replace the disabled 'Ask anything\u2026 Coming soon' row with a host-rendered chat panel. This is the entry point for the roleplay, communication and storytelling chats.",
+  "src/ui/web/index.html:369-378 / :379-557: append plugin settings nav items and panels, either a host-rendered JSON-schema form or an iframe. Requires delegating settings.js:5-8; load in loadSettingsView settings.js:12-54.",
+  "src/ui/web/index.html:196-200 + core.js:9-21, :49-62: full-page plugin views (Knowledge base, Team todos, Roadmap). showView needs a dynamic titles map and per-view load hooks instead of the hard-coded if-chain.",
+  "src/ui/web/index.html:683-700 + init.js:4-15: add a first-party classic script /js/plugin-host.js before init.js (fetch the manifest list, render contributions, own the MessageChannel bridge). Never load plugin JS here.",
+  "src/ui/web/index.html:6: add `frame-src cora-plugin:` (and optionally `child-src`) for a custom-scheme plugin frame. Keep script-src 'self'.",
+  "src/main.js before app ready (~:48, next to installNavigationGuards) for protocol.registerSchemesAsPrivileged; src/main.js:1000-1011 (session setup) for protocol.handle('cora-plugin', \u2026) with traversal-checked file serving plus a forced CSP response header, and session.webRequest.onBeforeRequest loopback-only filtering.",
+  "src/main/security.js:30-43: add contents.on('will-frame-navigate') deny for untrusted frames. Make setWindowOpenHandler deny by default and move external links to an explicit handleTrusted('open-external') with URL allowlist and lockdown check. Tighten isTrustedUrl :13-18 so plugin paths and schemes never qualify.",
+  "python/api/routes/__init__.py:2: register a new `plugins` route module, using router.py:16-26 prefix routes for `/api/plugins/rpc` (method + plugin_id + args). The server re-checks granted scopes and writes an audit row.",
+  "python/plugin_registry.py:19-59: generalize get_coaching_plugin into a manifest registry. Discover APP_ROOT/plugins (paths.py:28, first-party) and a new DATA_DIR/plugins (user-installed, declarative only); store enabled state, granted scopes and a sha256 pin.",
+  "python/db.py:25-157 (init_db): add tables plugins(id, version, manifest, enabled, scopes, sha256, installed_at), plugin_kv(plugin_id, scope, key, value), plugin_outputs(plugin_id, recording_id, kind, content, created_at), plugin_audit(ts, plugin_id, method, recording_id, bytes), action_items/decisions with stable UUIDs and provenance.",
+  "python/api/views.py:522-524 (dashboard_payload 'plugins'): return each enabled plugin's contributions (tabs/actions/settings/chats/templates) to the renderer.",
+  "python/pipeline/runner.py:339-342 and :413-415, python/api/routes/recordings.py:324-396 (re-summarize) and :399 (transcript edit): emit a meeting.processed/meeting.updated hook so declarative plugins (todo extraction, KB, roadmap) run after notes are persisted.",
+  "python/pipeline/notes.py:16-33 and :378-397: replace hard-coded SUMMARY_FORMATS and the frontier system prompt with a template registry (DATA_DIR/templates + plugin-contributed templates). generate_summary_variant :36 is local-only today and should route through credentials._call_configured_llm for cloud templates.",
+  "python/credentials.py:427-441: host-brokered `llm.chat` for plugins (policy.provider_allowed already enforced here). It needs a streaming variant for chat. Keychain _keychain_set/_keychain_get :56/:88 with account `plugin.<id>.<name>` for connector secrets the plugin never sees.",
+  "python/mcp_server.py:45-53 / tools :73-660: expose plugin outputs (KB todos/decisions) as additional MCP tools. Also a precedent for out-of-process third-party plugin backends speaking JSON-RPC over stdio."
+ ],
+ "constraints": [
+  "Main-renderer CSP is meta-only: `script-src 'self'`, no inline script, no remote code, `connect-src 'self'` (index.html:6). Anything served from 127.0.0.1:8765 as a script runs with full privileges, so plugin code must never be served from that origin into the main document.",
+  "Classic scripts share one global lexical scope with order-dependent loading (index.html:683-700; scripts/lint-ui.js concatenates them). Any injected plugin script can read or monkeypatch `api`, `esc`, `data`, `selectedDetail` and call window.electronAPI.",
+  "The vc_token cookie is host-only for 127.0.0.1 and not port-scoped (main.js:1005-1011); SameSite=Strict treats 127.0.0.1:<any port> as same-site. Any plugin-controlled server on 127.0.0.1 (any port) that the renderer loads from receives the token, which means full API compromise.",
+  "A same-origin iframe (any path on 127.0.0.1:8765) gets the cookie, parent DOM access and parent.electronAPI (preload.js:3), whose IPC is then sent from the trusted main frame (security.js:20-28). Same-origin framing provides zero isolation.",
+  "All Python responses send X-Frame-Options: DENY and CORP: same-origin (http.py:24-29), and the server sends no CSP header. Loopback-served plugin frames need per-route header changes, and their subresources are blocked for opaque or cross-origin frames.",
+  "authorize() rejects `Origin: null` and any non-loopback origin (http.py:43-46). Sandboxed (opaque) and custom-scheme frames therefore cannot call /api directly; all data must flow through a host bridge.",
+  "Lockdown is enforced only in Python (policy.py); the Electron main process, renderer, window-open handler and MCP server do not check it. Any plugin network or egress path must add main-process enforcement to keep the HIPAA/DoD 'nothing leaves the Mac' guarantee.",
+  "Python in-process plugins (plugin_registry.py:55) run with full privileges (DB, Keychain via credentials, network, subprocess). CPython cannot sandbox them, so third-party backend code must be out-of-process or declarative-only.",
+  "The first-party plugin dir is APP_ROOT/plugins (paths.py:28), inside the signed/asar-unpacked bundle. User-installed plugins need DATA_DIR/plugins, which is code-plant/persistence territory and needs integrity pinning.",
+  "POST bodies must be application/json, at most 1MB (http.py:64-71). Pass recording ids across the bridge and let the server attach transcripts, rather than shipping transcripts through the renderer.",
+  "The session permission handler denies everything but clipboard (main.js:1000-1003). Plugin frames cannot use the mic; voice roleplay needs host-mediated capture.",
+  "The server is a stdlib ThreadingHTTPServer (server.py:50). Streaming chat is possible via manual chunked/SSE writes, but each long-lived stream holds a thread.",
+  "SOC 2 Type 2 in progress: plugin data access needs an audit trail and least-privilege defaults; consent and scopes must be recorded durably (DB, not config.json)."
+ ],
+ "gaps_and_bugs": [
+  "src/main/security.js:33-36: only `will-navigate` (main frame) is guarded. Electron 44.4.5 is installed but there is no `will-frame-navigate` handler, so any subframe can navigate itself to an external URL with data in the query string (exfil channel) the moment any iframe exists.",
+  "src/main/security.js:38-41: setWindowOpenHandler calls shell.openExternal for any https URL from any frame, with no frame/origin check and no lockdown check. It is an exfil channel (data in URL) and a phishing launcher for any frame that can window.open.",
+  "src/main/security.js:13-18: isTrustedUrl trusts any URL under `DASHBOARD_URL + '/'`, so any page served from the loopback server, including a future plugin page, qualifies for privileged IPC.",
+  "src/main.js:1005-1011: the token cookie is not port-scoped. Loading anything from another 127.0.0.1 port (e.g. a plugin dev server, or an <img>/<iframe> pointing there) leaks vc_token to that process.",
+  "python/api/routes/settings.py:16-18, :243-251: /api/settings reads and writes any key with no allowlist. A token holder can set `vm_sync_host`/`log_upload_url`/`transcription_engine` and then trigger /api/cloud/sync-vm (cloud.py:32-36) or /api/logs/bundle send (logs.py:133-151), exfiltrating everything outside lockdown. A plugin bridge must never be a generic API proxy.",
+  "python/mcp_server.py (db import :29; no policy/lockdown reference anywhere): the MCP server serves every transcript, note and person to any MCP client even under enterprise_lockdown, so data reaches Claude Desktop or ChatGPT clouds. This is a compliance control gap for the HIPAA/DoD posture.",
+  "python/api/http.py:24-29: the server sends no CSP header at all, only the meta tag in index.html:6. Any other HTML ever served from STATIC (or a plugin page) runs with no CSP unless it carries its own.",
+  "python/plugin_registry.py:19-59: one hard-coded plugin, in-process import, no manifest, versioning, scopes, UI contributions or event hooks; the 'plugin platform' is effectively absent.",
+  "src/ui/web/js/navigation.js:7-14 plus styles.css:872: the coaching delivery-dashboard UI handler is dead code (nothing renders .delivery-dashboard). views.py:522-524 reports plugins.coaching.enabled but no renderer code consumes it.",
+  "src/ui/web/js/notepad.js:21-24, settings.js:5-8, search.js:153: tabs and settings items are bound once with $$() at script load, so dynamically added plugin tabs or settings panels won't switch. search.js:17-27 hard-codes panel ids. core.js:53 shows `undefined` as the title for any view missing from `titles` (:9-16).",
+  "python/db.py:87-94: todo_state is keyed by (recording_id, item_index). Re-summarize (recordings.py:324-396) rewrites action_items, so done-state attaches to the wrong item. Shared or team todos need stable UUIDs.",
+  "python/db.py:424-430: update_summary reads via get_summaries() on a separate connection and then writes, a read-modify-write without a transaction. Concurrent plugin outputs stored in `summaries` would lose updates.",
+  "python/api/views.py:365-373: recording payload exposes absolute folder_path, folder_uri and audio_url. Any plugin-facing serializer must redact these (they reveal the home dir/username and media paths).",
+  "python/pipeline/notes.py:36: generate_summary_variant is MLX-local only, and SUMMARY_FORMATS (:16-33) is a hard-coded dict. There is no user-editable template mechanism, and the frontier notes prompt is hard-coded (:378-397)."
+ ],
+ "recommendations": [
+  "Ship Tier 0 (declarative plugins) first. A manifest.json plus prompt templates, an output JSON schema and contribution declarations (recording tab rendering host-sanitized markdown via renderMarkdownSubset, action button, JSON-schema settings form, host-rendered chat persona, notes template). Covers roleplay, communication coaching, storytelling coaching, todo extraction with a user rule set and roadmap tracking with zero third-party code execution. It is also the easiest story to sell to HIPAA/DoD buyers and the fastest Product Hunt demo.",
+  "Tier 1 UI plugins run only in a cross-origin frame on a custom privileged scheme served by Electron main: protocol.registerSchemesAsPrivileged([{scheme:'cora-plugin', privileges:{standard:true, secure:true}}]) plus protocol.handle with resolve/relative_to traversal checks. Give each plugin its own origin (`cora-plugin://<id>/`) so it gets per-plugin storage and isolation from other plugins. Force a response CSP: `default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'`. Embed with `sandbox=\"allow-scripts allow-same-origin allow-forms\"`, which is safe only because the frame is cross-origin to the dashboard. Never grant allow-popups, allow-top-navigation or allow-modals. Main CSP gets `frame-src cora-plugin:`.",
+  "Bridge design: plugin-host.js creates a MessageChannel per frame on iframe load, transfers port2, and validates event.source === iframe.contentWindow plus the expected origin. Expose only typed verbs: meeting.getCurrent, meeting.getTranscript, notes.appendSection, kb.upsertTodo, storage.get/set, llm.chat (streamed), ui.toast, ui.confirm. Check each verb against granted scopes in the renderer, forward to POST /api/plugins/rpc {plugin_id, method, args}, re-check scopes server-side from the plugins table, write a plugin_audit row, and redact folder_path/folder_uri/audio_url.",
+  "Before any frame ships, harden the main process: add `will-frame-navigate` deny for non-trusted frames. Add session.webRequest.onBeforeRequest that blocks every non-loopback http(s) request (the UI loads nothing remote by design) and any request from plugin frames outside their own scheme; also honor lockdown here by reading VOICECOACH_ENTERPRISE_LOCKDOWN/config.json in main. Make setWindowOpenHandler deny everything and add handleTrusted('open-external') with an allowlist. Exact-match isTrustedUrl to the dashboard page; set nodeIntegrationInSubFrames:false explicitly.",
+  "Never serve plugin content from 127.0.0.1 on any port (cookie leak, same-origin parent access). Never inject plugin JS into index.html. Never offer a generic fetch/API proxy over the bridge (/api/settings arbitrary write leads to VM-sync/log-upload exfil). Add a key allowlist to /api/settings regardless.",
+  "Scopes, with least privilege by default: `meeting:current` (only the meeting open in the UI, after the user opens the plugin surface); `meeting:transcript`; `meetings:all` (explicit consent screen, needed for KB/roadmap); `notes:write` (appends a versioned, attributed plugin section, never overwrites); `kb:write`; `llm` (host-brokered through credentials._call_configured_llm using the user's provider, so policy.provider_allowed applies and keys stay in Keychain); `connector:<name>` (host-implemented Linear/Jira/Notion/Slack/Sheets sync, tokens in Keychain under `plugin.<id>.*`, outbound writes need a per-action user confirm, blocked under lockdown). Show scopes at install and keep them revocable.",
+  "Data model: add plugins, plugin_kv (namespaced by plugin and recording scope), plugin_outputs, plugin_audit, and first-class action_items/decisions tables with UUIDs and provenance (recording_id plus transcript timestamp span) instead of the index-keyed todo_state. That gives a stable base for shared team todos, the company knowledge base and the todo-app connectors. Don't store plugin data in `settings` or the `summaries` blob.",
+  "Third-party backend logic should run out-of-process only: a JSON-RPC-over-stdio child (MCP-shaped, reusing the mcp_server.py precedent) launched under a macOS sandbox-exec profile that denies network and reads outside its plugin dir, getting data only via host RPC. Keep in-process Python (the current plugin_registry model) for signed first-party plugins. Pin a sha256 of each plugin dir at consent and re-prompt when it changes.",
+  "Chat surface for AI roleplay: v1 is a host-rendered chat panel in the slot at index.html:337-340, configured by the plugin's persona and system-prompt template, with meeting context attached server-side per scope. Add a streaming endpoint (chunked/SSE on ThreadingHTTPServer) wrapping the providers in credentials.py:427+ and the local MLX llm, so transcripts never cross into plugin JS unless `meeting:transcript` is granted. Defer voice roleplay; it needs host-side mic capture, since the session denies media at main.js:1000-1003.",
+  "Fix existing compliance gaps independently of the platform work. Add policy.lockdown_enabled() refusal (or a 'local-only' warning) to mcp_server.py. Consider gating shell.openExternal on lockdown. Treat the arbitrary /api/settings write, the cookie port-scoping hazard and the subframe navigation guard as SOC 2 control items.",
+  "Notes templates (the production-branch ask): move SUMMARY_FORMATS and the frontier prompt (notes.py:16-33, :378-397) to template files with front-matter (sections, output schema, preferred provider/model, meeting-type match) under DATA_DIR/templates. Let plugins contribute templates through the manifest, render results only via renderMarkdownSubset, and route cloud templates through _call_configured_llm so lockdown and provider choice stay centralized."
+ ]
+}

@@ -70,9 +70,30 @@ def start(repo_id: str) -> dict[str, Any]:
     return status(repo_id)
 
 
+def _record(name: str, payload: dict[str, Any]) -> None:
+    import usage_events
+    usage_events.record(name, payload)
+
+
+def _report(repo_id: str, started: float, outcome: str) -> None:
+    """One model_downloaded Usage event per finished download. The model id
+    is a public Hugging Face repo name; no path, no error text."""
+    try:
+        _record("model_downloaded", {
+            "kind": "whisper" if "whisper" in repo_id.lower() else "text",
+            "model": repo_id,
+            "size_mb": round(_downloaded_bytes(repo_id) / 1024**2, 1),
+            "seconds": round(time.time() - started, 1),
+            "outcome": outcome,
+        })
+    except Exception as exc:  # noqa: BLE001 - telemetry never fails a download
+        print(f"[download_manager] model_downloaded not recorded: {exc}", flush=True)
+
+
 def _run(repo_id: str) -> None:
     from huggingface_hub import snapshot_download
 
+    started = time.time()
     stop = threading.Event()
 
     def poll() -> None:
@@ -92,11 +113,13 @@ def _run(repo_id: str) -> None:
         snapshot_download(repo_id=repo_id)
         stop.set()
         poller.join(timeout=2)
+        _report(repo_id, started, "ok")  # before "done": a poller seeing done sees the event too
         _set(repo_id, state="done", downloaded_bytes=_downloaded_bytes(repo_id))
     except Exception as exc:
         stop.set()
-        _set(repo_id, state="error", error=str(exc))
         print(f"[download_manager] Download failed for {repo_id}: {exc}", flush=True)
+        _report(repo_id, started, "error")
+        _set(repo_id, state="error", error=str(exc))
 
 
 def prune(max_age_seconds: int = 3600) -> None:

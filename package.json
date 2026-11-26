@@ -1,14 +1,16 @@
 {
   "name": "cora",
   "productName": "Cora AI Meeting Notes",
-  "version": "0.2.2",
-  "description": "Cora AI Meeting Notes \u2014 local-first meeting capture, transcription and notes for macOS",
+  "version": "1.0.1",
+  "description": "Cora AI Meeting Notes — local-first meeting capture, transcription and notes for macOS",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
     "build": "electron-builder",
-    "mcp": ".venv/bin/python python/mcp_server.py"
+    "mcp": ".venv/bin/python python/mcp_server.py",
+    "test": "npm run test:js",
+    "test:js": "node --test --test-timeout=20000 test/js/"
   },
   "build": {
     "appId": "ai.cora.desktop",
@@ -24,6 +26,7 @@
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Cora records your side of meetings so it can transcribe them on this Mac.",
         "NSAppleEventsUsageDescription": "Cora checks which meeting app is in front to detect when a meeting starts.",
+        "NSSpeechRecognitionUsageDescription": "With live captions on, Cora transcribes your call on this Mac as it happens.",
         "LSMinimumSystemVersion": "14.0"
       }
     },
@@ -39,6 +42,7 @@
       "!python/**/*.pyc"
     ],
     "asarUnpack": [
+      "config.example.json",
       "python/**",
       "capture/**",
       "bin/**",
@@ -52,6 +56,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "build/ffmpeg/bin",
+        "to": "ffmpeg/bin"
       }
     ]
   },

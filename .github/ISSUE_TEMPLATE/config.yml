@@ -3,3 +3,6 @@ contact_links:
   - name: Report a security vulnerability
     url: https://github.com/mkdsrt10/cora-ai-meeting-notes/security/advisories/new
     about: Please report vulnerabilities privately.
+  - name: Vote on existing ideas
+    url: https://github.com/mkdsrt10/cora-ai-meeting-notes/issues?q=is%3Aissue+is%3Aopen+label%3Aenhancement+sort%3Areactions-%2B1-desc
+    about: A 👍 on an open feature request counts as a vote.

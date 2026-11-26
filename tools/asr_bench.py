@@ -165,9 +165,10 @@ def backend_indic_conformer(spec: str):
 def backend_gemini(spec: str):
     sys.path.insert(0, str(REPO / "python"))
     import db
-    from pipeline import cloud_asr
+    from pipeline import gemini_asr
+    from pipeline.audio import probe_duration
     db.set_setting("cloud_asr_model", spec)
-    return lambda wav: cloud_asr.transcribe_gemini(wav, "")["text"]
+    return lambda wav: gemini_asr.clip_text(wav, probe_duration(wav))
 
 
 def backend_cmd(spec: str):

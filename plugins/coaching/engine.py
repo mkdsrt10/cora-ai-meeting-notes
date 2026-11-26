@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Coaching plugin engine: archetypes, scoring rubrics, delivery metrics.
 
-Everything here is reached only through plugin_registry.get_coaching_plugin(),
-never imported directly by core code. It depends on diarization.py (core) for
+Reached only through the Coaching plugin (plugins/coaching/plugin.py, via
+plugin_host); core code never imports it. It depends on diarization.py (core) for
 shared Gemini-audio plumbing (client, interact_with_audio, speaker_profiles,
 timestamp_seconds) but core never depends back on this module.
 """

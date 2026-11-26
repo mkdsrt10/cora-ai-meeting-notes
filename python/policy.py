@@ -3,7 +3,7 @@
 For regulated deployments (HIPAA, defence contractors) an admin sets either
 `"enterprise_lockdown": true` in config.json or VOICECOACH_ENTERPRISE_LOCKDOWN=1
 (e.g. via MDM). While it is on, every outbound path refuses to run —
-tracing, cloud LLM/transcription providers, VM sync, and data contribution —
+tracing, cloud LLM/transcription providers, and data contribution —
 regardless of what a user toggles in Settings. The env var cannot be
 switched off from inside the app, which is what makes it enforceable.
 """
@@ -14,7 +14,8 @@ import os
 
 import paths
 
-CLOUD_PROVIDERS = frozenset({"anthropic", "openai", "vertex", "ai_studio", "gemini"})
+LOCAL_PROVIDERS = frozenset({"local_mlx", "local"})
+LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 class LockdownError(RuntimeError):
@@ -36,14 +37,12 @@ def require_outbound_allowed(what: str) -> None:
 
 
 def provider_allowed(provider: str | None, base_url: str | None = None) -> bool:
-    """Cloud providers are blocked under lockdown; a custom endpoint is only
-    allowed if it runs on this machine (e.g. Ollama on localhost)."""
+    """Under lockdown only on-device models run: local MLX, or an endpoint on
+    this machine (e.g. Ollama or a LiteLLM proxy on localhost). Every other
+    provider (Gemini, Anthropic, any remote base URL) is blocked."""
     if not lockdown_enabled():
         return True
-    p = (provider or "").lower()
-    if p in CLOUD_PROVIDERS:
-        return False
-    if p == "custom":
-        from urllib.parse import urlparse
-        return urlparse(base_url or "").hostname in {"localhost", "127.0.0.1", "::1"}
-    return True
+    if (provider or "").lower() in LOCAL_PROVIDERS:
+        return True
+    from urllib.parse import urlparse
+    return bool(base_url) and urlparse(base_url).hostname in LOCAL_HOSTS

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en" data-shell="v2">
+<head>
+  <meta charset="utf-8">
+  <!-- Same strict CSP as the classic shell: no remote code, fonts or requests. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Cora AI Meeting Notes</title>
+  <link rel="stylesheet" href="/v2/shell.css">
+</head>
+<body>
+<a class="sr-only" href="#main">Skip to content</a>
+<div class="app" id="app">
+  <aside class="side" id="sidebar" aria-label="Sidebar">
+    <div class="ws"><span class="logo" aria-hidden="true">c</span><span>Cora</span><span class="grow"></span>
+      <button class="ib" type="button" id="collapseSidebar" aria-label="Hide sidebar" title="Hide sidebar (⌘\)">⇤</button></div>
+    <button class="search" type="button" id="openPalette" aria-label="Search and commands">⌕ Search<kbd>⌘K</kbd></button>
+    <div id="sideRecording" aria-live="polite"></div>
+    <nav id="navMain" aria-label="Pages"></nav>
+    <nav id="navPlugins" aria-label="Plugin pages"></nav>
+    <div id="navRecentWrap" hidden><div class="slabel">Recent</div><nav id="navRecent" aria-label="Recent meetings"></nav></div>
+    <div id="navFoldersWrap" hidden><div class="slabel"><span class="grow">Folders</span><button class="ib" type="button" id="addFolder" aria-label="New folder" title="New folder">+</button></div><nav id="navFolders" aria-label="Folders"></nav></div>
+    <div class="side-bottom"><a class="nav" id="requestFeature" href="https://github.com/mkdsrt10/cora-ai-meeting-notes/issues/new?template=feature_request.yml" target="_blank" rel="noopener" data-track="request_feature" title="Opens a public GitHub issue in your browser"><span class="ico" aria-hidden="true">💡</span><span class="lbl">Request a feature</span></a><a class="nav" id="starRepo" href="https://github.com/mkdsrt10/cora-ai-meeting-notes" target="_blank" rel="noopener" data-track="open_github" title="Opens Cora on GitHub in your browser"><span class="ico" aria-hidden="true">★</span><span class="lbl">Star us on GitHub</span></a><button class="nav" type="button" data-go="settings"><span class="ico" aria-hidden="true">⚙</span><span class="lbl">Settings</span></button></div>
+  </aside>
+  <main id="main" tabindex="-1">
+    <header class="top">
+      <button class="ib" type="button" id="expandSidebar" aria-label="Show sidebar" title="Show sidebar (⌘\)" hidden>⇥</button>
+      <div class="crumb" id="crumb"></div>
+      <div class="grow"></div>
+      <div id="topActions"></div>
+    </header>
+    <div class="update" id="updateBanner" role="status" hidden>
+      <div><strong id="updateBannerText"></strong> <span class="muted" id="updateBannerReason"></span> <span class="fail" id="updateBannerError"></span></div>
+      <span class="grow"></span><button class="btn q" id="updateLaterBtn" type="button">Later</button><button class="btn pri" id="updateNowBtn" type="button">Update</button>
+    </div>
+    <div id="page"></div>
+  </main>
+</div>
+<aside class="peek" id="confirmPanel" role="dialog" aria-label="Review suggestion" hidden></aside>
+<div class="bar" id="selectionBar" role="toolbar" aria-label="Selected Action items" hidden></div>
+<div class="scrim" id="palette" hidden></div>
+<div class="tour" id="tourOverlay" role="dialog" aria-modal="true" aria-labelledby="tourTitle" hidden>
+  <div class="tc">
+    <img id="tourImage" alt="">
+    <div class="tb"><div class="muted" id="tourStep"></div><h2 id="tourTitle"></h2><p id="tourBody"></p></div>
+    <div class="tf"><button class="btn q" id="tourSkip" type="button">Skip</button><span class="tour-dots grow" id="tourDots" aria-hidden="true"></span>
+      <button class="btn" id="tourBack" type="button" hidden>Back</button><button class="btn pri" id="tourNext" type="button">Next</button></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<!-- Markup for reused classic panels (js/providers.js binds to it at load);
+     Settings moves it into the open panel and parks it here again. -->
+<div id="v2Park" hidden><div data-parked="byom">
+<h3 class="sec">Bring your own key</h3>
+            <div class="seg byom-tabs" id="byomPresetTabs"></div>
+            <p class="muted" id="byomPresetNote"></p>
+
+            <div class="field" id="byomBaseUrlField">
+              <label for="byomBaseUrl">Base URL</label>
+              <input type="text" id="byomBaseUrl" class="inp" spellcheck="false" autocomplete="off">
+            </div>
+            <label class="byom-advanced" id="byomAdvancedField"><input type="checkbox" id="byomAdvanced"> Change base URL</label>
+
+            <div class="field" id="byomKeyField">
+              <label for="byomKey"><span id="byomKeyLabel">API key</span> <span class="badge" id="byomKeySaved" hidden>Saved</span></label>
+              <input type="password" id="byomKey" class="inp" autocomplete="off" spellcheck="false">
+            </div>
+
+            <div class="field">
+              <label for="byomModel">Model</label>
+              <div class="byom-model-row">
+                <input type="text" id="byomModel" class="inp" list="byomModelList" spellcheck="false" autocomplete="off">
+                <button class="btn sm" id="byomLoadModels" type="button">Load models</button>
+              </div>
+              <datalist id="byomModelList"></datalist>
+            </div>
+
+            <div class="field" id="byomAsrField">
+              <label for="byomAsrModel">Transcription model (optional)</label>
+              <input type="text" id="byomAsrModel" class="inp" spellcheck="false" autocomplete="off">
+            </div>
+
+            <div id="byomVertexField" hidden>
+              <button class="btn sm" id="byomOpenVertex" type="button">Use Google Cloud (Vertex AI) instead</button>
+            </div>
+
+            <p class="onboarding-error" id="byomError" style="display:none;margin-top:8px"></p>
+            <p class="onboarding-success" id="byomSuccess" style="display:none;margin-top:8px"></p>
+
+            <div style="display:flex;gap:8px;margin-top:16px">
+              <button class="btn" id="byomTestBtn" type="button">Test</button>
+              <button class="btn pri" id="byomSaveBtn" type="button">Save</button>
+            </div>
+</div></div>
+
+<script src="/js/lib.js"></script>
+<script src="/js/usage.js"></script>
+<script src="/v2/js/shell.js"></script>
+<script src="/v2/js/surfaces.js"></script>
+<script src="/v2/js/data.js"></script>
+<script src="/v2/js/sidebar.js"></script>
+<script src="/v2/js/palette.js"></script>
+<script src="/js/processing.js"></script>
+<script src="/js/processing-history.js"></script>
+<script src="/js/model-setup.js"></script>
+<script src="/js/providers.js"></script>
+<script src="/js/transcript.js"></script>
+<script src="/js/tour.js"></script>
+<script src="/js/update-banner.js"></script>
+<script src="/js/pulse.js"></script>
+<script src="/v2/js/confirm.js"></script>
+<script src="/v2/js/meeting.js"></script>
+<script src="/v2/js/settings.js"></script>
+<script src="/v2/js/settings-panels.js"></script>
+<script src="/v2/js/pages.js"></script>
+<script src="/v2/js/home.js"></script>
+<script src="/v2/js/init.js"></script>
+</body>
+</html>

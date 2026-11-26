@@ -60,8 +60,44 @@ function renderOnboardingPeopleList(){
   }));
 }
 
+let onboardingRecommendation = null;
+
+function onboardingIsLocalMode(){
+  const mode = $('#onboardingProcessing [data-processing="mode"]')?.value;
+  return !!mode && mode.startsWith('local');
+}
+
+// Whisper/Qwen lists only apply to local modes; the Gemini key only to Cloud.
+function syncOnboardingLocalModels(){
+  const local = onboardingIsLocalMode();
+  $('#onboardingLocalModels').hidden = !local;
+  const key = $('#onboardingCloudKey');
+  if(key) key.hidden = local;
+}
+
+// The three mode cards drive the (hidden) mode select of the shared controls.
+function renderOnboardingModeCards(){
+  const select = $('#onboardingProcessing [data-processing="mode"]');
+  $('#onboardingModeCards').innerHTML = processingModeCards(onboardingRecommendation, select?.value);
+  $$('#onboardingModeCards input[name="processingMode"]').forEach(input => input.addEventListener('change', () => chooseOnboardingMode(input.value)));
+}
+
+function chooseOnboardingMode(mode){
+  const host = $('#onboardingProcessing');
+  if(!host?.querySelector('[data-processing="mode"]')) return;
+  if(confirmProcessingMode(mode, onboardingRecommendation)) applyProcessingMode(host, mode);
+  renderOnboardingModeCards();
+  syncOnboardingLocalModels();
+}
+
 async function loadOnboardingModels(){
   try{
+    onboardingRecommendation = await loadProcessingControls('#onboardingProcessing', { embedded: true, preferRecommended: true });
+    $('#onboardingLowRam').innerHTML = lowRamBanner(onboardingRecommendation);
+    const modeField = $('#onboardingProcessing [data-processing="mode"]')?.closest('label');
+    if(modeField) modeField.hidden = true;
+    renderOnboardingModeCards();
+    syncOnboardingLocalModels();
     const res = await api('/api/onboarding/models');
     if(!onboardingSelectedWhisperModel) onboardingSelectedWhisperModel = (res.whisper_options || [])[0]?.id;
     if(!onboardingSelectedLiquidModel) onboardingSelectedLiquidModel = res.selected_liquid_model;
@@ -105,7 +141,14 @@ async function refreshPermissionStatus(){
   paint($('#permMicStatus'), status.microphone);
   paint($('#permScreenStatus'), status.screen);
   if($('#permAccessibilityStatus')) paint($('#permAccessibilityStatus'), status.accessibility);
+  // Microphone picker appears once mic access is granted; optional (unset = System default).
+  const micField = $('#onboardingMicrophoneField');
+  if(micField){
+    micField.hidden = status.microphone !== 'granted';
+    if(!micField.hidden) await loadMicrophonePicker('#onboardingMicrophone');
+  }
 }
+wireMicrophonePicker('#onboardingMicrophone', '#onboardingMicrophoneRefresh');
 
 async function openOnboarding(){
   $('#onboardingOverlay').style.display = 'flex';
@@ -177,6 +220,7 @@ $('#modalBtnSave')?.addEventListener('click', () => {
   doSaveCredentials('modal', () => setTimeout(closeCredentialsModal, 700));
 });
 
+$('#onboardingCloudKeyBtn')?.addEventListener('click', () => openCredentialsModal());
 $('#closeCredentialsModal')?.addEventListener('click', closeCredentialsModal);
 $('#credentialsModal')?.addEventListener('click', (e) => {
   if (e.target.id === 'credentialsModal') closeCredentialsModal();
@@ -192,6 +236,7 @@ $('#permRecheckBtn')?.addEventListener('click', refreshPermissionStatus);
 
 async function saveSetting(key, value){
   await api('/api/settings', { method: 'POST', body: JSON.stringify({ key, value }) });
+  trackSettingChanged(key, value);
 }
 
 $('#onboardingFinish')?.addEventListener('click', async () => {
@@ -201,10 +246,19 @@ $('#onboardingFinish')?.addEventListener('click', async () => {
     if(name) await api('/api/onboarding/name', { method: 'POST', body: JSON.stringify({ name }) });
     if(profession) await saveSetting('profession', profession);
     await saveSetting('meeting_types', [...onboardingSelectedMeetingTypes]);
-    if(onboardingSelectedWhisperModel) await saveSetting('whisper_model_choice', onboardingSelectedWhisperModel);
-    if(onboardingSelectedLiquidModel) await saveSetting('liquid_model', onboardingSelectedLiquidModel);
+    if(onboardingIsLocalMode()){
+      if(onboardingSelectedWhisperModel) await saveSetting('whisper_model_choice', onboardingSelectedWhisperModel);
+      if(onboardingSelectedLiquidModel) await saveSetting('liquid_model', onboardingSelectedLiquidModel);
+    }
     await saveSetting('retain_audio', $('#onboardingRetainAudio').checked);
+    const processingMode = $('#onboardingProcessing [data-processing="mode"]')?.value || null;
+    await saveProcessingControls("#onboardingProcessing");
     await api('/api/onboarding/complete', { method: 'POST', body: '{}' });
+    track('onboarding_completed', { processing_mode: processingMode });
+    // Setup lives in the classic page; the new look is the default once it is done.
+    const shell = await api('/api/settings?key=ui_shell').catch(() => ({}));
+    if(shell.value === 'v2'){ location.assign('/v2/'); return; }
     closeOnboarding();
+    maybeShowTour();  // tour.js
   }catch(error){ toast(error.message, true); }
 });

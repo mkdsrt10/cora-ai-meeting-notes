@@ -24,103 +24,18 @@ PYTHON = paths.venv_python()
 API_TOKEN_FILE = paths.API_TOKEN_FILE
 sys.path.insert(0, str(ROOT))
 import db  # noqa: E402
-from plugin_registry import get_coaching_plugin  # noqa: E402
+import plugin_host  # noqa: E402
 
-# ARCHETYPES only exists when the coaching plugin is installed and enabled;
-# with it absent/disabled this is just an empty dict, and every endpoint that
-# does ARCHETYPES.get(...) below degrades to a no-op rather than an error.
-ARCHETYPES = (get_coaching_plugin().ARCHETYPES if get_coaching_plugin() else {})
 
-ARCHETYPE_OPTIONS = [
-    {
-        "id": "auto",
-        "archetype_id": None,
-        "label": "Auto-detect Archetype (Recommended)",
-        "hat": "Cora Intelligence",
-        "tip": "Cora analyzes meeting dynamics and selects the optimal coaching rubric.",
-        "frequency": "Automatic"
-    },
-    {
-        "id": "1",
-        "archetype_id": 1,
-        "label": "1 · Technical Steering & Architecture",
-        "hat": "Chief Architect",
-        "tip": "State verdict in first 15s · Bound by hard SLAs & token constraints · Assign spec owner",
-        "frequency": "High (~50% of meetings)"
-    },
-    {
-        "id": "4",
-        "archetype_id": 4,
-        "label": "4 · Strategic L10 & Cross-Functional",
-        "hat": "Strategic Lead",
-        "tip": "Keep airtime <15% · Translate technical bottlenecks to business impact · Strict IDS",
-        "frequency": "High (~20% of meetings)"
-    },
-    {
-        "id": "5",
-        "archetype_id": 5,
-        "label": "5 · Client Solutioning & Commercials",
-        "hat": "Solution Strategist",
-        "tip": "Anchor on client ROI · Defend scope & unit economics · Lock sign-off milestone",
-        "frequency": "Frequent (~15% of meetings)"
-    },
-    {
-        "id": "2",
-        "archetype_id": 2,
-        "label": "2 · Execution Control & Standup",
-        "hat": "Operating Lead",
-        "tip": "Target <15m · Airtime 20-30% · Parking Lot rule (<30s redirect) · Rule of 4",
-        "frequency": "Frequent (~10% of meetings)"
-    },
-    {
-        "id": "7",
-        "archetype_id": 7,
-        "label": "7 · Solo Ideation & Voice Memo",
-        "hat": "Thought Partner",
-        "tip": "Unconstrained flow · Auto-structures audio into Core Thesis, Dependencies & Spec",
-        "frequency": "Specialized"
-    },
-    {
-        "id": "3",
-        "archetype_id": 3,
-        "label": "3 · Talent Multiplication (1:1 Mentoring)",
-        "hat": "Player-Coach",
-        "tip": "Socratic questions > lecture (>=2:1) · Synthesis test (learner recaps plan in final 15%)",
-        "frequency": "High leverage"
-    },
-    {
-        "id": "6",
-        "archetype_id": 6,
-        "label": "6 · Talent Acquisition (Interviews)",
-        "hat": "Technical Evaluator",
-        "tip": "Candidate airtime >70% · 2-min pitch max · 3-level depth probing (Why? What broke?)",
-        "frequency": "High stakes"
-    },
-    {
-        "id": "8",
-        "archetype_id": 8,
-        "label": "8 · Content Creation & Loom",
-        "hat": "Presenter",
-        "tip": "Deliver core hook in first 10s · Zero filler tolerance · Crisp vocal energy",
-        "frequency": "Asynchronous"
-    },
-]
+def archetypes() -> dict[int, dict[str, Any]]:
+    """Coaching rubric archetypes by id while the Coaching plugin is enabled;
+    {} otherwise, so tagging a Recording with an archetype is a no-op.
+    TODO(plugins): tag with core meeting_types instead and drop this."""
+    if not plugin_host.is_enabled("coaching"):
+        return {}
+    from plugins.coaching import engine
+    return engine.ARCHETYPES
 
-if get_coaching_plugin() is None:
-    # Without the coaching plugin, archetype selection is a no-op (ARCHETYPES
-    # is empty) — only offer "auto" so the UI doesn't advertise a rubric list
-    # that does nothing.
-    ARCHETYPE_OPTIONS = [opt for opt in ARCHETYPE_OPTIONS if opt["id"] == "auto"]
-
-MODE_LABELS = {opt["id"]: opt["label"] for opt in ARCHETYPE_OPTIONS}
-MODE_LABELS.update({str(opt["archetype_id"]): opt["label"] for opt in ARCHETYPE_OPTIONS if opt["archetype_id"]})
-MODE_LABELS.update({
-    "free": "Auto-detect Archetype",
-    "story": "Storytelling",
-    "negotiation": "Negotiation",
-    "direction": "Giving direction",
-    "pronunciation": "Delivery practice",
-})
 
 DATA_LOCK = threading.Lock()
 DEFAULT_DATA = {
@@ -136,28 +51,8 @@ DEFAULT_DATA = {
 }
 
 
-def _config() -> dict[str, Any]:
-    try:
-        return json.loads(paths.CONFIG_PATH.read_text())
-    except (OSError, ValueError):
-        return {}
-
-
 def current_self_name() -> str | None:
     return db.get_setting("pending_self_name") or (db.get_person(db.get_self_person_id() or "") or {}).get("name")
-
-
-def scanner_executable() -> Path:
-    """Optional helper .app that owns macOS Voice Memos access (config: scanner_app)."""
-    return Path(_config().get("scanner_app") or "/Applications/Cora Scanner.app/Contents/MacOS/CoraScanner")
-
-
-def scanner_command() -> list[str]:
-    """Kickstart the LaunchAgent whose direct executable owns macOS access."""
-    label = _config().get("scanner_launch_agent") or "ai.voicecoach.scanner"
-    if not re.fullmatch(r"[A-Za-z0-9.-]+", label):
-        raise ValueError("Invalid scanner_launch_agent label in config.json")
-    return ["/bin/launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{label}"]
 
 
 LOCAL_LLM_MODELS = [

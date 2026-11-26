@@ -1,0 +1,162 @@
+{
+ "summary": "This works and is a good fit, but it needs a separate, narrowly scoped \"mobile inbox\" listener. You can't put Tailscale Serve in front of the existing API as it stands. Serve proxies https://<mac>.<tailnet>.ts.net[:port] to http://127.0.0.1:<port>, but it passes the client's Host header through unchanged (Out.Host = In.Host). So the backend sees Host=<mac>.<tailnet>.ts.net[:8443] and Origin=https://..., and python/api/http.py authorize() rejects both: Host must be 127.0.0.1/localhost:port, and Origin is only checked after stripping \"http://\". On top of that, every POST must be JSON and is capped at 1 MB (read_json), and the per-launch token rotates on every launch. Loosening Host/Origin pinning on the main API would bring back the DNS-rebinding exposure the current design closes.\n\nRecommended design:\n1. Run a second loopback listener (e.g. 127.0.0.1:8767) that exposes only an upload route, a read-only notes route and a static mobile page.\n2. Gate it on: exact ts.net Host/Origin, a source address of 127.0.0.1, Tailscale-User-Login matching an allowlist, and a long-lived, revocable per-device token stored hashed.\n3. Stream the upload to INBOX_DIR as a temp file with a .part suffix, check it with ffprobe, then os.replace() it to .m4a. voice_memo_pipeline.discover() already scans INBOX_DIR for .m4a, so the existing pipeline picks it up.\n4. Publish it with `tailscale serve --bg --https=8443 http://127.0.0.1:8767`, never with Funnel.\n\nPhone ingest, best option first:\n- Native Voice Memos (records with the screen locked and in the background), then the Share Sheet, then a Shortcut that sends POST with the file as the body and a token header.\n- A Home Screen web app using MediaRecorder with audio/mp4 for quick memos while the screen is on. iOS mutes or ends web capture when the page is backgrounded or a call comes in, and Background Sync is not supported on iOS, so queued uploads must be sent when the app returns to the foreground.\n\nI modified no files. Tailscale behaviour was checked against the docs and the tailscale/tailscale main-branch source, fetched 2026-10-16. The iOS PWA mic-permission persistence and the Shortcuts timeouts and size limits are not officially documented; test them on a device.",
+ "facts": [
+  {
+   "claim": "Serve CLI: `tailscale serve [flags] <target>`; with `--bg`, Serve keeps running in the background and resumes automatically after a reboot or after `tailscale down`/`up`; without `--bg` it runs in the foreground and must be restarted by hand. Flags: --https=<port> (default listener, TLS terminated by tailscaled with an automatically provisioned cert), --http, --tcp, --tls-terminated-tcp, --set-path, --accept-app-caps, --yes. Turn off by re-running the same flags plus `off` (e.g. `tailscale serve --https=443 --set-path=/foo off`), or clear everything with `tailscale serve reset`; list with `tailscale serve status [--json]`.",
+   "evidence": "https://tailscale.com/docs/reference/tailscale-cli/serve ; https://tailscale.com/kb/1242/tailscale-serve",
+   "confidence": "verified"
+  },
+  {
+   "claim": "CLI help example for the background form: `tailscale serve --bg 3000` exposes 127.0.0.1:3000. Targets can be a port, localhost:PORT, http://127.0.0.1:PORT, or `unix:/path.sock`. Reverse proxies only support http://127.0.0.1.",
+   "evidence": "github.com/tailscale/tailscale cmd/tailscale/cli/serve_v2.go serveHelpCommon (main, fetched 2026-10-16); https://tailscale.com/docs/reference/tailscale-cli/serve",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Serve requires HTTPS certificates to be enabled for the tailnet. Enabling HTTPS requires MagicDNS (Admin console > DNS > enable MagicDNS, then HTTPS Certificates > Enable HTTPS). So MagicDNS and HTTPS are both prerequisites.",
+   "evidence": "https://tailscale.com/kb/1312/serve ('Tailscale Serve requires you to enable HTTPS certificates in your tailnet'); https://tailscale.com/kb/1153/enabling-https",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Enabling HTTPS publishes the machine FQDN and the tailnet DNS name to public Certificate Transparency logs. Tailscale's advice is not to enable it if machine names contain sensitive information.",
+   "evidence": "https://tailscale.com/kb/1153/enabling-https",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The backend sees Host = the original client Host (r.Out.Host = r.In.Host), i.e. `<mac>.<tailnet>.ts.net` or `<mac>.<tailnet>.ts.net:8443`, not 127.0.0.1. Serve sets X-Forwarded-Host=<in Host>, X-Forwarded-Proto=https (when TLS) and X-Forwarded-For=<source tailnet IP> using Header.Set.",
+   "evidence": "tailscale ipn/ipnlocal/serve.go reverseProxy.ServeHTTP lines ~991-996 and addProxyForwardedHeaders lines ~1088-1096 (main)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "A client cannot spoof X-Forwarded-* through Serve. Go's httputil.ReverseProxy removes Forwarded, X-Forwarded-For, X-Forwarded-Host and X-Forwarded-Proto from the outbound request before Rewrite runs, and Serve then sets fresh values. Hop-by-hop headers, including Transfer-Encoding, are stripped and re-framed.",
+   "evidence": "golang/go src/net/http/httputil/reverseproxy.go lines ~129-132 and 517-524",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Identity headers: Serve first deletes any inbound Tailscale-User-Login, Tailscale-User-Name, Tailscale-User-Profile-Pic, Tailscale-Funnel-Request and Tailscale-Headers-Info, then sets them from WhoIs(source). Non-ASCII values are RFC 2047 Q-encoded. They are not set when the source node is tagged, or when traffic comes from outside the tailnet (Funnel traffic gets Tailscale-Funnel-Request: ?1 instead). Tailscale-App-Capabilities (v1.92+, via --accept-app-caps) is also stripped on inbound.",
+   "evidence": "tailscale ipn/ipnlocal/serve.go addTailscaleIdentityHeaders lines ~1098-1127, addAppCapabilitiesHeader ~1144; https://tailscale.com/kb/1312/serve",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The identity headers can be trusted only if the request really came through tailscaled. Tailscale's own best practice is to have the service listen only on localhost. Even then, any local process on the Mac Studio can connect to 127.0.0.1:<port> directly and forge them. External users the device is shared with also receive identity headers.",
+   "evidence": "https://tailscale.com/kb/1312/serve ('it's best practice to only have the service listen on localhost')",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Serve's HTTP server sets no request-body size limit (no MaxBytesReader) and no Read/Write timeouts; the backend transport has IdleConnTimeout 90s, TLSHandshakeTimeout 10s and ExpectContinueTimeout 1s. In practice the body limit is whatever the backend enforces.",
+   "evidence": "tailscale ipn/ipnlocal/serve.go tcpHandlerForServeTCP http.Server{} ~line 667 and getTransport ~1036-1043 (main)",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Funnel exposes the service to the public internet. It requires v1.38.3+, MagicDNS, HTTPS and a `funnel` nodeAttr, and is limited to ports 443, 8443 and 10000. Enabling Funnel from the CLI adds `{\"target\":[\"autogroup:member\"],\"attr\":[\"funnel\"]}` to nodeAttrs, which lets any member use it. Serve and Funnel cannot share a port, and whichever command ran last decides visibility. Status output reads 'Available within your tailnet:' for Serve and 'Available on the internet:' for Funnel. The two KB pages disagree: kb/1312 says Funnel is 'enabled by default', kb/1223 says 'disabled by default'.",
+   "evidence": "https://tailscale.com/kb/1223/funnel ; https://tailscale.com/kb/1312/serve ; serve_v2.go msgFunnelAvailable/msgServeAvailable lines 1043-1044",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Grants syntax: `{\"src\":[...],\"dst\":[...],\"ip\":[\"tcp:443\"]}`. The default allow-all is `{\"src\":[\"*\"],\"dst\":[\"*\"],\"ip\":[\"*\"]}`; the own-devices pattern is `{\"src\":[\"autogroup:member\"],\"dst\":[\"autogroup:self\"],\"ip\":[\"*\"]}`. autogroup:self means 'all devices owned by the same user', and tagged devices are probably excluded. User emails are valid in src/dst. Serve traffic is subject to access rules.",
+   "evidence": "https://tailscale.com/kb/1324/grants ; https://tailscale.com/docs/reference/examples/grants ; https://tailscale.com/docs/reference/targets-and-selectors",
+   "confidence": "likely"
+  },
+  {
+   "claim": "macOS variants: only the open-source tailscaled runs before login. The App Store and Standalone variants do not, though Standalone is the recommended one. The Standalone CLI is installed via Settings > CLI integration (creates /usr/local/bin/tailscale); the App Store CLI is at /Applications/Tailscale.app/Contents/MacOS/Tailscale. Serving file paths is blocked on the App Store and Standalone variants; proxying to localhost works.",
+   "evidence": "https://tailscale.com/kb/1065/macos-variants ; https://tailscale.com/kb/1080/cli ; serve_v2.go ~line 1266",
+   "confidence": "verified"
+  },
+  {
+   "claim": "iOS Tailscale VPN On Demand (iOS app 1.48+) has Wi-Fi rules (Always / Only On / Except On / Never / Do Nothing) and Cellular rules (Always / Never / Do Nothing). With 'Do Nothing', iOS can connect automatically when something accesses a *.ts.net hostname. Tailscale also ships Shortcuts actions (1.36+, iOS 15+), including Connect, Disconnect, Toggle and Get Status.",
+   "evidence": "https://tailscale.com/kb/1291/ios-vpn-on-demand ; https://tailscale.com/kb/1233/mac-ios-shortcuts",
+   "confidence": "verified"
+  },
+  {
+   "claim": "iOS Safari has supported MediaRecorder fully since 14.5, through 27.x. It records MP4/AAC (audio/mp4). Since Safari/iOS 18.4 it can also write WebM/Opus, plus ALAC/PCM. Ogg/Opus is reported broken on iOS. The WebKit example uses start(1000) timeslice chunks.",
+   "evidence": "https://caniuse.com/mediarecorder ; https://webkit.org/blog/11353/mediarecorder-api/ ; https://webkit.org/blog/16574/webkit-features-in-safari-18-4/",
+   "confidence": "verified"
+  },
+  {
+   "claim": "getUserMedia works only in secure contexts (HTTPS or localhost); otherwise navigator.mediaDevices is undefined. The publicly trusted Let's Encrypt cert from Tailscale Serve satisfies this; a plain http://100.x address does not.",
+   "evidence": "https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The Screen Wake Lock API works in Home Screen Web Apps on iOS 18.4+, so a PWA can keep the screen on while recording.",
+   "evidence": "https://webkit.org/blog/16574/webkit-features-in-safari-18-4/",
+   "confidence": "verified"
+  },
+  {
+   "claim": "iOS mutes or suspends web mic capture when the page goes to the background or a call comes in. Tracks can stay muted or reach readyState 'ended', and getUserMedia must be called again. Visibility events may not fire after a dismissed call. The bug reports date from 2017 to 2022; I found no 2026 official doc saying web capture continues with the screen locked.",
+   "evidence": "https://bugs.webkit.org/show_bug.cgi?id=208209 ; https://bugs.webkit.org/show_bug.cgi?id=204681 ; https://developer.apple.com/forums/thread/689182",
+   "confidence": "likely"
+  },
+  {
+   "claim": "Mic permission persistence for Home Screen web apps is undocumented. An old WebKit bug reports a re-prompt whenever the URL path changes in a standalone PWA. Safari tabs have a per-site Allow setting.",
+   "evidence": "https://bugs.webkit.org/show_bug.cgi?id=215884",
+   "confidence": "unverified"
+  },
+  {
+   "claim": "Background Sync (SyncManager) is not supported in any Safari or iOS Safari version, so an offline queue must flush on app open, the online event or visibilitychange.",
+   "evidence": "https://caniuse.com/background-sync",
+   "confidence": "verified"
+  },
+  {
+   "claim": "IndexedDB in a Home Screen web app gets browser-app quota (an origin can use up to 60% of disk). navigator.storage.persist() is granted by heuristics that favour Home Screen web apps, and eviction is least-recently-used. The 7-day script-writable storage cap counts Home Screen apps' own days of use, so regular use resets it.",
+   "evidence": "https://webkit.org/blog/14403/updates-to-storage-policy/ ; https://webkit.org/blog/10218/full-third-party-cookie-blocking-and-more/",
+   "confidence": "verified"
+  },
+  {
+   "claim": "In Shortcuts, Get Contents of URL with POST/PUT/PATCH adds a Request Body choice of JSON, Form or File; headers can be added with '+ Add new header'. Multipart requires choosing 'Form' with a File-typed field, and Shortcuts sets multipart/form-data itself. File sends the raw file as the body. Apple publishes no size or timeout limit; a dev-forum report mentions a ~30s intent timeout for large transfers.",
+   "evidence": "https://support.apple.com/guide/shortcuts/request-your-first-api-apd58d46713f/ios ; https://matthewcassinelli.com/actions/get-contents-of-url/ ; https://developer.apple.com/forums/thread/788242",
+   "confidence": "likely"
+  },
+  {
+   "claim": "Share-sheet Shortcuts with Audio/Files input receive Voice Memos as .m4a (AAC). Community shortcuts show this pattern, but Apple does not document Voice Memos as a share-sheet source specifically.",
+   "evidence": "https://spokenly.app/blog/voice-memo-to-text-iphone ; https://github.com/nadikaprabhath/file-upload-server-python",
+   "confidence": "likely"
+  },
+  {
+   "claim": "Current Cora gate: authorize() requires Host to be in {127.0.0.1:port, localhost:port}; Origin is compared after removeprefix('http://'), so https://*.ts.net is rejected. read_json() requires application/json and caps bodies at 1 MB. server.py refuses any non-loopback --host.",
+   "evidence": "python/api/http.py:31-53,63-69 ; python/server.py:43-44",
+   "confidence": "verified"
+  },
+  {
+   "claim": "The pipeline already ingests from INBOX_DIR (DATA_DIR/inbox) through rglob, filtered by AUDIO_SUFFIXES = {.m4a,.mp3,.wav,.aiff,.aif,.mp4,.caf,.mov}. .webm is not included, so WebM/Opus uploads would be silently ignored.",
+   "evidence": "python/voice_memo_pipeline.py:29,34,269-289 ; python/paths.py:46",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Python's stdlib cgi module (the usual multipart parser) was removed in Python 3.13 under PEP 594, so a raw-body upload (Shortcuts 'File' or fetch(blob)) is much simpler to support than multipart.",
+   "evidence": "https://peps.python.org/pep-0594/",
+   "confidence": "verified"
+  },
+  {
+   "claim": "Prior art: Obsidian Audio Inbox (iCloud-synced Voice Memos folder plus macOS Shortcuts folder automations); Whisper Memos (cloud, Shortcuts/Action button); MacWhisper for iOS (on-device). Granola has an iOS app that uses the phone mic for in-person meetings (cloud), plus an Apple Watch app from July 2026. I found no mobile companion for Hyprnote/Char or Screenpipe; both are desktop-only. I found no published guide combining Tailscale Serve, a self-hosted ASR and a Shortcut.",
+   "evidence": "https://alexanderweichart.de/5_Archive/4_Projects/audio-inbox/Obsidian-Audio-Inbox ; https://whispermemos.com/changelog/2023-10-shortcuts ; https://macwhisper.helpscoutdocs.com/article/33-macwhisper-for-ios ; https://techcrunch.com/2026/07/28/granola-launches-an-apple-watch-app/ ; https://char.com/docs/about/what-is-hyprnote ; https://docs.screenpi.pe",
+   "confidence": "likely"
+  }
+ ],
+ "design_recommendations": [
+  "Do not expose the main API (8765). Add a separate mobile gateway listener bound to 127.0.0.1:8767, in the same Python process or a sibling. It exposes only: GET / (static mobile page plus manifest and service worker), POST /m/upload, GET /m/notes, GET /m/notes/<id> (read-only summary and transcript), and POST /m/pair. It never sets or accepts the desktop vc_token, so the desktop's Host/Origin pinning and per-launch token stay exactly as they are.",
+  "Publish with Serve on a non-default HTTPS port and confirm it is tailnet-only: `tailscale serve --bg --https=8443 http://127.0.0.1:8767` then `tailscale serve status` (must print 'Available within your tailnet:'). Turn off with `tailscale serve --https=8443 off` or `tailscale serve reset`. Never run `tailscale funnel` on this node.",
+  "Gateway auth, all of which must pass. (a) Host must exactly equal FQDN or FQDN:8443, where FQDN is configured, e.g. studio.tailXXXX.ts.net. (b) Origin must be absent or equal https://FQDN[:8443]. (c) client_address[0] must be 127.0.0.1. (d) Tailscale-User-Login must be in an allowlist; optionally also run `tailscale whois --json <X-Forwarded-For>` and check it against a node-ID allowlist. (e) A per-device token sent as `Authorization: Bearer` (Shortcut) or an HttpOnly Secure SameSite=Strict cookie (PWA): mint 32 bytes, store only the sha256, compare with hmac.compare_digest, and make it revocable from desktop Settings. The headers alone are not enough, because any local process can connect directly and forge them.",
+  "Pairing: the desktop shows a one-time code or QR with a 5-minute TTL. The phone opens https://FQDN:8443/pair inside the installed Home Screen app, so the cookie lands in the PWA's own jar, and POSTs the code. The server mints the device token, which you name and can list and revoke. For the Shortcut, show the token once so you can paste it into the header.",
+  "Upload handler: require Content-Length and return 411 on chunked. Go re-frames requests without a length as chunked, and BaseHTTPRequestHandler does not decode chunked bodies. Enforce a cap (e.g. 512 MB) and return 413 above it. Stream in 1 MB chunks to INBOX_DIR/.mobile-<uuid>.m4a.part (the .part suffix keeps rglob/AUDIO_SUFFIXES from picking it up), fsync, run ffprobe to confirm it is audio, then os.replace() to INBOX_DIR/<UTC>_mobile_<device>.m4a and return 202 {id}. Accept a raw body (Content-Type audio/mp4, audio/x-m4a or audio/webm) rather than multipart, since the stdlib has no multipart parser in 3.13+. Either transcode WebM to .m4a with ffmpeg, or add .webm to AUDIO_SUFFIXES. Make uploads idempotent with an X-Cora-Client-Id header (a UUID per recording) so retried uploads don't create duplicates.",
+  "Shortcut ('Send to Cora', Show in Share Sheet, input: Audio and Files): optionally run Tailscale 'Connect' first; then Get Contents of URL to https://FQDN:8443/m/upload with Method POST, Headers `Authorization: Bearer <token>`, `Content-Type: audio/mp4`, `X-Filename: <Shortcut Input Name>`, and Request Body File = Shortcut Input; then Show Notification with the result. On the phone, set Tailscale VPN On Demand to 'Do Nothing' (so *.ts.net triggers a connect) or to Always.",
+  "PWA recorder: `const s = await navigator.mediaDevices.getUserMedia({audio:true}); const rec = new MediaRecorder(s, MediaRecorder.isTypeSupported('audio/mp4') ? {mimeType:'audio/mp4', audioBitsPerSecond:64000} : {}); rec.ondataavailable = e => idbPut(recId, seq++, e.data); rec.start(5000); s.getAudioTracks()[0].onmute = onInterrupted; wake = await navigator.wakeLock?.request('screen');`. Also call navigator.storage.persist(). On visibilitychange to hidden or on track mute/ended, stop and seal the segment and show 'recording interrupted'. Upload sealed recordings as one Blob via `fetch('/m/upload',{method:'POST',headers:{'Content-Type':'audio/mp4','X-Cora-Client-Id':recId},body:blob})`, and on success delete them from IndexedDB. Flush the queue on load, the online event and visibilitychange to visible. Do not register Background Sync.",
+  "Position the paths honestly. For long or in-pocket recordings, use native Voice Memos and share it to the Shortcut: it records with the screen locked, and the file sits safely on the phone until the upload succeeds. The PWA is for quick memos with the screen on. A zero-code fallback already exists: iCloud Voice Memos sync to the Mac Studio's Voice Memos folder, which Cora scans. But that routes audio through iCloud, so don't use it under lockdown or for PHI.",
+  "Tailnet policy. In a personal single-user tailnet the default autogroup:self grant is enough. In a shared or work tailnet, remove the allow-all grant and add `\"groups\":{\"group:cora-owner\":[\"<owner login>\"]}, \"tagOwners\":{\"tag:cora\":[\"autogroup:admin\"]}, \"grants\":[{\"src\":[\"group:cora-owner\"],\"dst\":[\"tag:cora\"],\"ip\":[\"tcp:8443\"]}]`. Keep any `funnel` nodeAttr away from tag:cora. Keep the phone user-owned (untagged), because identity headers are dropped for tagged sources. Disable key expiry on the Mac Studio and consider Tailnet Lock.",
+  "Mac Studio always-on: use the Standalone Tailscale with CLI integration. It does not run before login, and neither does Cora/Electron, so keep a logged-in session (auto-login or never log out) and prevent system sleep. `--bg` Serve config is restored automatically after a reboot. Give the machine a non-identifying name and a randomized tailnet DNS name before enabling HTTPS (Certificate Transparency exposure).",
+  "Enterprise lockdown: mobile ingress is inbound over WireGuard and nothing leaves the owner's devices in plaintext, so it does not violate the existing 'no outbound' guarantee. Still, gate it behind an explicit `mobile_ingress` setting that is off by default, and refuse to start it when VOICECOACH_ENTERPRISE_LOCKDOWN=1 unless an admin key allows it. Log every pairing, upload and revocation, with device ID, Tailscale login and byte count but no content, for the SOC 2 evidence trail."
+ ],
+ "risks": [
+  "Security: loosening the current Host/Origin/token gate in python/api/http.py so that Serve works would reopen DNS rebinding and cross-site exposure on the full API (settings, credentials, recordings). Keep mobile on a separate, minimal surface.",
+  "Security: anything running locally on the Mac Studio can forge Tailscale identity headers by connecting directly to 127.0.0.1:8767. A device token, plus an optional `tailscale whois` check of X-Forwarded-For, is required on top of the headers.",
+  "Compliance (SOC 2, HIPAA): enabling Tailscale HTTPS publishes the machine FQDN and tailnet name to public CT logs, so the Mac Studio name must not identify customers or projects.",
+  "Compliance: the `funnel` nodeAttr may already sit in the tailnet policy for autogroup:member, and the docs contradict each other on the default. One mistyped `tailscale funnel` on port 8443 would publish the endpoint to the internet. Audit the policy and remove or narrow the attribute.",
+  "Shortcut credential exposure: the bearer token is stored in plain text inside the Shortcut, which syncs through iCloud and can be shared. Use per-device tokens that can be revoked, and still require the Tailscale login match.",
+  "Data residency: Voice Memos with iCloud sync and the iCloud fallback both put the audio in Apple iCloud. That conflicts with enterprise_lockdown and PHI handling, so document the phone-side settings (turn Voice Memos iCloud off) for regulated use.",
+  "Reliability: iOS web capture stops or mutes when the page is backgrounded, the screen locks or a call comes in, and does not always recover or tell the page. A PWA recording can silently lose audio unless you watch track mute/ended, use Wake Lock and persist chunks.",
+  "Reliability: no Background Sync on iOS, so PWA uploads only go out while the app is open. Shortcuts timeouts for large uploads are undocumented (one report mentions ~30s). Return 202 immediately after the file is stored and do the processing asynchronously; test 30-60 min memos (about 30-60 MB) over cellular.",
+  "Protocol gap: Go's proxy may forward bodies without a length as Transfer-Encoding: chunked, which Python's BaseHTTPRequestHandler does not decode. Reject with 411 or implement chunked decoding, otherwise uploads can hang or arrive truncated.",
+  "Pipeline gap: AUDIO_SUFFIXES excludes .webm, and rglob on INBOX_DIR would pick up a partially written .m4a. Write to a .part file and rename atomically, and either normalize to .m4a or add .webm.",
+  "Unverified: whether a Home Screen web app keeps mic permission across launches on iOS 26/27 (an old WebKit bug reports re-prompts on path change), and whether Voice Memos lists Shortcuts in its share sheet on the current iOS. Both need a device test before you commit to the UX.",
+  "Availability: the Standalone Tailscale and the Electron app need a logged-in macOS session. After a power loss without auto-login, the phone will get connection errors until someone logs in; the Shortcut and PWA should show that clearly and keep the audio queued on the phone."
+ ]
+}

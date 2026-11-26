@@ -7,6 +7,7 @@ This module fixes up the process environment and starts the server.
 from __future__ import annotations
 
 import os
+import signal
 import sys
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -20,10 +21,11 @@ from pathlib import Path
 # silently failed on every recording whenever Cora wasn't launched from a
 # terminal, with no way to tell from a plain subprocess.run() error. Fixing
 # PATH here, before anything else in this process can shell out, covers
-# every such call for the rest of the process's life.
+# every such call for the rest of the process's life. Appended, not
+# prepended: the release app puts its bundled ffmpeg first on PATH.
 for _brew_bin in ("/opt/homebrew/bin", "/usr/local/bin"):
     if _brew_bin not in os.environ.get("PATH", "").split(os.pathsep):
-        os.environ["PATH"] = _brew_bin + os.pathsep + os.environ.get("PATH", "")
+        os.environ["PATH"] = os.environ.get("PATH", "") + os.pathsep + _brew_bin
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import credentials  # noqa: E402
@@ -49,12 +51,71 @@ def main() -> None:
     credentials._sanitize_db()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Cora: http://{args.host}:{args.port}", flush=True)
+    # Electron stops the server with SIGTERM (pythonProcess.kill()); turn it
+    # into the same clean exit as Ctrl-C so the beta sender's final flush runs.
+    signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
+    import usage_events
+    usage_events.seed_display_name()  # beta builds, once: name teammates who onboarded before 0.4.4
+    import threading
+    threading.Thread(target=_backfill_identity, name="identity-backfill", daemon=True).start()
+    threading.Thread(target=_scan_crash_reports, name="crash-reports", daemon=True).start()
+    threading.Thread(target=_daily_hooks, name="plugins-daily", daemon=True).start()
+    import beta_sender
+    # The port is bound; the daily people_snapshot (a walk of the Recordings
+    # folder), the config fetch and the first flush all run on its thread.
+    beta_sender.start()
+    import audio_pruning
+    audio_pruning.start()  # first pass now on its thread, then after each job and every 6 h
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.server_close()
+        audio_pruning.stop()
+        beta_sender.stop(final_flush=True)
+
+
+def _scan_crash_reports() -> None:
+    """Our processes' macOS crash reports since the last check, as
+    crash_report Usage events (python/crash_reports.py)."""
+    try:
+        import crash_reports
+        found = crash_reports.scan()
+        if found:
+            print(f"[crash_reports] {found} crash report(s) recorded", flush=True)
+    except Exception as e:  # noqa: BLE001 - never stops the server
+        print(f"[crash_reports] scan failed: {type(e).__name__}: {e}", flush=True)
+
+
+def _daily_hooks() -> None:
+    """Plugins' daily Hook (e.g. Notion's Task cache and status pull), once a
+    day, checked hourly. A failing plugin is isolated by the host."""
+    import time
+
+    import plugin_host
+    while True:
+        try:
+            plugin_host.run_daily_if_due()
+        except Exception as e:  # noqa: BLE001 - never stops the server
+            print(f"[plugins] daily hook failed: {type(e).__name__}", flush=True)
+        time.sleep(3600)
+
+
+def _backfill_identity() -> None:
+    """0.4.5, once per Install: Recordings Cora captured before then get the
+    mic-track identity, so they stop asking which speaker is you."""
+    try:
+        from pipeline.speakers import backfill_mic_track_identity
+        written = backfill_mic_track_identity()
+        if written:
+            print(f"[identity] mic-track identity written for {written} earlier Recording(s)", flush=True)
+    except Exception as e:  # noqa: BLE001 - a backfill must never stop the server
+        print(f"[identity] backfill failed: {type(e).__name__}: {e}", flush=True)
+
+
+def _raise_keyboard_interrupt(signum, frame) -> None:
+    raise KeyboardInterrupt
 
 
 if __name__ == "__main__":

@@ -1,25 +1,161 @@
-// Settings view: profile, models, cloud providers, MCP config.
+// Settings view: profile, models, MCP config, logs (providers and keys: providers.js).
 // Classic script sharing global scope with the other files in index.html (load order matters).
 
 // --- Settings ---
 $$('.settings-nav-item').forEach(tab => tab.addEventListener('click', () => {
   $$('.settings-nav-item').forEach(t => t.classList.toggle('active', t === tab));
   $$('.settings-panel').forEach(p => p.hidden = p.dataset.settingsContent !== tab.dataset.settingsPanel);
+  if(tab.dataset.settingsPanel === 'recording') return loadMicrophonePicker('#settingsMicrophone');
+  if(tab.dataset.settingsPanel === 'beta') return loadBetaSettings();
+  if(tab.dataset.settingsPanel === 'connections') return renderConnectionsSettings().catch(error => toast(error.message, true));
 }));
+
+// --- Beta (share toggle, name for the Cora team, what is shared, audio retention) ---
+const BETA_NUMBER_FIELDS = { '#settingsAudioRetentionDays': 'audio_retention_days', '#settingsAudioCapMb': 'audio_cap_mb' };
+
+async function loadBetaSettings(){
+  try{
+    const keys = ['share_usage', 'beta_display_name', ...Object.values(BETA_NUMBER_FIELDS)];
+    const values = await Promise.all(keys.map(key => api(`/api/settings?key=${key}`).then(r => r.value)));
+    const byKey = Object.fromEntries(keys.map((key, i) => [key, values[i]]));
+    $('#settingsShareUsage').checked = byKey.share_usage === true;
+    $('#settingsBetaName').value = byKey.beta_display_name || '';
+    for(const [selector, key] of Object.entries(BETA_NUMBER_FIELDS)){
+      $(selector).value = byKey[key] == null ? '' : String(byKey[key]);
+      $(selector).dataset.saved = $(selector).value;
+    }
+  }catch(error){ toast(error.message, true); }
+  await loadShareStatus();
+}
+
+// What the sender can actually do, under the toggle: a switched-on toggle in a
+// build with no receiver used to look like sharing while nothing ever left the Mac.
+const SHARE_OFF_TEXT = {
+  no_receiver: "This copy of Cora can't share with the Cora team: it was built without the team's receiver. Update to the latest version, or reinstall from the team setup page.",
+  lockdown: 'Sharing is off: enterprise lockdown is on.',
+};
+
+function shareStatusText(status){
+  if(!status || typeof status !== 'object') return '';
+  if(status.sharing_off_reason) return SHARE_OFF_TEXT[status.sharing_off_reason] || '';
+  if(status.sharing_enabled !== true) return '';
+  if(status.last_error) return `Last send failed: ${status.last_error}`;
+  const waiting = status.unsent_events ? `${status.unsent_events} events waiting to send.` : '';
+  if(status.last_flush_at) return `Last sent ${new Date(status.last_flush_at).toLocaleString()}.${waiting ? ' ' + waiting : ''}`;
+  return waiting;
+}
+
+async function loadShareStatus(){
+  const el = $('#settingsShareStatus');
+  if(!el) return;
+  let text = '';
+  try{ text = shareStatusText(await api('/api/beta/status')); }catch{}
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+$('#settingsShareUsage')?.addEventListener('change', async (e) => {
+  try{ await saveSetting('share_usage', e.target.checked); toast(e.target.checked ? 'Sharing with the Cora team' : 'Sharing turned off'); }
+  catch(error){ toast(error.message, true); }
+  await loadShareStatus();
+});
+
+$('#settingsBetaName')?.addEventListener('change', async (e) => {
+  try{ await saveSetting('beta_display_name', e.target.value.trim() || null); toast('Saved'); }
+  catch(error){ toast(error.message, true); }
+});
+
+for(const [selector, key] of Object.entries(BETA_NUMBER_FIELDS)){
+  $(selector)?.addEventListener('change', async (e) => {
+    const field = e.target;
+    try{
+      await saveSetting(key, Number(field.value));
+      field.dataset.saved = field.value;
+      toast('Saved');
+    }catch(error){
+      field.value = field.dataset.saved ?? '';
+      toast(error.message, true);
+    }
+  });
+}
+
+$('#settingsShowShared')?.addEventListener('click', async () => {
+  try{
+    const res = await api('/api/events/export');
+    if(window.electronAPI?.revealPath) await window.electronAPI.revealPath(res.path);
+    else await api('/api/open-folder', { method: 'POST', body: '{}' });  // the export sits in the data folder
+  }catch(error){ toast(error.message, true); }
+});
+
+// --- Microphone picker (Settings > Recording, and the onboarding permissions step) ---
+// Options: "System default" (value '', saved as null), then every input
+// device by its macOS name, the current system default annotated. Re-listed
+// from the capture helper each time it is shown and on Refresh.
+const microphoneDevices = {};  // select selector -> devices last listed into it
+
+async function loadMicrophonePicker(selector){
+  const select = $(selector);
+  if(!select) return;
+  try{
+    const [list, saved] = await Promise.all([
+      api('/api/audio-devices'),
+      api('/api/settings?key=microphone'),
+    ]);
+    const devices = list.devices || [];
+    microphoneDevices[selector] = devices;
+    const chosen = saved.value || null;
+    const match = chosen && (devices.find(d => d.unique_id === chosen.unique_id) || devices.find(d => d.name === chosen.name));
+    // A saved choice that is not plugged in stays visibly chosen (recordings
+    // still ask for it and fall back to System default), not shown as System default.
+    const missing = chosen && !match && chosen.unique_id
+      ? [{value: chosen.unique_id, label: `${chosen.name || chosen.unique_id} (not connected)`, attrs: ' selected disabled'}]
+      : [];
+    const options = [{value: '', label: 'System default'}].concat(missing, devices.map(d => ({
+      value: d.unique_id, label: d.name + (d.is_default ? ' (system default)' : ''),
+    })));
+    select.innerHTML = options.map(o => `<option value="${esc(o.value)}"${o.attrs || ''}>${esc(o.label)}</option>`).join('');
+    select.value = match ? match.unique_id : missing.length ? chosen.unique_id : '';
+  }catch(error){ toast(error.message, true); }
+}
+
+// Saves on change (System default clears the setting); Refresh re-lists.
+function wireMicrophonePicker(selector, refreshSelector){
+  $(selector)?.addEventListener('change', async (e) => {
+    const device = (microphoneDevices[selector] || []).find(d => d.unique_id === e.target.value);
+    try{
+      await saveSetting('microphone', device ? { unique_id: device.unique_id, name: device.name } : null);
+      toast('Saved — used from the next recording');
+    }catch(error){ toast(error.message, true); }
+  });
+  $(refreshSelector)?.addEventListener('click', () => loadMicrophonePicker(selector));
+}
+wireMicrophonePicker('#settingsMicrophone', '#settingsMicrophoneRefresh');
 
 let settingsSelectedMeetingTypes = new Set();
 
 async function loadSettingsView(){
+  const recordingPanel = $$('.settings-panel').find(p => p.dataset.settingsContent === 'recording');
+  if(recordingPanel && !recordingPanel.hidden) loadMicrophonePicker('#settingsMicrophone');
+  const betaPanel = $$('.settings-panel').find(p => p.dataset.settingsContent === 'beta');
+  if(betaPanel && !betaPanel.hidden) loadBetaSettings();
   try{
     const status = await api('/api/onboarding/status');
     if($('#settingsName')) $('#settingsName').value = status.self_name || '';
     if($('#settingsProfession')) $('#settingsProfession').value = status.profession || '';
   }catch(error){ toast(error.message, true); }
+  try{
+    const [work, contextOn] = await Promise.all(['work_context', 'notes_context_enabled'].map(key =>
+      api('/api/settings', { method: 'POST', body: JSON.stringify({ key }) })));
+    if($('#settingsWorkContext')) $('#settingsWorkContext').value = work.value || '';
+    if($('#settingsNotesContext')) $('#settingsNotesContext').checked = contextOn.value === true;
+  }catch{}
 
   try{
     const retain = await api('/api/settings', { method: 'POST', body: JSON.stringify({ key: 'retain_audio' }) });
     if($('#settingsRetainAudio')) $('#settingsRetainAudio').checked = retain.value !== false;
   }catch{}
+
+  await loadOpenAtLogin();
 
   try{
     const res = await api('/api/onboarding/meeting-types');
@@ -37,45 +173,14 @@ async function loadSettingsView(){
     }));
   }catch(error){ toast(error.message, true); }
 
+  await loadProcessingControls("#settingsProcessing");
   await renderSettingsModels();
   await loadMcpSettings();
   loadLogsSettings();
-  try {
-    const credsRes = await api('/api/credentials/status');
-    const c = credsRes.credentials || {};
-    if (c.has_anthropic_key && $('#settingsAnthropicKey')) $('#settingsAnthropicKey').placeholder = '•••••••••••••••••••••••• (Saved in Keychain)';
-    if (c.has_openai_key && $('#settingsOpenAIKey')) $('#settingsOpenAIKey').placeholder = '•••••••••••••••••••••••• (Saved in Keychain)';
-    if (c.has_ai_studio_key && $('#settingsGeminiKey')) $('#settingsGeminiKey').placeholder = '•••••••••••••••••••••••• (Saved in Keychain)';
-    if (c.custom_llm_url && $('#settingsCustomUrl')) $('#settingsCustomUrl').value = c.custom_llm_url;
-    if (c.anthropic_model && $('#settingsAnthropicModel')) $('#settingsAnthropicModel').value = c.anthropic_model;
-    if (c.openai_model && $('#settingsOpenAIModel')) $('#settingsOpenAIModel').value = c.openai_model;
-    if (c.gemini_model && $('#settingsGeminiModel')) $('#settingsGeminiModel').value = c.gemini_model;
-  } catch (e) {}
+  await loadProviderSettings();
 }
-
-async function renderAsrEngine(){
-  const select = $('#settingsAsrEngine');
-  if(!select) return;
-  try{
-    const status = await api('/api/models/status');
-    select.value = status.whisper?.engine || 'local';
-    const locked = !!status.whisper?.lockdown;
-    select.disabled = locked;
-    $('#settingsAsrEngineNote').textContent = locked
-      ? 'Enterprise lockdown is on — transcription always runs on this Mac.'
-      : 'Cloud transcription uses the Google credentials from "Cloud LLMs & APIs"; each speech chunk is uploaded to Google.';
-  }catch{}
-}
-
-$('#settingsAsrEngine')?.addEventListener('change', async (e) => {
-  try{
-    await saveSetting('transcription_engine', e.target.value);
-    toast(e.target.value === 'local' ? 'Transcribing on this Mac.' : 'Cloud transcription on — audio is sent to Google.');
-  }catch(error){ toast(error.message, true); }
-});
 
 async function renderSettingsModels(){
-  renderAsrEngine();
   const host = $('#settingsModelRows');
   if(!host) return;
   try{
@@ -114,8 +219,8 @@ async function renderSettingsModels(){
         <div class="settings-model-icon">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
         </div>
-        <div><div class="model-title">Live transcription (streaming)</div><div class="model-sub">Coming soon — will use the transcription model above, in short chunks</div></div>
-        <span class="badge">Coming soon</span>
+        <div><div class="model-title">Live captions (Live transcript)</div><div class="model-sub">Off, on this Mac, or Cloud (Vertex): choose it under Processing → Live captions</div></div>
+        <span class="badge">Processing</span>
       </div>
     `;
     $('#settingsWhisperModel').value = currentWhisper;
@@ -151,13 +256,45 @@ $('#settingsProfileSave')?.addEventListener('click', async () => {
   try{
     if(name) await api('/api/onboarding/name', { method: 'POST', body: JSON.stringify({ name }) });
     await saveSetting('profession', profession);
+    if($('#settingsWorkContext')) await saveSetting('work_context', $('#settingsWorkContext').value);
     toast('Profile saved');
   }catch(error){ toast(error.message, true); }
+});
+
+$('#settingsNotesContext')?.addEventListener('change', async (e) => {
+  try{ await saveSetting('notes_context_enabled', e.target.checked); toast('Saved — used on the next notes run'); }
+  catch(error){ toast(error.message, true); }
 });
 
 $('#settingsRetainAudio')?.addEventListener('change', async (e) => {
   try{ await saveSetting('retain_audio', e.target.checked); toast('Saved'); }
   catch(error){ toast(error.message, true); }
+});
+
+// --- Open Cora at login (Preferences) ---
+// The macOS login item, read from and written through main (src/main/menu-bar.js),
+// which also stores the choice (open_at_login). Hidden outside the app.
+async function loadOpenAtLogin(){
+  const row = $('#settingsOpenAtLoginRow');
+  const toggle = $('#settingsOpenAtLogin');
+  if(!row || !toggle) return;
+  const bridge = window.electronAPI;
+  row.hidden = !bridge?.getOpenAtLogin;
+  if(row.hidden) return;
+  try{ toggle.checked = (await bridge.getOpenAtLogin()) === true; }
+  catch(error){ toast(error.message, true); }
+}
+
+$('#settingsOpenAtLogin')?.addEventListener('change', async (e) => {
+  const wanted = e.target.checked;
+  try{
+    const now = await window.electronAPI.setOpenAtLogin(wanted);
+    e.target.checked = now === true;
+    toast(now === wanted ? (wanted ? 'Cora will open at login' : 'Cora will not open at login') : 'macOS did not accept the change', now !== wanted);
+  }catch(error){
+    e.target.checked = !wanted;
+    toast(error.message, true);
+  }
 });
 
 $('#settingsMeetingTypesSave')?.addEventListener('click', async () => {
@@ -169,27 +306,7 @@ $('#settingsOpenFolder')?.addEventListener('click', () => {
   api('/api/open-folder', { method: 'POST', body: '{}' }).catch(error => toast(error.message, true));
 });
 
-// Cloud LLMs & MCP Settings tabs
-let activeSettingsCloudProvider = 'anthropic';
-
-function switchSettingsCloudTab(provider) {
-  activeSettingsCloudProvider = provider;
-  $('#settingsTabAnthropic')?.classList.toggle('active', provider === 'anthropic');
-  $('#settingsTabOpenAI')?.classList.toggle('active', provider === 'openai');
-  $('#settingsTabGemini')?.classList.toggle('active', provider === 'gemini');
-  $('#settingsTabCustom')?.classList.toggle('active', provider === 'custom');
-
-  if ($('#settingsAnthropicForm')) $('#settingsAnthropicForm').style.display = provider === 'anthropic' ? 'block' : 'none';
-  if ($('#settingsOpenAIForm')) $('#settingsOpenAIForm').style.display = provider === 'openai' ? 'block' : 'none';
-  if ($('#settingsGeminiForm')) $('#settingsGeminiForm').style.display = provider === 'gemini' ? 'block' : 'none';
-  if ($('#settingsCustomForm')) $('#settingsCustomForm').style.display = provider === 'custom' ? 'block' : 'none';
-}
-
-$('#settingsTabAnthropic')?.addEventListener('click', () => switchSettingsCloudTab('anthropic'));
-$('#settingsTabOpenAI')?.addEventListener('click', () => switchSettingsCloudTab('openai'));
-$('#settingsTabGemini')?.addEventListener('click', () => switchSettingsCloudTab('gemini'));
-$('#settingsTabCustom')?.addEventListener('click', () => switchSettingsCloudTab('custom'));
-
+// MCP settings
 async function loadMcpSettings() {
   try {
     const res = await api('/api/mcp/config');
@@ -218,78 +335,6 @@ $('#copyMcpCursorBtn')?.addEventListener('click', () => {
 $('#copyMcpCliBtn')?.addEventListener('click', () => {
   const text = $('#mcpClaudeCodeCmd')?.textContent;
   if (text) { copyText(text); toast('Copied CLI command to clipboard.'); }
-});
-
-$('#settingsCredTestBtn')?.addEventListener('click', async () => {
-  const p = activeSettingsCloudProvider;
-  let payload = { provider: p };
-  if (p === 'anthropic') {
-    payload.api_key = $('#settingsAnthropicKey')?.value.trim();
-    payload.model = $('#settingsAnthropicModel')?.value;
-  } else if (p === 'openai') {
-    payload.api_key = $('#settingsOpenAIKey')?.value.trim();
-    payload.model = $('#settingsOpenAIModel')?.value;
-  } else if (p === 'gemini') {
-    payload.api_key = $('#settingsGeminiKey')?.value.trim();
-    payload.model = $('#settingsGeminiModel')?.value;
-  } else if (p === 'custom') {
-    payload.location = $('#settingsCustomUrl')?.value.trim();
-    payload.api_key = $('#settingsCustomKey')?.value.trim();
-    payload.model = $('#settingsCustomModel')?.value.trim();
-  }
-  const errEl = $('#settingsCredError');
-  const succEl = $('#settingsCredSuccess');
-  if (errEl) errEl.style.display = 'none';
-  if (succEl) succEl.style.display = 'none';
-  try {
-    const res = await api('/api/credentials/test', { method: 'POST', body: JSON.stringify(payload) });
-    if (succEl) {
-      succEl.textContent = `✅ ${res.message || 'Connected successfully!'}`;
-      succEl.style.display = 'block';
-    }
-    toast('Connection verified.');
-  } catch (err) {
-    if (errEl) {
-      errEl.textContent = `⚠️ ${err.message}`;
-      errEl.style.display = 'block';
-    }
-  }
-});
-
-$('#settingsCredSaveBtn')?.addEventListener('click', async () => {
-  const p = activeSettingsCloudProvider;
-  let payload = { provider: p };
-  if (p === 'anthropic') {
-    payload.api_key = $('#settingsAnthropicKey')?.value.trim();
-    payload.model = $('#settingsAnthropicModel')?.value;
-  } else if (p === 'openai') {
-    payload.api_key = $('#settingsOpenAIKey')?.value.trim();
-    payload.model = $('#settingsOpenAIModel')?.value;
-  } else if (p === 'gemini') {
-    payload.api_key = $('#settingsGeminiKey')?.value.trim();
-    payload.model = $('#settingsGeminiModel')?.value;
-  } else if (p === 'custom') {
-    payload.base_url = $('#settingsCustomUrl')?.value.trim();
-    payload.api_key = $('#settingsCustomKey')?.value.trim();
-    payload.model = $('#settingsCustomModel')?.value.trim();
-  }
-  const errEl = $('#settingsCredError');
-  const succEl = $('#settingsCredSuccess');
-  if (errEl) errEl.style.display = 'none';
-  if (succEl) succEl.style.display = 'none';
-  try {
-    await api('/api/credentials/save', { method: 'POST', body: JSON.stringify(payload) });
-    if (succEl) {
-      succEl.textContent = `✅ Key saved and secured with Apple Keychain.`;
-      succEl.style.display = 'block';
-    }
-    toast('API credentials saved.');
-  } catch (err) {
-    if (errEl) {
-      errEl.textContent = `⚠️ ${err.message}`;
-      errEl.style.display = 'block';
-    }
-  }
 });
 
 // --- Notifications & logs ---
@@ -387,3 +432,12 @@ async function sendLogsBundle(send){
 
 $('#logsBundleSaveBtn')?.addEventListener('click', () => sendLogsBundle(false));
 $('#logsBundleSendBtn')?.addEventListener('click', () => sendLogsBundle(true));
+
+// UI shell v2 (docs/specs/ui-shell-v2.md): the switch is the stored setting
+// ui_shell, which the main process reads to pick the page on every launch.
+async function tryNewLook(){
+  await api('/api/settings', { method: 'POST', body: JSON.stringify({ key: 'ui_shell', value: 'v2' }) });
+  trackAction('change_setting');
+  location.assign('/v2/');
+}
+$('#settingsTryNewLook')?.addEventListener('click', () => tryNewLook().catch(error => toast(error.message, true)));

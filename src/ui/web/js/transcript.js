@@ -14,6 +14,9 @@ function transcriptSegments(record){
       speaker: seg.speaker_id === 'You' ? (record.self_name || 'You') : (seg.speaker_name || seg.speaker_id || 'Unknown'),
       speakerId: seg.speaker_id || '',
       source: seg.speaker_source || '',
+      // Which engine produced the turn: a cloud Window the cloud engine kept
+      // rejecting is transcribed locally ("local") or left as a gap ("gap").
+      engine: seg.engine || '', reason: seg.reason || '',
     }));
   }
   const out = [];
@@ -33,15 +36,84 @@ function speakerChoices(record, segments){
 }
 
 function transcriptAsText(segments){
-  return segments.filter(s => s.text && s.text !== '!')
-    .map(s => `[${s.start}–${s.end}] ${s.speaker}: ${s.text}`).join('\n\n');
+  return segments.filter(isShownTurn)
+    .map(s => s.engine === 'gap' ? `[${s.start}–${s.end}] ${gapText(s)}` : `[${s.start}–${s.end}] ${s.speaker}: ${s.text}`).join('\n\n');
 }
+
+const isShownTurn = s => s.engine === 'gap' || (s.text && s.text !== '!');
+const gapText = s => `[not transcribed: ${s.reason || 'unknown reason'}]`;
+
+// --- Live transcript (captions while recording) ---
+// GLOSSARY "Live transcript". Read from GET /api/recording/live-transcript
+// with a byte cursor (the 2 s detail poll calls renderCleanTranscript), and
+// topped up by live-caption IPC from main for partials between polls.
+let liveView = null;   // { id, cursor, lines: Map key -> line, loading }
+
+const liveKey = l => `${l.recording_id || l.chunkId}:${l.track}:${l.seg}`;
+
+function liveViewFor(id){
+  if(!liveView || liveView.id !== id) liveView = { id, cursor: 0, lines: new Map(), loading: null };
+  return liveView;
+}
+
+function drawLiveTranscript(view, label){
+  const host = $('#notepadTranscript');
+  if(!host || !liveView || liveView !== view) return;
+  const lines = [...view.lines.values()].sort((a, b) => (a.start - b.start) || (a.track === 'mic' ? -1 : 1));
+  const rows = lines.map(l => `
+      <div class="timeline-turn live-turn${l.final ? '' : ' live-partial'}"><div class="timeline-turn-head">
+        <span class="timeline-speaker">${esc(l.track === 'mic' ? 'You' : (l.speaker || 'Them'))}</span>
+        <span class="timeline-time">${fmtDuration(l.start)}</span></div>
+        <p class="timeline-text">${esc(l.text)}</p></div>`).join('');
+  const retryBtn = view.retry ? ` <button type="button" class="button secondary small" data-retry-processing="${esc(view.id)}">Retry</button>` : '';
+  host.innerHTML = `<p class="muted live-transcript-label">${esc(label)}${retryBtn}</p>${rows || '<p class="muted">Captions appear here as people speak.</p>'}`;
+}
+
+async function renderLiveTranscript(record, label = 'Live captions · a draft until processing finishes', retry = false){
+  ['#editTranscriptBtn', '#saveTranscriptBtn', '#cancelTranscriptBtn', '#transcriptEditHint'].forEach(sel => { if($(sel)) $(sel).hidden = true; });
+  const view = liveViewFor(record.id);
+  view.retry = retry;
+  drawLiveTranscript(view, label);
+  if(view.loading) return;
+  view.loading = (async () => {
+    try{
+      for(let i = 0; i < 20; i++){
+        const res = await api(`/api/recording/live-transcript?id=${encodeURIComponent(record.id)}&since=${view.cursor}`);
+        res.lines.forEach(l => view.lines.set(liveKey(l), l));
+        const done = res.cursor === view.cursor;
+        view.cursor = res.cursor;
+        if(done || !res.lines.length) break;
+      }
+    }catch{ /* captions are best effort */ }
+    view.loading = null;
+    drawLiveTranscript(view, label);
+  })();
+}
+
+function liveLabel(tv){
+  return tv.label === 'Live captions' ? 'Live captions · a draft until processing finishes'
+    : `${tv.label} · from the live captions${tv.retry ? '; processing did not finish' : ''}`;
+}
+
+window.electronAPI?.onLiveCaption?.(c => {
+  if(!liveView || !c || (c.recordingId !== liveView.id && c.chunkId !== liveView.id)) return;
+  if(c.dropped) liveView.lines.delete(liveKey(c));   // a mic echo of the other side
+  else liveView.lines.set(liveKey(c), { recording_id: c.chunkId, track: c.track, seg: c.seg, speaker: c.speaker,
+    start: c.start, end: c.end, text: c.text, final: c.final });
+  const shown = selectedRecording();
+  if(shown?.id === liveView.id && shown.transcript_view?.source === 'live') drawLiveTranscript(liveView, liveLabel(shown.transcript_view));
+});
 
 function renderCleanTranscript(record){
   // The final, processed transcript — one row per turn with speaker and time
   // range. Meeting Timeline stays the raw live-event log.
   const host = $('#notepadTranscript');
   if(!host) return;
+  // Which transcript to show is the server's call (transcript_view): captions
+  // while recording, the full transcript once ready, else the Live transcript
+  // as "Draft transcript" (with Retry when processing failed). No toggle.
+  const tv = record?.transcript_view;
+  if(tv?.source === 'live') return renderLiveTranscript(record, liveLabel(tv), Boolean(tv.retry));
   if(transcriptEditingFor !== record?.id){ transcriptEditing = false; transcriptEditingFor = record?.id; }
   const segments = transcriptSegments(record);
   const editable = segments.length > 0 && segments[0].index !== null;
@@ -59,9 +131,13 @@ function renderCleanTranscript(record){
   }
 
   if(!transcriptEditing){
-    host.innerHTML = segments.filter(s => s.text && s.text !== '!').map(s => `
+    host.innerHTML = segments.filter(isShownTurn).map(s => s.engine === 'gap' ? `
+      <div class="timeline-turn transcript-gap"><div class="timeline-turn-head">
+        <span class="timeline-speaker"></span>
+        <span class="timeline-time">${esc(s.start)}–${esc(s.end)}</span></div>
+        <p class="timeline-text">${esc(gapText(s))}</p></div>` : `
       <div class="timeline-turn"><div class="timeline-turn-head">
-        <span class="timeline-speaker">${esc(s.speaker)}${s.source === 'manual' ? '<span class="speaker-source">edited</span>' : ''}</span>
+        <span class="timeline-speaker">${esc(s.speaker)}${s.source === 'manual' ? '<span class="speaker-source">edited</span>' : ''}${s.engine === 'local' ? '<span class="engine-note">transcribed on this Mac</span>' : ''}</span>
         <span class="timeline-time">${esc(s.start)}–${esc(s.end)}</span></div>
         <p class="timeline-text">${esc(s.text)}</p></div>`).join('');
   } else {
@@ -90,7 +166,11 @@ function renderCleanTranscript(record){
   }
 
   const copyBtn = $('#copyTranscriptBtn');
-  if(copyBtn) copyBtn.onclick = () => { copyText(transcriptAsText(segments)); toast('Transcript copied with speakers and timestamps.'); };
+  if(copyBtn) copyBtn.onclick = () => {
+    copyText(transcriptAsText(segments));
+    toast('Transcript copied with speakers and timestamps.');
+    if(record?.id) track('notes_exported', { recording_id: record.id, kind: 'copy' });
+  };
   if(editBtn) editBtn.onclick = () => { transcriptEditing = true; renderCleanTranscript(record); };
   if(cancelBtn) cancelBtn.onclick = () => { transcriptEditing = false; renderCleanTranscript(record); };
   if(saveBtn) saveBtn.onclick = () => saveTranscriptEdits(record, segments);
@@ -116,6 +196,7 @@ async function saveTranscriptEdits(record, segments){
   try{
     await api('/api/recording/transcript/edit', { method: 'POST', body: JSON.stringify({ id: record.id, edits }) });
     transcriptEditing = false;
+    track('transcript_corrected', { recording_id: record.id, corrections: edits.length });
     toast(`Saved ${edits.length} correction${edits.length === 1 ? '' : 's'}. Re-summarize to refresh the notes.`);
     await loadSelectedRecording(record.id);
   }catch(err){ toast(err.message, true); }

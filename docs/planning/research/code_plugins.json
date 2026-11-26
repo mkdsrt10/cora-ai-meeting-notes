@@ -1,0 +1,159 @@
+{
+ "summary": "Cora does not have a plugin system yet. What it has is one feature-flagged module that core code reaches into by name. python/plugin_registry.py (59 lines) reads DATA_DIR/config.json `plugins.<id>.enabled`. Its only loader, get_coaching_plugin() at :48-59, imports `plugins.coaching.engine` directly and caches the module, or None, for the life of the process. There is no discovery, no manifest, no plugin API version, no lifecycle hooks, no route or UI registration and no per-plugin storage. paths.PLUGINS_DIR (paths.py:28) is defined but never used. A 'plugin' is a Python module that the core imports and whose functions core calls with fixed signatures.\n\nThe coaching plugin (plugins/coaching/engine.py) does Gemini archetype classification (text, :547-577), a Gemini audio coaching pass (:615-651) and local numpy delivery metrics (pace/pause/filler/pitch, :85-282). It persists results to core DB columns (`coaching`, `delivery_metrics`) and to fixed filenames in the recording folder. It has no data layer of its own: it imports nine private helpers from core diarization.py plus db directly. coach_engine.py (a local heuristic scorer) and core python/gemini_coach.py are dead code with no importers.\n\nThe coupling also runs the other way. Its HTTP routes live in core (python/api/routes/coaching.py, statically imported at api/routes/__init__.py:2). Core view-models compute coaching-specific stages and scores (api/views.py:336-360). The DB schema has coaching columns (db.py:37-38). Core invalidates coaching artifacts by filename (diarization.py:332-337). The archetype taxonomy is copied in five places (meeting_types.py, engine.py ARCHETYPES, api/core.py ARCHETYPE_OPTIONS, src/main.js MEETING_ARCHETYPES, the engine classification prompt), and the names have already drifted.\n\nThe only automatic trigger is the 'auto-pilot' block inside the cloud-only diarization.diarize() (:663-688). The default local pipeline (pipeline/runner.py) has no plugin hook. The renderer UI never calls /api/gemini-coach or /api/confirm-and-coach. So in practice coaching runs only through the cloud-diarize path or a manual API call.\n\nThe MCP server (python/mcp_server.py) is a separate stdio process. It reads SQLite directly, read-only, through 13 tools, 4 resources and 2 prompts. It is hard-coded to an older coaching schema, does not respect the plugin flag, and is not governed by policy.py lockdown. It is the most practical extension surface today (agents such as Claude can already pull transcripts, notes and action items), but plugins cannot add tools to it.\n\nIf a third party wrote a plugin today, nothing would load it. They would have to edit plugin_registry.py, add a route module to api/routes/__init__.py, add DB columns and the db.py field allowlists, edit views.py to surface the data, and patch src/ui/web (strict CSP, script-src 'self', with a static, ordered script list in index.html). They would also have to call private diarization.py helpers. Any import error makes the plugin vanish silently, and a config toggle needs a server restart.",
+ "key_files": [
+  {
+   "path": "python/plugin_registry.py",
+   "role": "Entire 'registry'. Config read (:26-38), hard-coded coaching defaults (:19-23), coaching_enabled (:41-42), hard-wired import of plugins.coaching.engine with process-lifetime cache and silent ImportError (:45-59)."
+  },
+  {
+   "path": "plugins/coaching/engine.py",
+   "role": "Coaching plugin implementation: delivery metrics (:85-282), ARCHETYPES (:285-294), classification prompt/schema (:297-344), coaching prompt/schema (:347-544), Gemini-only classify (:547-577), resolve_archetype aliases (:580-612), coach() entry point (:615-651), markdown render (:654-693). Imports core internals at :18-29."
+  },
+  {
+   "path": "plugins/coaching/__init__.py",
+   "role": "Declares PLUGIN_ID/PLUGIN_NAME/REQUIRES_CLOUD (:23-25). The registry never reads this metadata."
+  },
+  {
+   "path": "plugins/coaching/coach_engine.py",
+   "role": "Legacy local heuristic scorer (WPM/filler/silencedetect). Unused by server; the README says it is kept as a reference for a no-cloud mode."
+  },
+  {
+   "path": "plugins/coaching/backfill_delivery_metrics.py",
+   "role": "Maintenance script that imports plugins.coaching.engine directly. Uses repo-root paths (:10-12), not paths.DATA_DIR."
+  },
+  {
+   "path": "plugins/coaching/README.md",
+   "role": "Plugin docs. Claims graceful degradation and a Files API deletion that the code does not match."
+  },
+  {
+   "path": "python/api/routes/coaching.py",
+   "role": "The plugin's HTTP endpoints, living in core: POST /api/confirm-and-coach (:12-23) and POST /api/gemini-coach (:26-35). Return 404 when disabled; the coach() call runs synchronously in the request thread."
+  },
+  {
+   "path": "python/api/routes/__init__.py",
+   "role": "Static import list of route modules (:2). The only route registration mechanism."
+  },
+  {
+   "path": "python/api/router.py",
+   "role": "@route registry (exact and prefix match, duplicate detection). Reusable for plugin routes if modules were discovered dynamically."
+  },
+  {
+   "path": "python/api/core.py",
+   "role": "Pulls ARCHETYPES from the plugin at import time (:27,:32). Hard-coded ARCHETYPE_OPTIONS rubric copy (:34-107), filtered when plugin is off (:109-113). Legacy MODE_LABELS (:115-123) and coaching DEFAULT_DATA goals/reflections (:126-136)."
+  },
+  {
+   "path": "python/api/views.py",
+   "role": "Core view-model hard-codes coaching: delivery_payload (:160-190), coaching validity with a model allowlist (:336-341), the needs_diarization/needs_speaker_confirmation/ready_for_coaching/coached stage machine (:346-353), scores/archetype/top_priority (:354-412), dashboard 'plugins' payload hard-coded to coaching only (:522-524)."
+  },
+  {
+   "path": "python/diarization.py",
+   "role": "Core diarization. Imports the registry (:26). confirm_speaker invalidates coaching (:323-329), clear_coaching_artifacts hard-codes plugin file and column names (:332-337), auto-pilot hook calling coaching_plugin.coach() only on the cloud path (:663-691). Also the private helpers the plugin depends on (:182, :192, :342, :348, :421)."
+  },
+  {
+   "path": "python/db.py",
+   "role": "recordings table has coaching and delivery_metrics columns (:37-38). update/get_recording_data field allowlists (:367, :375). Generic settings KV (:212-225). todo_state table (:87-94) with a getter only (:571-573)."
+  },
+  {
+   "path": "python/pipeline/runner.py",
+   "role": "Default local pipeline. No plugin hook anywhere. Final DB writes (:339-343), retain_audio deletion (:376-378), continuation merge that leaves coaching stale (:383-428), hard-coded enhanced-notes sections (:311-318)."
+  },
+  {
+   "path": "python/mcp_server.py",
+   "role": "Read-only stdio MCP server, a separate process reading SQLite directly. 13 tools, 4 resources, 2 prompts. Coaching hard-coded to a stale schema (:87-107, :307-320, :433-465, :513-522, :717-730). No plugin gating, no policy check, no way to register tools."
+  },
+  {
+   "path": "python/meeting_types.py",
+   "role": "Core copy of the archetype taxonomy (:19-28) that must be manually synced with the plugin (docstring :11-13). Only consumer is api/routes/settings.py:80."
+  },
+  {
+   "path": "src/main.js",
+   "role": "Electron main. Hard-coded MEETING_ARCHETYPES (:331-368), archetype picker and notification shown on every recording start regardless of plugin state (:370-425, called at :602), 'coached' check after processing (:626-646), 'Processing coaching report...' notification (:750-753), tray archetype submenu (:819-875)."
+  },
+  {
+   "path": "src/ui/web/index.html",
+   "role": "Renderer shell. Strict CSP (:6), static ordered classic-script list (:682-700), coaching stage filter (:234), coaching copy (:23, :36, :83, :421, :532). No plugin settings or toggle."
+  },
+  {
+   "path": "python/credentials.py",
+   "role": "call_configured_llm (:403-410), a single-turn prompt+system call that is provider-agnostic and policy-checked (:439-440). get_client/_build_client is the Gemini client with a lockdown check (:660-671). This is the shared LLM surface a plugin SDK should wrap."
+  },
+  {
+   "path": "python/policy.py",
+   "role": "Enterprise lockdown (:24-49). Not consulted by plugin_registry or mcp_server."
+  },
+  {
+   "path": "python/pipeline/notes.py",
+   "role": "SUMMARY_FORMATS hard-coded dict (:14-33) and generate_summary_variant (:36+, local MLX only). The natural seed for user-editable note templates and plugin-contributed formats."
+  },
+  {
+   "path": "python/gemini_coach.py",
+   "role": "Dead legacy coaching module in core (no importers). Its schema is the origin of field names that MCP and views still read."
+  }
+ ],
+ "extension_points": [
+  "python/pipeline/runner.py:343: after log_resource_usage() and before the retain_audio deletion at :376. This is the correct place for an `on_recording_processed(recording_ctx)` post-process hook that fans out to every enabled plugin while audio, transcript, notes and call_summary all exist. It must run before :376 or audio-dependent plugins (coaching delivery metrics) break.",
+  "python/diarization.py:663-688: the existing coaching auto-pilot block (cloud path only). Replace it with the same generic hook dispatcher so the cloud and local paths behave identically.",
+  "python/diarization.py:287-337: confirm_speaker/clear_coaching_artifacts/reset_speaker. Replace the hard-coded filenames with an `on_identity_changed(recording_id, old, new)` hook that each plugin uses to invalidate its own artifacts.",
+  "python/pipeline/runner.py:383-428: continuation merge into the parent. Add an `on_recording_merged(parent_id, child_id)` hook; today the parent's coaching/delivery_metrics go stale.",
+  "python/plugin_registry.py:48-59: replace get_coaching_plugin() with discover() that scans PLUGINS_DIR (paths.py:28) plus a user dir under DATA_DIR for a manifest (id, version, api_version, requires_cloud, capabilities, entrypoint), imports via importlib, records load errors instead of swallowing them, and checks policy.lockdown_enabled() against requires_cloud.",
+  "python/api/routes/__init__.py:2: after the static imports, call a registry function that lets each plugin register its routes under a namespaced prefix (e.g. /api/plugins/<id>/...) using the existing api.router.route(prefix=True) at python/api/router.py:16-26.",
+  "python/api/views.py:522-524: the dashboard 'plugins' payload. Generalize it to the list of discovered plugins with enabled/requires_cloud/load_error/ui contributions so the renderer can build a Plugins settings pane and detail-page tabs.",
+  "python/api/views.py:416-448: recording_item(detailed=True). Add a `plugins: {<id>: plugin.view(recording)}` block in place of the hard-coded gemini_coaching/delivery_metrics/delivery_moments keys.",
+  "python/db.py:25-160 (init_db): add a generic `plugin_data(plugin_id, recording_id NULL, key, value JSON, updated_at, PRIMARY KEY(plugin_id, recording_id, key))` table plus a namespaced per-plugin settings accessor. This replaces adding columns to recordings and the field allowlists at :367/:375.",
+  "python/credentials.py:403-410: call_configured_llm is the shared LLM surface. Extend it to accept a messages list (multi-turn) for the roleplay/1:1 practice plugin, and expose it through a plugin context object instead of having plugins import credentials/diarization directly.",
+  "python/pipeline/notes.py:14-33: SUMMARY_FORMATS. Load from user-editable template files (DATA_DIR/templates/*.md|json) and merge in plugin-contributed formats. The existing /api/recording/summary-formats route (python/api/routes/recordings.py:22-27) already lists them for the UI.",
+  "python/mcp_server.py:44-52 and :73+: MCP server construction. Add a loop that lets enabled plugins register extra @mcp.tool/@mcp.resource/@mcp.prompt items (e.g. todos.mark_done, kb.search, roleplay.start). It also needs a policy gate.",
+  "src/ui/web/index.html:682-700 plus settings panels around :530: renderer contribution point. Under CSP script-src 'self' (index.html:6), plugin UI must be served from the same origin. Serve plugin static assets via serve_static-like handling (python/api/routes/media.py:79-84) under /plugins/<id>/ and add a manifest-driven tab/panel loader rather than editing the static script list.",
+  "src/main.js:331-368, 395-425, 819-875: the archetype picker and notifications. Drive these from dashboard_payload().plugins (or remove them), so tray and notification UX appear only when a plugin that uses meeting types is enabled."
+ ],
+ "constraints": [
+  "Enterprise lockdown (python/policy.py:24-49) promises that 'every outbound path refuses to run' (:5-8). Plugin loading must honor it up front: block or disable plugins whose manifest says requires_cloud, and route every plugin network or LLM call through credentials.call_configured_llm/get_client, which already enforce policy (credentials.py:439-440, :671). Plugins must not open their own HTTP clients.",
+  "Renderer CSP is strict: default-src 'self'; script-src 'self'; connect-src 'self'; object-src 'none'; form-action 'none' (src/ui/web/index.html:6). No inline scripts and no remote code. Plugin UI must be same-origin static files served by the Python server, and plugin JS shares globals with classic scripts (load order matters per the file headers).",
+  "The local API is loopback-only with a token gate (python/api/http.py:35-53; python/server.py:45-46). Plugin routes must go through the same Handler.authorize path. POST /api/settings (python/api/routes/settings.py:243-251) writes arbitrary keys, so a plugin UI holding the token can rewrite core settings such as retain_audio and transcription_engine. Per-plugin namespacing and an allowlist are needed before running third-party UI code.",
+  "Data sensitivity: customers include HIPAA-covered entities and DoD contractors. Third-party Python plugins run in-process with full access to SQLite (voicecoach.db), Keychain-backed credentials and audio. There is no sandbox, signing or permission model. For SOC 2, plugin install and enable must be an auditable admin action, and enterprise mode should be able to allowlist plugin IDs.",
+  "The MCP server is a separate process (python/mcp_server.py) that reads SQLite directly and is launched by external MCP clients. It is not mediated by the HTTP API, the plugin flags or policy.py. Extensions added there bypass every gate unless one is added explicitly.",
+  "Plugins currently live under APP_ROOT (paths.PLUGINS_DIR = APP_ROOT/'plugins', paths.py:28), are packaged into the Electron bundle (package.json build.files includes 'plugins/**/*'), and are imported as a Python package that needs APP_ROOT on sys.path (api/core.py:25, api/views.py:26). A user- or third-party-installable plugin needs a writable location under DATA_DIR and explicit sys.path/importlib handling.",
+  "Python API process is stdlib http.server (ThreadingHTTPServer). The coach() call runs a multi-minute Gemini audio request synchronously inside a request thread (api/routes/coaching.py:22,34). Plugin work needs a background job model with progress, like pipeline/runner.py's _write_progress / .pipeline_progress.json.",
+  "Recording identity model: plugins that analyze 'the user' depend on identity.speaker_id (diarization.py:287-329) and must be invalidated when it changes. Continuation merges (runner.py:383-428) rewrite the parent's diarization, so derived plugin data must be recomputed or cleared.",
+  "retain_audio=false deletes source audio at the end of the local pipeline (runner.py:376-378). Any audio-dependent plugin must run before that point, or degrade to transcript-only."
+ ],
+ "gaps_and_bugs": [
+  "No discovery or manifest: plugin_registry.py:48-59 hard-imports `plugins.coaching.engine`. A second plugin needs core edits in plugin_registry.py, api/routes/__init__.py:2, db.py:37-38/:367/:375, api/views.py:522-524 and the UI. PLUGINS_DIR (paths.py:28) is defined but never referenced.",
+  "Silent failure: plugin_registry.py:54-57 catches ImportError and caches None. A missing dependency (e.g. numpy, google-genai) makes coaching silently disappear with no log or UI signal.",
+  "Process-lifetime caching: plugin_registry.py:45-59 caches the module, and api/core.py:32 and :109-113 compute ARCHETYPES/ARCHETYPE_OPTIONS at import time. Toggling plugins.coaching.enabled needs a server restart, and there is no API or UI to toggle it (no plugins route in python/api/routes/settings.py, no toggle in index.html).",
+  "Coaching never runs on the default path. The auto-pilot hook exists only in the cloud diarize() (diarization.py:663-688). pipeline/runner.py:98-430 has no plugin hook. main.js:626 posts /api/process-recording without engine, so it goes local (recordings.py:222-227), and main.js:633's `analysis_stage === 'coached'` check is effectively never true. The renderer never calls /api/gemini-coach or /api/confirm-and-coach (no matches in src/).",
+  "The UX advertises coaching when it is off. main.js:602 calls promptMeetingType() ('Select an archetype for real-time executive coaching', :398) on every recording start, main.js:750-753 notifies 'Processing coaching report...', and the tray archetype submenu (:860-876) always renders. With the plugin off, /api/recording/archetype (recordings.py:117-147) silently clears the choice because ARCHETYPES is {}.",
+  "Meeting-type filter is effectively dead. src/ui/web/js/sessions.js:30 filters on r.archetype_id, which is set only through plugin ARCHETYPES (capture.py:32, recordings.py:121) or cloud classification (engine.py:576). The local pipeline never sets it. meeting_types.py:6-9 claims vocabulary/summary prompts read this taxonomy, but its only consumer is api/routes/settings.py:80.",
+  "Taxonomy duplicated in five places with drift: meeting_types.py:19-28, engine.py:285-294, api/core.py:34-107, src/main.js:331-368, and engine.py:297-319 (prompt text '8 archetypes'). Names already differ: meeting_types.py:23 'Strategic / Cross-Functional' vs engine.py:289 'Strategic L10 / Cross-Functional'. main.js lists only 6 of the 8 (no 6 or 8).",
+  "Core stage machine is coaching-specific: api/views.py:346-353 ('ready_for_coaching'/'coached'), index.html:234, ui/web/js/core.js:25, mcp_server.py:166-177. With the plugin off, every confirmed recording sits at 'Ready to coach' forever.",
+  "Coaching schema drift: views.py:180 reads `strongest_moments`; mcp_server.py:310-313 and :459-463 read strongest_moments/next_practice/interaction_dynamics/pronunciation_delivery; engine.py:689-691 renders next_practice. engine.coaching_schema (:427-544) produces none of these, so the fields are always empty. Conversely, MCP never exposes what the engine does produce (counterpart_reception, jtbd, crucial_turning_point, action_items_rule_of_4, structured_summary, structured_memo).",
+  "Inaccurate privacy disclosure (SOC 2/HIPAA relevant): engine.py:642 and plugins/coaching/README.md:17-19 state that 'the remote Files API copy was deleted after analysis'. interact_with_audio actually sends inline bytes (diarization.py:428-429, Part.from_bytes) and never uses the Files API. The disclosure should state what is actually sent.",
+  "REQUIRES_CLOUD (plugins/coaching/__init__.py:25) is never read. The registry ignores policy.lockdown_enabled(), so under lockdown the coaching endpoints load and then fail deep inside credentials._build_client (credentials.py:671). The user gets a generic 500 with the LockdownError text (api/http.py:138-139) instead of a clean 'disabled by policy'.",
+  "MCP egress is outside lockdown (control gap). mcp_server.py has no policy check (grep: no `policy` import). It serves full transcripts, notes and people to any MCP client, typically a cloud LLM, even when enterprise_lockdown is on, which contradicts policy.py:5-8. Also, /api/mcp/config (api/routes/settings.py:48-74) doesn't pass VOICECOACH_DATA_DIR, so a non-default data dir points MCP at the wrong DB.",
+  "Action items cannot be tracked. todo_state (db.py:87-94) has no writer anywhere; only db.get_todo_states (:571-573) exists. mcp_server.py:614-625's is_done is always False, and the table is keyed by item_index, so a reprocess that reorders bullets would mismatch any future done-state. This blocks the 'shared todos' and 'todo app' plugin ideas until there is stable item identity.",
+  "Audio deletion breaks coaching: runner.py:376-378 deletes audio when retain_audio is false, before any hook could run. coach() needs audio (engine.py:631 find_audio) and analyze_delivery (engine.py:258) needs it too, so they raise FileNotFoundError on those recordings.",
+  "Stale derived data after continuation: runner.py:413-415 updates the parent's diarization/call_summary/metadata but leaves coaching/delivery_metrics from the first segment. target_speaker still matches, so the views (views.py:336-341) keep showing outdated scores.",
+  "Plugin depends on core internals: engine.py:18-29 imports nine private helpers from diarization.py, uses db.get/update_recording_data on core columns (:259, :281, :553, :576, :607, :616, :620, :645), and reads call_summary.json from disk (:552). Any core refactor breaks plugins, and there is no stable SDK surface.",
+  "Gemini-only coupling: classify_meeting (engine.py:547-571) uses google.genai types directly and bypasses call_configured_llm (credentials.py:403), so it can't use Anthropic, OpenAI or a local model. The coaching pass uses Gemini audio only (engine.py:634).",
+  "Hard-coded ffmpeg path: engine.py:265 uses '/opt/homebrew/bin/ffmpeg' directly. Everywhere else uses shutil.which() with a fallback (e.g. pipeline/audio.py:41, diarization.py:364), so this breaks on Intel Macs or bundled ffmpeg.",
+  "backfill_delivery_metrics.py:10-12 uses repo-root recordings/ and coach_data.json instead of paths.RECORDINGS_DIR/DATA_DIR, and reads goals from coach_data.json while live code reads db.get_setting('goals') (api/routes/coaching.py:21, diarization.py:686). There is also no API or UI to set goals at all (README's goals/reflections/practice-queue loop does not exist).",
+  "Synchronous long-running work in a request thread: api/routes/coaching.py:20-22 and :31-34 run a full Gemini audio analysis inside the HTTP handler. The auto-pilot exception is swallowed with print (diarization.py:690-691), so coaching failures are invisible.",
+  "Orphan UI: the navigation.js:7-12 click handler targets .delivery-dashboard, .delivery-audio and .delivery-event-detail, and styles.css:872-924 styles it, but nothing renders that DOM. The coaching delivery dashboard was removed from the renderer while its API payload (views.py:440-442) remains.",
+  "Dead or legacy code in core: python/gemini_coach.py has no importers. MODE_LABELS legacy modes (api/core.py:117-123: story/negotiation/direction/pronunciation) come from the unused coach_engine.py. DEFAULT_DATA goals/reflections (api/core.py:126-136) and COACH_DATA paths (api/core.py:20, api/views.py:21) remain in core.",
+  "No test coverage: tests/ has nothing for plugin_registry, the coaching routes, or the auto-pilot path.",
+  "call_configured_llm (credentials.py:403-410) is single-turn (prompt plus system_prompt string). The 1:1 roleplay plugin needs multi-turn messages and streaming, which nothing in core provides."
+ ],
+ "recommendations": [
+  "Define a minimal Plugin API v1 before writing plugin #2. Use a manifest (plugin.json: id, name, version, api_version, requires_cloud, permissions such as ['read:transcripts','write:plugin_data','llm','audio'], entrypoint, ui assets) plus a Python entrypoint exposing optional hooks: on_recording_processed(ctx), on_identity_changed(ctx), on_recording_merged(ctx), routes(router), mcp(mcp), view(recording) -> dict, summary_formats() -> dict. Give plugins a PluginContext with read-only accessors for transcript, notes, call_summary, people and identity, a namespaced plugin_data store, call_llm(messages) and a progress reporter. Plugins should stop importing diarization or db directly.",
+  "Rewrite plugin_registry as discover-and-load. Scan paths.PLUGINS_DIR (bundled first-party) plus DATA_DIR/plugins (user-installed), validate manifests, import with importlib, record load_error per plugin, skip requires_cloud plugins under policy.lockdown_enabled(), support an enterprise allowlist from config.json, and re-read the config on demand instead of using an import-time cache.",
+  "Add one dispatcher call at runner.py:343 (before retain_audio deletion at :376) and replace diarization.py:663-688 with the same call. Both pipelines then trigger plugins identically, and audio-dependent plugins run while audio exists. Run plugin hooks in a background thread with .pipeline_progress-style status, not inside HTTP requests.",
+  "Move coaching onto the API it should have used. Move api/routes/coaching.py into plugins/coaching/routes.py, and move ARCHETYPE_OPTIONS (api/core.py:34-107), delivery_payload (views.py:160-190) and the coaching fields in recording_item into plugin.view(). Replace the 'ready_for_coaching'/'coached' stages with a core 'ready' stage plus per-plugin badges. Swap clear_coaching_artifacts for the on_identity_changed hook, and store coaching in plugin_data, migrating the existing recordings.coaching/delivery_metrics columns. Coaching then becomes the reference plugin that proves the API.",
+  "Make meeting_types.py the single source of truth for meeting types. Remove the copies in api/core.py, src/main.js and engine.py ARCHETYPES, and have plugins attach rubric data by id. Drive main.js's archetype prompt and tray submenu from dashboard_payload().plugins so they appear only when a plugin needs them. Set archetype_id in the local pipeline too (e.g. LLM classification in notes generation) so the meeting-type filter works.",
+  "Add a generic plugin_data table in db.init_db() and namespaced settings (plugin:<id>:<key>). Add a stable action-item identity, such as a hash of normalized text plus recording id or a UUID assigned at notes generation, with a todo writer API, before building the shared-todos, roadmap or todo-app plugins. todo_state's item_index key cannot support them.",
+  "Extend MCP as the first public extension surface, since it is what agents and third parties can use today without touching the Electron UI. Let plugins register tools (e.g. todos.list/mark_done, kb.search_decisions, roleplay.get_scenario). Add write tools behind explicit opt-in. Gate the whole server on policy.lockdown_enabled() or an 'mcp_enabled' admin setting. Pass VOICECOACH_DATA_DIR in the generated MCP config. Fix the stale coaching fields.",
+  "For the roleplay/1:1 practice plugin, add multi-turn chat to credentials (call_configured_llm accepting a messages list, ideally streaming) and a same-origin plugin UI mount: /plugins/<id>/ static files served by a sibling of api/routes/media.py:serve_static, plus a manifest-declared detail-page tab. Both are needed to stay inside the CSP at index.html:6.",
+  "Turn pipeline/notes.py SUMMARY_FORMATS into a template registry loaded from DATA_DIR/templates/ (user-editable) plus plugin-contributed templates. Make the enhanced-notes section list in runner.py:311-318 template-driven too. This delivers the 'templates for notes conversion' production requirement and is the simplest plugin type to document first.",
+  "Fix the immediate SOC 2/HIPAA-relevant items before launch. Correct the coaching privacy_note and README Files API claim (engine.py:642, plugins/coaching/README.md:17-19) to match inline upload. Put MCP under lockdown. Namespace or allowlist POST /api/settings keys (api/routes/settings.py:243-251) before any third-party UI code can hold the API token. Document that in-process Python plugins are fully trusted code (no sandbox) and need admin-controlled install.",
+  "Small cleanups: replace engine.py:265's hard-coded ffmpeg path with shutil.which. Point backfill_delivery_metrics.py at paths.*. Delete python/gemini_coach.py, the orphan delivery-dashboard handler (navigation.js:7-12) and its CSS (styles.css:872-924), and the legacy MODE_LABELS/DEFAULT_DATA once coaching moves into the plugin. Add tests for discovery, the lockdown gating and hook dispatch."
+ ]
+}

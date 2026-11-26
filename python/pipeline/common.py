@@ -37,7 +37,13 @@ def _write_progress(folder: Path, stage: str, detail: str = "", percent: int = 0
     """A lightweight heartbeat file so the UI can show real processing state
     instead of a static "Processing..." with no way to tell active work from
     a stall. Overwritten at each stage boundary; deleted once process_recording_local
-    finishes."""
+    finishes. Each stage boundary is also marked in the run's meter
+    (python/run_meter.py) for per-stage seconds in processing_finished."""
+    try:
+        import run_meter
+        run_meter.mark_stage(stage)
+    except Exception:
+        pass
     try:
         (folder / ".pipeline_progress.json").write_text(json.dumps({
             "stage": stage,
