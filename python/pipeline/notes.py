@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any, Optional
 
@@ -142,6 +143,33 @@ _COMMITMENT_PATTERN = re.compile(
 )
 
 
+# Keep combining vowel signs attached to their words. A regex word boundary
+# can split an Indic verb before its final sign and miss ordinary punctuation.
+_ACTION_PROMISE = re.compile(
+    r"(?<!\S)(?:"
+    # Tamil
+    r"அனுப்புவேன்|செய்வேன்|பார்த்துக்கொள்கிறேன்|anuppuven|anuppuvaen|seiven|seyven|"
+    # Telugu
+    r"పంపిస్తాను|పంపుతాను|చేస్తాను|pampistaanu|pampistanu|pamputanu|chestanu|chestaanu|"
+    # Bengali
+    r"(?:পাঠাবো|পাঠাব|পাঠিয়ে দেব|করে দেব|pathabo|pathiye debo|kore debo)(?! (?:না|na)(?!\S))|"
+    # Marathi
+    r"पाठवेन|पाठवतो|पाठवते|करून देईन|pathaven|pathavto|pathavte|karun dein|"
+    # Spanish and Portuguese
+    r"(?<!no )(?:enviaré|compartiré|revisaré|voy a (?:enviar|compartir|revisar)|me encargo de)|"
+    r"(?<!não )(?<!nao )(?:enviarei|revisarei|vou enviar|vou compartilhar|vou revisar|fico de enviar)"
+    r")(?!\S)"
+)
+
+
+def _sounds_like_commitment(text: str) -> bool:
+    if _COMMITMENT_PATTERN.search(text):
+        return True
+    text = unicodedata.normalize("NFC", text.casefold())
+    words = "".join(c if c.isalnum() or unicodedata.category(c).startswith("M") else " " for c in text)
+    return bool(_ACTION_PROMISE.search(" ".join(words.split())))
+
+
 def _mine_commitment_turns(aligned_segments: list[dict[str, Any]], min_turns: int = 3) -> str:
     """Pre-filter transcript turns down to the ones that sound like an
     actual commitment ("I'll send...", "bhej dungi...") before the Action
@@ -155,7 +183,7 @@ def _mine_commitment_turns(aligned_segments: list[dict[str, Any]], min_turns: in
     matched = [
         f"{seg.get('speaker_name', 'Speaker')}: {seg['text']}"
         for seg in aligned_segments
-        if _COMMITMENT_PATTERN.search(seg.get("text", ""))
+        if _sounds_like_commitment(seg.get("text", ""))
     ]
     return "\n".join(matched) if len(matched) >= min_turns else ""
 
