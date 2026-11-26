@@ -83,7 +83,7 @@ class Contribution:
     url: str | None = None
     badge: int | str | None = None
     detail: str | None = None          # secondary text (e.g. an Account's state)
-    state: str | None = None           # chip: pending | failed | link
+    state: str | None = None           # chip: pending | failed | link | dismissed (brings it back)
     action: Action | None = None
     panel: dict[str, Any] | None = None    # {title, blocks: [{type, ...}], submit?: action id}
     proposal_key: str | None = None
@@ -147,6 +147,15 @@ def outbox_chips(ctx: SurfaceContext, service_label: str) -> list[Contribution]:
         for item_id in p.get("action_item_ids") or []:
             chips.append(Contribution("action_item.chip", "annotation", proposal_label(p), target=item_id,
                                       state=p["state"], proposal_key=p["key"], icon=ctx.plugin_id))
+    # A dismissed suggestion stays reachable: its chip brings it back (pending again).
+    linked = {lk.get("action_item_id") for lk in ctx.links}
+    for p in ctx.proposals:
+        if p.get("state") != "dismissed":
+            continue
+        for item_id in p.get("action_item_ids") or []:
+            if item_id not in linked:
+                chips.append(Contribution("action_item.chip", "annotation", f"Add to {service_label}", target=item_id,
+                                          state="dismissed", proposal_key=p["key"], icon=ctx.plugin_id))
     for link in ctx.links:
         if link.get("action_item_id"):
             chips.append(Contribution("action_item.chip", "annotation", service_label, target=link["action_item_id"],

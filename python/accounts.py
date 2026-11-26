@@ -60,16 +60,24 @@ def _fetch(service: str) -> list[tuple[str, str, bool]]:
     users: list[tuple[str, str, bool]] = []
     if service == "notion":
         me = conn.request("GET", "/users/me")
-        owner = ((me.get("bot") or {}).get("owner") or {}).get("user") or {}
+        # An integration token's /users/me is its bot (owner = the user who made
+        # it); a personal token's is the person themselves.
+        owner = me if me.get("type") == "person" else ((me.get("bot") or {}).get("owner") or {}).get("user") or {}
         cursor = None
-        for _ in range(20):
-            body = conn.request("GET", "/users", query={"page_size": 100, **({"start_cursor": cursor} if cursor else {})})
-            for u in body.get("results") or []:
-                if u.get("type") == "person" and u.get("id") and u.get("name"):
-                    users.append((str(u["id"]), str(u["name"]), u.get("id") == owner.get("id")))
-            cursor = body.get("next_cursor")
-            if not body.get("has_more") or not cursor:
-                break
+        try:
+            for _ in range(20):
+                body = conn.request("GET", "/users", query={"page_size": 100, **({"start_cursor": cursor} if cursor else {})})
+                for u in body.get("results") or []:
+                    if u.get("type") == "person" and u.get("id") and u.get("name"):
+                        users.append((str(u["id"]), str(u["name"]), u.get("id") == owner.get("id")))
+                cursor = body.get("next_cursor")
+                if not body.get("has_more") or not cursor:
+                    break
+        except connections.ConnectionFailed:
+            if not owner.get("id"):
+                raise          # no list (no "read user information" capability) and no self either
+        if owner.get("id") and owner.get("name") and not any(uid == owner["id"] for uid, _, _ in users):
+            users.append((str(owner["id"]), str(owner["name"]), True))   # at least you
     else:
         me = conn.request("POST", "/auth.test")
         cursor = ""
@@ -211,6 +219,38 @@ def person_for_name(name: str | None) -> dict[str, Any] | None:
         if len(first) == 1:
             return first[0]
     return None
+
+
+SELF_WORDS = {"you", "me", "myself", "i"}
+
+
+def is_self_owner(owner: str | None) -> bool:
+    """An Action item owner that means the user: "You"/"me", or the self Person's name."""
+    want = norm(owner or "")
+    if not want:
+        return False
+    if want in SELF_WORDS:
+        return True
+    person = person_for_name(owner)
+    return bool(person and person.get("is_self"))
+
+
+def assignee_for_owner(owner: str | None, service: str) -> tuple[dict[str, Any] | None, str]:
+    """The service user to preselect as an Action item owner's assignee, and why:
+    "self" (the owner is you), "confirmed" (their confirmed Account), "name"
+    (their full name matches exactly one user), or (None, "")."""
+    if is_self_owner(owner):
+        me = self_user(service)
+        return (me, "self") if me else (None, "")
+    account = for_owner(owner, service)
+    if account and user(service, account["id"]):
+        return user(service, account["id"]), "confirmed"
+    want = norm(owner or "")
+    if " " in want:
+        same = [u for u in users(service) if norm(u["name"]) == want]
+        if len(same) == 1:
+            return same[0], "name"
+    return None, ""
 
 
 def for_owner(owner: str | None, service: str) -> dict[str, Any] | None:

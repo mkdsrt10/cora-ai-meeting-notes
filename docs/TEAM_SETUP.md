@@ -109,3 +109,7 @@ same install by hand.
 | Meet prompt appears before you join | Same cause: without step 3 Cora only sees the Meet address, not whether you joined |
 | Settings > Beta says "built without the team's receiver" | This copy didn't come from the release. Click Update when the banner offers one, or run the step 1 command again |
 | Anything else | Send Mayank the file at `~/Library/Application Support/Cora AI Meeting Notes/logs` for that meeting (it never leaves your Mac otherwise) |
+
+## Optional: Notion
+
+To turn meeting action items into Notion Tasks, follow [NOTION_SETUP.md](NOTION_SETUP.md) (about 5 minutes).

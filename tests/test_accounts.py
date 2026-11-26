@@ -118,3 +118,22 @@ def test_confirm_refuses_an_account_not_in_the_list(port, services):
 def test_not_connected_service_has_no_row(port, keychain):
     pid = person("Odalys Brennt")
     assert call(port, "GET", f"/api/person/accounts?id={pid}")[1] == {"accounts": {}}
+
+
+def test_a_personal_token_is_you_even_without_the_user_list(services):
+    """A personal Notion token's /users/me is the person; when /users is not
+    allowed (no "read user information"), you are still known."""
+    import connections
+    notion, _ = services
+    notion.on("GET", "/users/me", {"object": "user", "type": "person", "id": "n-me", "name": "Mayank Tester"})
+    notion.fail[("GET", "/users")] = connections.ConnectionFailed("forbidden", status=403)
+    assert accounts.refresh_users("notion", force=True)
+    assert accounts.self_user("notion") == {"id": "n-me", "name": "Mayank Tester", "is_self": True}
+
+
+def test_assignee_for_owner_you_confirmed_or_unique_full_name(services):
+    accounts.refresh_users("notion", force=True)
+    assert accounts.assignee_for_owner("You", "notion") == (accounts.user("notion", "n-me"), "self")
+    assert accounts.assignee_for_owner("Odalys Brennt", "notion")[1] == "name"
+    assert accounts.assignee_for_owner("Odalys", "notion") == (None, "")        # first name alone: two people
+    assert accounts.assignee_for_owner("Zed Nobody", "notion") == (None, "")

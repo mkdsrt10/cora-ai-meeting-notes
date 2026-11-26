@@ -6,6 +6,8 @@ GET  /api/outbox/count                   pending count, for the To-dos nav badge
 POST /api/outbox/refresh                 {recording_id}: "Suggest again"
 POST /api/outbox/confirm                 {key, edits?}: the user's click; the only write path
 POST /api/outbox/dismiss                 {key}
+POST /api/outbox/restore                 {key}: undo a dismiss (pending again; nothing is sent)
+GET  /api/outbox/dismissed               dismissed in the last 30 days, newest first
 GET  /api/links?recording=<id>
 GET  /api/connections                    {service: {connected, account_label, blocked_policy}}
 POST /api/connections/connect            {service, token}: token goes to the Keychain only
@@ -74,6 +76,20 @@ def post_outbox_dismiss(req, path: str, body: dict) -> None:
     except outbox.OutboxError as exc:
         return _error(req, exc)
     return req.send_json({"ok": True, "proposal": row})
+
+
+@route("POST", "/api/outbox/restore")
+def post_outbox_restore(req, path: str, body: dict) -> None:
+    try:
+        row = outbox.restore(str(body.get("key") or ""))
+    except outbox.OutboxError as exc:
+        return _error(req, exc)
+    return req.send_json({"ok": True, "proposal": row})
+
+
+@route("GET", "/api/outbox/dismissed")
+def get_outbox_dismissed(req, path: str, query: dict) -> None:
+    return req.send_json({"proposals": outbox.dismissed()})
 
 
 @route("GET", "/api/links")

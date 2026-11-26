@@ -98,7 +98,7 @@ defineSettingsPanel('connections', { title: 'Connections', async render(host){
   const { connections } = await api('/api/connections');
   host.innerHTML = `${head('Connections', 'Your own workspaces. Cora suggests; nothing is written until you click Confirm, and every write acts as you. Tokens stay in this Mac’s Keychain.')}
     ${Object.entries(connections).map(([service, c]) => `<div class="row-set" data-connection="${esc(service)}"><div><strong>${esc(c.label || service)}</strong>
-      <small>${c.blocked_policy ? 'Blocked by your organization’s policy.' : c.connected ? `Connected${c.account_label ? ' as ' + esc(c.account_label) : ''}. Writes need your Confirm.` : 'Not connected. Paste your own token; it is kept in the macOS Keychain.'}</small></div>
+      <small>${c.blocked_policy ? 'Blocked by your organization’s policy.' : c.connected ? `Connected${c.account_label ? ' as ' + esc(c.account_label) : ''}. Writes need your Confirm.` : 'Not connected. Paste your own token; it is kept in the macOS Keychain.'}${/^https:\/\//.test(c.guide_url || '') ? ` <a href="${esc(c.guide_url)}" target="_blank" rel="noopener" data-track="open_github">Setup guide</a>` : ''}</small></div>
       ${c.connected ? `<button type="button" class="btn" data-disconnect="${esc(service)}">Disconnect</button>`
         : `<span class="filters" style="margin:0"><input type="password" class="inp" style="width:180px" autocomplete="off" data-token-for="${esc(service)}" placeholder="${esc(c.token_hint || 'Token')}" aria-label="${esc(c.label || service)} token"${c.blocked_policy ? ' disabled' : ''}><button type="button" class="btn pri" data-connect="${esc(service)}"${c.blocked_policy ? ' disabled' : ''}>Connect</button></span>`}</div>`).join('')}`;
 } });

@@ -289,3 +289,20 @@ def test_connection_refuses_under_lockdown(keychain, monkeypatch):
         connections.get("notion")
     with pytest.raises(connections.BlockedByPolicy):
         connections.Connection(connections.ADAPTERS["notion"], "tok").request("GET", "/users/me")
+
+
+def test_a_dismissed_proposal_can_be_brought_back_and_then_confirmed(port, plugin):
+    recording("ob-restore", ["Send the deck"])
+    outbox.refresh("ob-restore")
+    [key] = keys(port, "ob-restore")
+    call(port, "POST", "/api/outbox/dismiss", {"key": key})
+    assert keys(port, "ob-restore") == []
+    status, body = call(port, "GET", "/api/outbox/dismissed")
+    assert status == 200 and key in [p["key"] for p in body["proposals"]]
+    status, body = call(port, "POST", "/api/outbox/restore", {"key": key})
+    assert status == 200 and body["proposal"]["state"] == "pending"
+    assert keys(port, "ob-restore") == [key]
+    assert key not in [p["key"] for p in call(port, "GET", "/api/outbox/dismissed")[1]["proposals"]]
+    assert call(port, "POST", "/api/outbox/restore", {"key": key})[0] == 409      # only a dismissed one
+    call(port, "POST", "/api/outbox/confirm", {"key": key})
+    assert outbox.get(key)["state"] == "confirmed"

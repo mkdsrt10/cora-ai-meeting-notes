@@ -56,6 +56,17 @@ test('Suggested: in the sidebar only with pending Proposals, grouped by meeting,
   assert.deepEqual(p.posts().find((c) => c.url === '/api/outbox/confirm').body, { key: 'k1', edits: { title: 'Book the room' } });
 });
 
+test('Suggested › Dismissed: a dismissed suggestion can be brought back and reviewed again', async () => {
+  const gone = { key: 'k9', kind: 'task.create', title: 'Create “Order chairs”', state: 'dismissed', recording_id: 'r1', action_item_ids: ['a9'], fields: [{ name: 'title', label: 'Title', value: 'Order chairs' }], sends: 'A new task' };
+  const p = await open({ '/api/outbox/dismissed': { proposals: [gone] }, 'POST /api/outbox/restore': { ok: true, proposal: { ...gone, state: 'pending' } } });
+  await p.click('#navMain [data-go="suggested"]');
+  assert.match(text(p.$('#dismissedList summary')), /Dismissed · 1/);
+  await p.click('[data-restore-proposal="k9"]');
+  await p.flush();
+  assert.deepEqual(p.posts().find((c) => c.url === '/api/outbox/restore').body, { key: 'k9' });
+  assert.equal(p.$('#confirmPanel').dataset.key, 'k9');
+});
+
 test('v2 has no To-dos › Suggested tab: Suggested is a core page', async () => {
   const p = await open();
   assert.equal(p.$('[data-tab="suggested"],#todoSuggested'), null);

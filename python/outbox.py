@@ -473,6 +473,33 @@ def dismiss(key: str) -> dict[str, Any]:
     return get(key)  # type: ignore[return-value]
 
 
+def restore(key: str) -> dict[str, Any]:
+    """Undo a dismiss: the Proposal is pending again (Suggested, its chip, the
+    confirm panel). Nothing is sent; the user still has to confirm it."""
+    row = get(key)
+    if row is None or _plugin(row["plugin_id"]) is None:
+        raise OutboxError("unknown_proposal", 404)
+    if row["state"] != "dismissed":
+        raise OutboxError(f"already_{row['state']}")
+    with db.get_db() as conn:
+        _ensure(conn)
+        conn.execute("UPDATE outbox SET state = 'pending', updated_at = ? WHERE key = ?", (_now().isoformat(), key))
+        conn.commit()
+    return get(key)  # type: ignore[return-value]
+
+
+def dismissed(days: int = 30) -> list[dict[str, Any]]:
+    """Proposals of enabled plugins dismissed in the last `days`, newest first
+    (Suggested's "Dismissed" list, where each can be brought back)."""
+    cutoff = (_now() - dt.timedelta(days=days)).isoformat()
+    enabled = {p.id for p in plugin_host.enabled_plugins()}
+    with db.get_db() as conn:
+        _ensure(conn)
+        rows = [_row(r) for r in conn.execute(
+            "SELECT * FROM outbox WHERE state = 'dismissed' AND updated_at >= ? ORDER BY updated_at DESC, key", (cutoff,))]
+    return [r for r in rows if r["plugin_id"] in enabled]
+
+
 def links(*, recording_id: str | None = None, action_item_id: str | None = None,
           service: str | None = None) -> list[dict[str, Any]]:
     sql, args = "SELECT * FROM links WHERE 1 = 1", []

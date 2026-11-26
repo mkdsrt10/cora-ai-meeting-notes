@@ -150,13 +150,18 @@ def test_link_proposal_writes_a_comment_only_on_confirm(port, notion, fake_text)
     assert [(lk["external_id"], lk["kind"]) for lk in links] == [("t-pricing", "task")]
 
 
-def test_low_confidence_becomes_create_with_three_link_instead(port, notion, fake_text):
+def test_low_confidence_becomes_create_with_nearest_first_then_every_open_task(port, notion, fake_text):
+    import plugins.notion.tasks as ntasks
     fake_text.reply = model(lambda t: {"decision": "link", "task_id": "t-onboard", "confidence": 0.4})
     recording("n-low", ["Draft onboarding emails for trial users"])
     p = process("n-low")[0]
     assert p["kind"] == "task.create"
     instead = next(f for f in p["fields"] if f["name"] == "link_instead")
-    assert [o["value"] for o in instead["options"]][:2] == ["", "t-onboard"] and len(instead["options"]) <= 4
+    values = [o["value"] for o in instead["options"]]
+    assert values[:2] == ["", "t-onboard"] and instead["options"][1]["label"].startswith("★ ")
+    assert set(values[1:]) == {t["id"] for t in ntasks.open_tasks()}     # not just the 3 nearest
+    other = next(v for v in values[1:] if v != "t-onboard")
+    assert not any(o["label"].startswith("★ ") for o in instead["options"] if o["value"] == other)
     call(port, "POST", "/api/outbox/confirm", {"key": p["key"], "edits": {"link_instead": "t-onboard"}})
     assert [r["path"] for r in notion.requests if r["method"] == "POST" and "/query" not in r["path"]] == ["/comments"]
     assert outbox.links(recording_id="n-low")[0]["external_id"] == "t-onboard"
@@ -168,17 +173,23 @@ def test_model_cannot_link_to_a_task_it_was_not_shown(port, notion, fake_text):
     assert process("n-guard")[0]["kind"] == "task.create"
 
 
-def test_create_assignee_only_from_a_confirmed_account(port, notion, fake_text):
+def test_create_assignee_from_you_a_confirmed_account_or_a_unique_full_name(port, notion, fake_text):
     fake_text.reply = model(lambda t: {"decision": "create", "confidence": 0.9})
     pid = f"p_{uuid.uuid4().hex[:6]}"
     now = NOW.isoformat()
     db.upsert_person(pid, "Quill Arbuthnot", "", "", [], False, None, now, now, 0)
-    recording("n-assign", ["Book the venue (Owner: Quill Arbuthnot, Due: 2026-11-20)", "Order pizza (Owner: Zed Nobody)"])
-    venue, pizza = process("n-assign")
+    recording("n-assign", ["Book the venue (Owner: Quill Arbuthnot, Due: 2026-11-20)", "Order pizza (Owner: Zed Nobody)",
+                           "Send the deck (Owner: You)", "Call the caterer (Owner: Quill)"])
+    venue, pizza, deck, caterer = process("n-assign")
     field = {f["name"]: f for f in venue["fields"]}
-    assert field["assignee"]["value"] == "" and field["due"]["value"] == "2026-11-20"   # unconfirmed: empty
+    assert field["assignee"]["value"] == "n-quill" and field["due"]["value"] == "2026-11-20"   # exact full name
+    assert {o["value"] for o in field["assignee"]["options"]} == {"", "n-me", "n-quill"}       # everyone is offered
+    assert field["assignee"]["options"][1] == {"value": "n-me", "label": "Mira Testwell (you)"}
+    assert {f["name"]: f for f in deck["fields"]}["assignee"]["value"] == "n-me"               # your own item
+    assert {f["name"]: f for f in caterer["fields"]}["assignee"]["value"] == ""                # first name only
+    assert {f["name"]: f for f in pizza["fields"]}["assignee"]["value"] == ""                  # nobody by that name
     accounts.confirm(pid, "notion", "n-quill")
-    venue = next(p for p in process("n-assign") if p["key"] == venue["key"])            # refreshed in place
+    venue = next(p for p in process("n-assign") if p["key"] == venue["key"])                   # refreshed in place
     assert {f["name"]: f for f in venue["fields"]}["assignee"]["value"] == "n-quill"
     call(port, "POST", "/api/outbox/confirm", {"key": venue["key"]})
     call(port, "POST", "/api/outbox/confirm", {"key": pizza["key"]})

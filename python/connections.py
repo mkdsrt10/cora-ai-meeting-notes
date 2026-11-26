@@ -36,6 +36,8 @@ SERVICES = ("notion", "slack")
 # How the UI names each service and hints its token, so a renderer can draw
 # Settings › Connections from data alone (UI shell v2, ADR 0005).
 DISPLAY = {"notion": ("Notion", "secret_… / ntn_…"), "slack": ("Slack", "xoxp-…")}
+# Step-by-step setup in the public repo, linked from Settings › Connections.
+GUIDES = {"notion": "https://github.com/mkdsrt10/cora-ai-meeting-notes/blob/production/docs/NOTION_SETUP.md"}
 # 2025-09-03: a database holds one or more data sources; Tasks live in one
 # of them (plugins/notion). Older versions reject multi-source databases.
 NOTION_VERSION = "2025-09-03"
@@ -313,4 +315,5 @@ def status() -> dict[str, dict[str, Any]]:
     blocked = policy.lockdown_enabled()
     return {s: {"connected": s in rows or s in _fakes, "account_label": (rows.get(s) or {}).get("account_label") or "",
                 "checked_at": (rows.get(s) or {}).get("checked_at"), "blocked_policy": blocked,
-                "label": DISPLAY.get(s, (s.title(), ""))[0], "token_hint": DISPLAY.get(s, ("", ""))[1]} for s in SERVICES}
+                "label": DISPLAY.get(s, (s.title(), ""))[0], "token_hint": DISPLAY.get(s, ("", ""))[1],
+                "guide_url": GUIDES.get(s, "")} for s in SERVICES}

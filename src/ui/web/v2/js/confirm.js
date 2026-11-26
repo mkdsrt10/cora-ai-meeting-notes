@@ -87,6 +87,16 @@ async function findProposal(key){
   return proposals.find(p => p.key === key) || null;
 }
 
+// Undo a dismiss: pending again, then open it so it can be sent (or dismissed again).
+async function restoreProposal(key){
+  const { proposal } = await api('/api/outbox/restore', { method: 'POST', body: JSON.stringify({ key }) });
+  trackAction('restore_proposal');
+  const onChange = confirmState.onChange;
+  await onChange?.();
+  refreshSuggestedCount();
+  openConfirmPanel(proposal, { onChange });
+}
+
 async function advanceConfirmPanel(){
   const next = confirmState.queue.shift();
   confirmState.done++;
@@ -113,6 +123,11 @@ onSurfaceResult(async result => {
 
 addEventListener('click', async event => {
   const t = event.target;
+  const restore = t.closest('[data-restore-proposal]');
+  if(restore){
+    try{ await restoreProposal(restore.dataset.restoreProposal); }catch(error){ toast(error.message, true); }
+    return;
+  }
   const open = t.closest('[data-open-proposal]');
   if(open){
     try{ openConfirmPanel(await findProposal(open.dataset.openProposal)); }catch(error){ toast(error.message, true); }
@@ -139,6 +154,7 @@ addEventListener('click', async event => {
     try{
       await api('/api/outbox/dismiss', { method: 'POST', body: JSON.stringify({ key: panel.dataset.key }) });
       trackAction('dismiss_proposal');
+      toast('Dismissed. Bring it back from its “Add to …” chip or under Suggested › Dismissed.');
       await advanceConfirmPanel();
     }catch(error){ toast(error.message, true); }
   }

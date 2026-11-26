@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.6-beta.7 — 2026-11-26 (pre-beta, owner testing only)
+
+- Notion Assignee is filled in: Cora now fetches your workspace's people when it makes suggestions (it only did so from a Person page, so the list was empty and every Task showed "Unassigned"). Your own items default to you; someone else's to their confirmed Notion account, or to the one Notion user whose full name matches; everyone in the workspace can be picked. A personal Notion token is recognized as you.
+- "Or link instead to" lists every open Task: the best matches first (★), then the rest, newest first.
+- A dismissed suggestion can be brought back: its action item shows "Add to Notion", and Suggested › Dismissed lists the last 30 days with Bring back.
+- Suggested no longer scrolls sideways when a suggestion has a long title.
+- Settings › Connections links to a step-by-step Notion setup guide (docs/NOTION_SETUP.md).
+- Suggestions made before this version keep their old choices: use the meeting's ⋯ › Suggest again (Notion).
+
 ## 0.4.6-beta.6 — 2026-11-25 (pre-beta, owner testing only)
 
 - Request a feature and Star us on GitHub, in the new look's sidebar above Settings; a new Settings › Help & feedback panel (request a feature, vote on ideas, report a bug, star); both also in ⌘K, and request / bug / star links in the classic Settings. They open the public GitHub repo in your browser; nothing about you or your meetings is put in the link. Issues are public, so every entry point says not to paste meeting content or customer names.

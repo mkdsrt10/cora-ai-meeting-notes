@@ -4,7 +4,8 @@
 // ---- Suggested: every pending Proposal across meetings, grouped by meeting ----
 const KIND_NAME = { 'task.create': 'Create task', 'task.link': 'Link to task', 'task.update': 'Update task', 'task.comment': 'Comment on task', 'message.post': 'Send message', 'page.create': 'Create page' };
 async function renderSuggested(host){
-  const { proposals } = await api('/api/outbox');
+  const [{ proposals }, gone] = await Promise.all([api('/api/outbox'), api('/api/outbox/dismissed').catch(() => ({ proposals: [] }))]);
+  const dismissedRows = gone.proposals || [];
   const groups = new Map();
   for(const p of proposals){ const k = p.recording_id || ''; if(!groups.has(k)) groups.set(k, []); groups.get(k).push(p); }
   const title = id => meetingById(id)?.title || (id ? 'Meeting' : 'Not tied to a meeting');
@@ -13,7 +14,10 @@ async function renderSuggested(host){
     ${proposals.length ? [...groups].map(([id, list]) => `<section class="sgroup" data-group="${esc(id)}"><div class="grp">${id ? `<button type="button" class="btn q sm" data-go="meeting" data-id="${esc(id)}">${esc(title(id))}</button>` : esc(title(id))} · ${list.length}</div>
       ${list.map(p => `<div class="mrow sg" role="button" tabindex="0" data-open-proposal="${esc(p.key)}"><div><div class="t">${esc(p.title)}</div><div class="s">${esc(KIND_NAME[p.kind] || p.kind)}${p.state === 'failed' ? ' · last attempt failed' : ''}</div></div>
         <span></span><span></span><span class="status ${p.state === 'failed' ? 'failed' : 'draft'}">${p.state === 'failed' ? 'Failed' : 'Review'}</span></div>`).join('')}</section>`).join('')
-      : '<div class="empty"><strong>Nothing waiting.</strong>Suggestions show up here after a meeting is processed.</div>'}</div>`;
+      : '<div class="empty"><strong>Nothing waiting.</strong>Suggestions show up here after a meeting is processed.</div>'}
+    ${dismissedRows.length ? `<details class="sgroup" id="dismissedList"><summary class="grp">Dismissed · ${dismissedRows.length}</summary>
+      ${dismissedRows.map(p => `<div class="mrow sg"><div><div class="t">${esc(p.title)}</div><div class="s">${esc(KIND_NAME[p.kind] || p.kind)}${p.recording_id ? ` · ${esc(title(p.recording_id))}` : ''}</div></div>
+        <span></span><span></span><button type="button" class="btn sm" data-restore-proposal="${esc(p.key)}">Bring back</button></div>`).join('')}</details>` : ''}</div>`;
   confirmState.onChange = async () => { await refreshSuggestedCount(); if(shell.page === 'suggested') await renderSuggested($('#page')); };
   suggestedCache = proposals;
 }

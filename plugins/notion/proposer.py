@@ -5,8 +5,9 @@
   has a Notion meeting page Link. Never edits a Task's title or body (Q61).
 - task.create: a new Task in the mapped database, following the Usage
   instructions (grouped sub-steps become a checklist). Assignee only from the
-  owner's confirmed Account, else empty (Q55). A low-confidence match offers
-  the 3 nearest Tasks as "link instead". A Task with the same title created in
+  owner: you for your own items, else their confirmed Account, else a unique
+  exact full-name match, else empty; every workspace user can be picked. "Or
+  link instead to" lists the nearest Tasks first, then the other open Tasks. A Task with the same title created in
   the last day is flagged (Q31).
 - task.update: "Mark done in Notion" when a Linked To-do is ticked done in
   Cora (T8; see on_action_item).
@@ -57,6 +58,18 @@ def _recently_created(title: str) -> dict | None:
     return None
 
 
+LINK_CHOICES = 60
+
+
+def link_choices(nearest: list[dict]) -> list[dict]:
+    """'Or link instead to': the nearest Tasks first (★ in the list), then the
+    other open Tasks, newest first, up to LINK_CHOICES in all."""
+    seen = {t["id"] for t in nearest}
+    rest = sorted((t for t in tasks.open_tasks() if t["id"] not in seen),
+                  key=lambda t: str(t.get("created_time") or ""), reverse=True)
+    return (list(nearest) + rest)[:max(LINK_CHOICES, len(nearest))]
+
+
 class NotionProposer:
     automatic = True
 
@@ -68,7 +81,9 @@ class NotionProposer:
         if not items:
             return []
         s = tasks.settings()
+        accounts.refresh_users("notion")   # names only, at most daily: the Assignee choices
         owner_ids = {i["id"]: (accounts.for_owner(i.get("owner"), "notion") or {}).get("id") for i in items}
+        assignees = {i["id"]: accounts.assignee_for_owner(i.get("owner"), "notion")[0] for i in items}
         try:
             model_cm = ctx.text_model()
         except Exception:
@@ -95,11 +110,11 @@ class NotionProposer:
                 proposals.append(self._link(item, tasks.task(d.task_id) or {}, meeting, date, d.confidence,
                                             ctx.recording_id))
             else:
-                proposals.append(self._create([item], d.nearest, meeting, date, s, owner_ids, ctx.recording_id))
+                proposals.append(self._create([item], d.nearest, meeting, date, s, assignees, ctx.recording_id))
         for members in groups.values():
             group_items = [by_id[d.action_item_id] for d in members]
             proposals.append(self._create(group_items, members[0].nearest if len(members) == 1 else [],
-                                          meeting, date, s, owner_ids, ctx.recording_id))
+                                          meeting, date, s, assignees, ctx.recording_id))
         return proposals
 
     def _link(self, item, task, meeting, date, confidence, recording_id) -> Proposal:
@@ -114,22 +129,19 @@ class NotionProposer:
             sends=f"One comment on the Task '{task.get('title', '')}' in Notion: the comment text above. "
                   "Its title and body are not changed.")
 
-    def _create(self, items, nearest, meeting, date, s, owner_ids, recording_id) -> Proposal:
+    def _create(self, items, nearest, meeting, date, s, assignees, recording_id) -> Proposal:
         mapping = s["mapping"]
         first = items[0]
         title = first["text"]
         checklist = [i["text"] for i in items[1:]]
-        owner_account = owner_ids.get(first["id"])
-        assignee_user = accounts.user("notion", owner_account) if owner_account else None
+        assignee_user = assignees.get(first["id"])
         due = first.get("due") or ""
         fields = [Field("title", "Title", title)]
         if mapping.get("assignee"):
-            options = [{"value": "", "label": "Unassigned"}]
-            if assignee_user:
-                options.append({"value": assignee_user["id"], "label": assignee_user["name"]})
-            me = accounts.self_user("notion")
-            if me and me["id"] != (assignee_user or {}).get("id"):
-                options.append({"value": me["id"], "label": f"{me['name']} (you)"})
+            people = accounts.users("notion")
+            options = [{"value": "", "label": "Unassigned"}] + [
+                {"value": u["id"], "label": f"{u['name']} (you)" if u["is_self"] else u["name"]}
+                for u in sorted(people, key=lambda u: (not u["is_self"], u["name"].lower()))]
             fields.append(Field("assignee", "Assignee", assignee_user["id"] if assignee_user else "", True, "select",
                                 tuple(options)))
         if mapping.get("due"):
@@ -138,10 +150,13 @@ class NotionProposer:
             fields.append(Field("area", "Area", "", True))
         if checklist:
             fields.append(Field("checklist", "Checklist (one per line)", "\n".join(checklist), True, "textarea"))
-        if nearest:
+        choices = link_choices(nearest)
+        if choices:
+            near_ids = {t["id"] for t in nearest}
             fields.append(Field("link_instead", "Or link instead to", "", True, "select",
                                 tuple([{"value": "", "label": "Create a new Task"}] +
-                                      [{"value": t["id"], "label": t["title"]} for t in nearest])))
+                                      [{"value": t["id"], "label": f"★ {t['title']}" if t["id"] in near_ids else t["title"]}
+                                       for t in choices])))
         twin = _recently_created(title)
         if twin:
             fields.append(Field("warning", "Heads-up", f"A Task with this title was created in the last day: "
@@ -153,7 +168,8 @@ class NotionProposer:
             payload={"database_id": s["database_id"], "data_source_id": s.get("data_source_id") or "", "mapping": mapping, "meeting": meeting, "date": date,
                      "recording_id": recording_id,
                      "item_text": first["text"], "nearest": [{"id": t["id"], "title": t["title"], "url": t.get("url")}
-                                                             for t in nearest]},
+                                                             for t in nearest],
+                     "link_choice_ids": [t["id"] for t in choices]},
             action_item_ids=tuple(i["id"] for i in items),
             sends=f"A new Task in {db_name}: the title, assignee, due date, Area and checklist above, and the line "
                   f"'From {meeting}{', ' + date if date else ''}.' Or, if you pick a Task to link instead, "
@@ -167,7 +183,8 @@ class NotionProposer:
         if proposal.kind == "task.create":
             instead = str(edits.get("link_instead") or "")
             if instead:
-                if instead not in {t["id"] for t in p.get("nearest") or []}:
+                offered = {t["id"] for t in p.get("nearest") or []} | set(p.get("link_choice_ids") or [])
+                if instead not in offered:
                     raise ValueError("link target was not offered")
                 return self._apply_link(instead, comment_text(p["meeting"], p["date"], p["item_text"]), conn, proposal)
             return self._apply_create(p, edits, conn)

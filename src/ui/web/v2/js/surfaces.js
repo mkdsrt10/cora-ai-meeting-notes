@@ -53,6 +53,7 @@ function drawAction(c, cls = 'btn'){
 function drawChip(c){
   const state = c.state === 'link' ? 'link' : c.state === 'failed' ? 'failed' : c.state === 'pending' ? 'pending' : '';
   const inner = `${surfaceMark(c)}<span class="t">${esc(c.label)}</span>`;
+  if(c.state === 'dismissed' && c.proposal_key) return `<button type="button" class="chip dismissed" data-restore-proposal="${esc(c.proposal_key)}" title="You dismissed this suggestion. Click to review it again.">${inner}</button>`;
   if(c.proposal_key) return `<button type="button" class="chip ${state}" data-open-proposal="${esc(c.proposal_key)}" title="${esc(c.label)}">${inner}</button>`;
   if(c.url) return `<a class="chip ${state}" href="${esc(c.url)}" target="_blank" rel="noopener" title="${esc(c.label)}">${inner} <span aria-hidden="true">↗</span></a>`;
   if(c.action) return `<button type="button" class="chip ${state}" ${actionAttrs(c)} data-target="${esc(c.target || '')}">${inner}</button>`;
