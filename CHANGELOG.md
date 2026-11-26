@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 — 2026-11-26
+
+- **The new look is now the default.** Cora opens in it after updating (and after setup on a new install). Anyone who chose the classic look keeps it; to go back: Settings › Appearance › Back to the classic look.
+- **Updates find you.** A macOS notification once per new version (click it to update), an "Update to Cora …" item in the menu-bar menu, and a fresh check when the Mac wakes or Cora's window opens if the last one is over 6 hours old. Before, the only sign was a banner inside the window, which in menu-bar mode is usually hidden.
+- **What's new** combines every version since the one you last saw, so skipping 1.0.0 still shows its highlights.
+- Setup guide: install only with the install command or the release `.dmg`, not a copy you (or an AI assistant) built.
+
 ## 1.0.0 — 2026-11-26
 
 Everything since 0.4.5, for the whole team. The 0.4.6 betas below were owner-only test builds.

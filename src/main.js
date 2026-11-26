@@ -281,8 +281,26 @@ function publishUpdateState(s = updater.state()) {
   if (json === publishedUpdateState) return;
   publishedUpdateState = json;
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('update-state', s);
+  if (tray) updateTrayMenu();          // "Update to Cora X…" follows the state
+  announceUpdate(s);
 }
 updater.on('state', publishUpdateState);
+
+// Cora mostly lives in the menu bar with its window hidden, so the banner alone
+// is easy to miss: each new version is also announced once with a macOS
+// notification (clicking it opens Cora on the banner). Not while forced-only
+// states or an install is running; remembered across restarts.
+function announceUpdate(s) {
+  if (!s || !s.available || !s.latest || s.installing) return;
+  let told = null;
+  try { told = updaterStore.get('notifiedVersion'); } catch {}
+  if (told === s.latest) return;
+  try { updaterStore.set('notifiedVersion', s.latest); } catch {}
+  const n = notify({ title: `Cora ${s.latest} is available`, body: 'Click to see what\'s new and update. Your meetings and settings are kept.' },
+    { show: false });
+  n.on('click', () => openMainWindow());
+  n.show();
+}
 
 installNavigationGuards();
 
@@ -428,6 +446,7 @@ const menuBar = createMenuBar({
 
 // Show the main window (and the Dock icon), creating it if it is gone.
 function openMainWindow() {
+  updater.checkIfStale().catch(() => {});   // opening Cora is a good moment to look for an update
   return menuBar.showWindow().then((shown) => {
     if (!shown) { createWindow(); menuBar.showWindow(); }
   }).catch((err) => console.error('[Cora menu bar] open:', err && err.message));
@@ -725,7 +744,8 @@ function takeMeetingScreenshot(recId, targetDir) {
 }
 
 function loadShellPage(win) {
-  resolveShellUrl(DASHBOARD_URL, fetchSetting).then((url) => {
+  const onboardingComplete = async () => Boolean(JSON.parse(await fetchJson('/api/onboarding/status')).complete);
+  resolveShellUrl(DASHBOARD_URL, fetchSetting, onboardingComplete).then((url) => {
     if (win && !win.isDestroyed()) win.loadURL(url);
   });
 }
@@ -817,6 +837,15 @@ function updateTrayMenu() {
     );
   }
 
+  const update = updater.state();
+  if (update.available && update.latest) {
+    template.push({ type: 'separator' }, {
+      label: update.installing ? `Updating to Cora ${update.latest}…` : `Update to Cora ${update.latest}…`,
+      enabled: !update.installing,
+      click: () => openMainWindow(),   // the banner: Update, or why not now (recording / processing)
+    });
+  }
+
   template.push(
     { type: 'separator' },
     {
@@ -885,6 +914,8 @@ app.whenReady().then(async () => {
   // macOS shutdown, restart or logout must quit, not hide (a cancelled
   // before-quit would make Cora block the logout).
   powerMonitor.on('shutdown', () => menuBar.onSystemShutdown());
+  // Waking from sleep: check for an update if the last check is over 6 h old.
+  powerMonitor.on('resume', () => { updater.checkIfStale().catch(() => {}); });
 
   // Start python web server
   fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });

@@ -178,7 +178,9 @@ function createUpdater({
   }
 
   // One check; never throws. A failed check keeps whatever was known.
+  let lastCheckedAt = null;
   async function check() {
+    lastCheckedAt = clock.now();
     if (!(await outboundAllowed())) return state();
     let latest;
     try {
@@ -257,6 +259,14 @@ function createUpdater({
     check,
     state,
     update,
+    // A check only if the last one is older than 6 h (or none ran): the Mac
+    // waking from sleep or Cora's window opening. The 6 h timer pauses while
+    // the Mac sleeps, so a laptop closed overnight would otherwise wait.
+    checkIfStale() {
+      if (stopped) return Promise.resolve(state());
+      if (lastCheckedAt !== null && clock.now() - lastCheckedAt < CHECK_EVERY_MS) return Promise.resolve(state());
+      return check();
+    },
     // Check now, then every 6 h; resolves when the first check is done.
     start() {
       if (!stopped) return Promise.resolve(state());

@@ -28,6 +28,14 @@ test('resolveShellUrl reads ui_shell and falls back to classic', async () => {
 test('the main window loads its page through the ui_shell choice', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'main.js'), 'utf8');
   assert.match(main, /require\('\.\/main\/shell-page'\)/);
-  assert.match(main, /resolveShellUrl\(DASHBOARD_URL, fetchSetting\)/);
+  assert.match(main, /resolveShellUrl\(DASHBOARD_URL, fetchSetting, onboardingComplete\)/);
   assert.doesNotMatch(main, /mainWindow\.loadURL\(DASHBOARD_URL\)/, 'every main-window load goes through loadShellPage');
+});
+
+test('the new look opens only once setup is finished; a stored classic choice is kept', async () => {
+  const setting = (v) => async () => v;
+  assert.equal(await resolveShellUrl(BASE, setting('v2'), async () => true), `${BASE}/v2/`);
+  assert.equal(await resolveShellUrl(BASE, setting('v2'), async () => false), BASE, 'setup runs in the classic page');
+  assert.equal(await resolveShellUrl(BASE, setting('classic'), async () => true), BASE, 'someone who chose classic keeps it');
+  assert.equal(await resolveShellUrl(BASE, setting('v2'), async () => { throw new Error('down'); }), BASE);
 });

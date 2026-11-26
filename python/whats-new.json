@@ -1,8 +1,14 @@
 {
+  "1.0.1": {
+    "title": "What's new in Cora 1.0.1",
+    "items": [
+      "Cora now opens in the new look: a sidebar, Home, ⌘K to search and run anything, and each meeting as one page with Notes, Transcript and Action items. Prefer the old one? Settings › Appearance › Back to the classic look.",
+      "Updates find you: a notification when a new version is out, and “Update to Cora …” in the menu-bar menu."
+    ]
+  },
   "1.0.0": {
     "title": "What's new in Cora 1.0",
     "items": [
-      "A new look: sidebar, Home, ⌘K to search and run anything, and each meeting as one page with Notes, Transcript and Action items. Try it in Settings › Try the new look; the classic look is one click away.",
       "Live captions in Hinglish, on this Mac: turn them on in Settings › Processing & models. Captions keep up about a second behind, and nothing leaves your Mac.",
       "Captions no longer put the other side's words in your mouth when you use speakers instead of headphones.",
       "Notion: Cora suggests a Task (or a link to an existing one) for each action item, with the right assignee; nothing is sent until you Confirm. Setup guide in Settings › Connections.",

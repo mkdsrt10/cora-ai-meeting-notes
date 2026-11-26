@@ -108,8 +108,8 @@ test('a new install is sent to setup in the classic look', async () => {
   const page = loadPage('v2/index.html', { replies: { '/api/onboarding/status': { complete: false } } });
   await page.flush();
   assert.match(text(page.$('#page')), /Finish setting up Cora first/);
-  await page.click('[data-switch-shell="classic"]');
-  assert.deepEqual(page.location.assigned, ['/']);
+  assert.equal(page.$('#page a.btn').getAttribute('href'), '/');      // opens setup
+  assert.equal(page.store.ui_shell, undefined, 'does not save classic: Cora comes back to this look after setup');
 });
 
 test('error and empty states: a failed page shows the error with Try again', async () => {

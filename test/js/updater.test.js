@@ -357,3 +357,23 @@ test('lockdown switched on after the offer refuses Update and installs nothing',
   assert.equal(r.installs.length, 0);
   assert.deepEqual(r.events.map((e) => e.name), ['update_available']);
 });
+
+test('checkIfStale checks only when the last check is 6 hours old (waking from sleep, opening the window)', async (t) => {
+  const r = await rig(t);
+  await r.updater.start();
+  assert.equal(r.release.requests, 1);
+  await r.updater.checkIfStale();
+  assert.equal(r.release.requests, 1, 'a fresh check is not repeated');
+  // The Mac slept: timers did not fire, but the clock moved on 7 hours.
+  const slept = r.clock.now() + 7 * HOUR;
+  r.clock.now = () => slept;
+  await r.updater.checkIfStale();
+  assert.equal(r.release.requests, 2);
+  assert.equal(r.updater.state().latest, '0.4.0');
+});
+
+test('checkIfStale does nothing before start or after stop', async (t) => {
+  const r = await rig(t);
+  await r.updater.checkIfStale();
+  assert.equal(r.release.requests, 0);
+});

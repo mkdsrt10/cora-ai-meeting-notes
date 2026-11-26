@@ -255,6 +255,9 @@ $('#onboardingFinish')?.addEventListener('click', async () => {
     await saveProcessingControls("#onboardingProcessing");
     await api('/api/onboarding/complete', { method: 'POST', body: '{}' });
     track('onboarding_completed', { processing_mode: processingMode });
+    // Setup lives in the classic page; the new look is the default once it is done.
+    const shell = await api('/api/settings?key=ui_shell').catch(() => ({}));
+    if(shell.value === 'v2'){ location.assign('/v2/'); return; }
     closeOnboarding();
     maybeShowTour();  // tour.js
   }catch(error){ toast(error.message, true); }

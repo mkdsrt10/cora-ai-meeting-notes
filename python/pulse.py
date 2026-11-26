@@ -50,18 +50,29 @@ def notes_file() -> Path:
     return Path(__file__).resolve().parent / "whats-new.json"
 
 
-def whats_new_entry(version: str) -> dict[str, Any] | None:
-    """The entry for `version`, else for its release (1.0.0 for 1.0.0-beta.2)."""
+MAX_ITEMS = 8
+
+
+def whats_new_entry(version: str, since: str | None = None) -> dict[str, Any] | None:
+    """What's new for `version`: its entry (or its release's, 1.0.0 for
+    1.0.0-beta.2) plus, when `since` is given, every entry after `since` up to
+    it, newest first, so someone skipping a version still sees its notes."""
     try:
         notes = json.loads(notes_file().read_text())
     except (OSError, ValueError):
         return None
-    for key in (version, version.partition("-")[0]):
-        entry = notes.get(key)
-        if isinstance(entry, dict) and entry.get("items"):
-            return {"version": key, "title": str(entry.get("title") or f"What's new in Cora {key}"),
-                    "items": [str(i) for i in entry["items"]][:8]}
-    return None
+    current = _vkey(version.partition("-")[0]) if version.partition("-")[0] in notes else _vkey(version)
+    floor = _vkey(since) if since else None
+    keys = [k for k, e in notes.items() if isinstance(e, dict) and e.get("items") and _vkey(k) <= current
+            and (floor is None or _vkey(k) > floor)]
+    if floor is None:
+        keys = [k for k in keys if k in (version, version.partition("-")[0])]
+    keys.sort(key=_vkey, reverse=True)
+    if not keys:
+        return None
+    newest = notes[keys[0]]
+    items = [str(i) for k in keys for i in notes[k]["items"]][:MAX_ITEMS]
+    return {"version": keys[0], "title": str(newest.get("title") or f"What's new in Cora {keys[0]}"), "items": items}
 
 
 def processed_meetings() -> int:
@@ -80,7 +91,7 @@ def state() -> dict[str, Any]:
         if not seen and meetings == 0:
             db.set_setting("whats_new_seen", version)   # a new install: nothing is new to it
         elif not seen or _vkey(seen) < _vkey(version):
-            whats_new = whats_new_entry(version)
+            whats_new = whats_new_entry(version, since=seen or "0.4.5")
     return {"whats_new": whats_new, "csat_due": csat_due(meetings)}
 
 

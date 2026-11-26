@@ -284,7 +284,9 @@ def post_api_onboarding_complete(req, path: str, body: dict) -> None:
 NULLABLE_SETTINGS = frozenset({"microphone", "beta_display_name"})
 
 # Defaults for keys whose unset value is not null (beta audio retention).
-SETTING_DEFAULTS = {"audio_retention_days": 30, "audio_cap_mb": 500, "ui_shell": "classic", "ui_theme": "system"}
+# ui_shell: the new look (v2) is the default since 1.0.1; "classic" is stored only
+# when someone chose it (Settings › Appearance › Back to the classic look).
+SETTING_DEFAULTS = {"audio_retention_days": 30, "audio_cap_mb": 500, "ui_shell": "v2", "ui_theme": "system"}
 READ_ONLY_SETTINGS = frozenset({"install_id"})
 DISPLAY_NAME_MAX = usage_events.DISPLAY_NAME_MAX
 

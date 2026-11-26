@@ -43,11 +43,16 @@ def test_both_pages_are_served(port):
 
 
 def test_shell_and_theme_settings_default_and_validate(port):
-    for key, default in (("ui_shell", "classic"), ("ui_theme", "system")):
+    import db
+    with db.get_db() as conn:
+        conn.execute("DELETE FROM settings WHERE key IN ('ui_shell', 'ui_theme')")
+        conn.commit()
+    for key, default in (("ui_shell", "v2"), ("ui_theme", "system")):     # the new look by default since 1.0.1
         status, body = call(port, "GET", f"/api/settings?key={key}")
         assert json.loads(body)["value"] == default
+    assert call(port, "POST", "/api/settings", {"key": "ui_shell", "value": "classic"})[0] == 200
+    assert json.loads(call(port, "GET", "/api/settings?key=ui_shell")[1])["value"] == "classic"   # a choice is kept
     assert call(port, "POST", "/api/settings", {"key": "ui_shell", "value": "v2"})[0] == 200
-    assert json.loads(call(port, "GET", "/api/settings?key=ui_shell")[1])["value"] == "v2"
     assert call(port, "POST", "/api/settings", {"key": "ui_shell", "value": "fancy"})[0] == 400
     assert call(port, "POST", "/api/settings", {"key": "ui_theme", "value": "dark"})[0] == 200
     assert call(port, "POST", "/api/settings", {"key": "ui_theme", "value": "purple"})[0] == 400

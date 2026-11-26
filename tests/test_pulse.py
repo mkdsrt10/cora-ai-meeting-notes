@@ -115,3 +115,24 @@ def test_bad_answers_are_refused(port):
     for body in ({"score": 0}, {"score": 6}, {"score": "5"}, {"score": True}, {"outcome": "maybe"}):
         assert call(port, "POST", "/api/pulse/csat", body)[0] == 400
     assert events("csat") == []
+
+
+def test_skipping_a_version_still_shows_its_notes_newest_first():
+    import json
+    import pulse
+    notes = json.loads(pulse.notes_file().read_text())
+    combined = pulse.whats_new_entry("1.0.1", since="0.4.5")
+    assert combined["version"] == "1.0.1" and combined["title"] == notes["1.0.1"]["title"]
+    assert combined["items"] == (notes["1.0.1"]["items"] + notes["1.0.0"]["items"])[:pulse.MAX_ITEMS]
+    assert pulse.whats_new_entry("1.0.1", since="1.0.0")["items"] == notes["1.0.1"]["items"]
+    assert pulse.whats_new_entry("1.0.1", since="1.0.1") is None
+
+
+def test_the_new_look_and_where_to_switch_back_lead_the_1_0_1_notes(port, monkeypatch):
+    import db
+    import pulse
+    monkeypatch.setattr(pulse, "app_version", lambda: "1.0.1")
+    processed(1)
+    db.set_setting("whats_new_seen", "1.0.0")
+    first = call(port, "GET", "/api/pulse")[1]["whats_new"]["items"][0]
+    assert "new look" in first and "Back to the classic look" in first
