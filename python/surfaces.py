@@ -181,9 +181,14 @@ def account_row(person_id: str, service: str, label: str) -> Contribution:
     accounts.refresh_users(service)
     state = accounts.account_state(person_id, service)
     account = state.get("account") or {}
+    # Every known user of the service, so the Person can be linked by hand when
+    # the name does not match (picked with account_confirm, like Confirm).
+    choices = [{"value": u["id"], "label": f"{u['name']} (you)" if u["is_self"] else u["name"]}
+               for u in sorted(accounts.users(service), key=lambda u: u["name"].lower())]
     return Contribution("person.accounts", "annotation", label, id=str(account.get("id") or "") or None,
                         target=person_id, state=state["state"], detail=account.get("name") or None, icon=service,
-                        action=Action("account_confirm", "app") if state["state"] == "suggested" else None)
+                        action=Action("account_confirm", "app") if state["state"] == "suggested" else None,
+                        panel={"choices": choices} if choices else None)
 
 
 def account_actions(service: str) -> dict[str, Callable[[ActionContext], dict]]:

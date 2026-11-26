@@ -88,6 +88,22 @@ test('People list, a Person with Accounts rows from person.accounts; Confirm run
   assert.deepEqual([post.body.plugin_id, post.body.action_id, post.body.values], ['p-one', 'account_confirm', { person_id: 'pe1', external_id: 'u7' }]);
 });
 
+test('Accounts: link a person to any known account by hand when the name does not match', async () => {
+  const row = { plugin_id: 'p-one', surface: 'person.accounts', kind: 'annotation', label: 'Tracker', target: 'pe1', state: 'none',
+    panel: { choices: [{ value: 'u1', label: 'A. Rivera (design)' }, { value: 'u2', label: 'Alex R' }] } };
+  const p = await open({ 'GET /api/surfaces': (url) => ({ contributions: url.includes('context=person') ? [row] : [] }) });
+  await p.click('#navMain [data-go="people"]');
+  await p.click('.prow[data-id="pe1"]');
+  await p.flush();
+  const link = p.$('#personAccounts [data-account-link]');
+  assert.ok(link.disabled, 'nothing picked yet');
+  await p.change('#personAccounts [data-account-pick]', 'u2');
+  assert.equal(link.disabled, false);
+  await p.click('#personAccounts [data-account-link]');
+  const post = p.posts().find((c) => c.url === '/api/surfaces/action');
+  assert.deepEqual([post.body.action_id, post.body.values], ['account_confirm', { person_id: 'pe1', external_id: 'u2' }]);
+});
+
 test('Memory page lists, filters and deletes terms', async () => {
   const p = await open();
   await p.run('go("memory")');

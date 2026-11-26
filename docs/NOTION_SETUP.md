@@ -37,7 +37,8 @@ After a meeting is processed:
 
 - Each action item gets a **Notion** chip, and the sidebar shows **Suggested** with everything waiting across meetings.
 - Click a suggestion to open it. You can edit the title, **Assignee**, due date and checklist, or under **Or link instead to**, pick an existing Task (best matches are marked ★). Then **Confirm**.
-- **Assignee**: you for your own items. For someone else, Cora preselects their Notion account once you have confirmed it on their Person page (People › the person › Accounts), or when their full name matches exactly one Notion user. Otherwise pick from the list.
+- **Assignee**: you for your own items. For someone else, Cora preselects their Notion account once it is linked on their Person page, or when their full name matches exactly one Notion person. Otherwise pick from the list.
+- **Name in Notion differs from the meeting** ("Sam K." vs "Samir Kapoor", or two people called Alex)? Open **People › that person › Accounts**, pick their Notion account under **Pick their account…** and click **Link**. Their items get them as Assignee from then on.
 - **Dismissed one by mistake?** Its action item now shows an **Add to Notion** chip, and **Suggested › Dismissed** lists the last 30 days with **Bring back**.
 - **Suggest again (Notion)** in a meeting's **⋯** menu makes fresh suggestions, for example after you change the Usage instructions.
 - Ticking a linked to-do done in Cora offers **Mark done in Notion**.

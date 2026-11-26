@@ -164,3 +164,15 @@ def test_people_seen_on_tasks_become_choices_and_survive_a_refresh(services):
     assert by_id["n-me"]["is_self"] and {"n-odalys", "n-teo"} <= set(by_id)
     assert accounts.remember_users("notion", [("n-me", "Someone Else")]) == 0
     assert accounts.user("notion", "n-me")["name"] == "Mayank Tester"   # never overrides you
+
+
+def test_the_accounts_row_offers_every_known_account_to_link_by_hand(services):
+    from surfaces import account_row
+    nick = f"Odalys {uuid.uuid4().hex[:5]}"
+    pid = person(nick)                            # matches nobody by name
+    accounts.refresh_users("notion", force=True)
+    row = account_row(pid, "notion", "Notion")
+    labels = [c["label"] for c in row.panel["choices"]]
+    assert labels == sorted(labels, key=str.lower) and "Mayank Tester (you)" in labels and "Odalys Bramwell" in labels
+    accounts.confirm(pid, "notion", "n-odalys2")  # what the Link button runs (account_confirm)
+    assert accounts.assignee_for_owner(nick, "notion") == (accounts.user("notion", "n-odalys2"), "confirmed")

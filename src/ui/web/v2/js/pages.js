@@ -40,7 +40,12 @@ function accountRow(c){
   const values = esc(JSON.stringify({ person_id: c.target, external_id: c.id }));
   const actions = c.state === 'suggested' ? `<button type="button" class="btn pri sm" data-surface-action="account_confirm" data-plugin="${esc(c.plugin_id)}" data-applies-to="app" data-values="${values}">Confirm</button>
     <button type="button" class="btn sm" data-surface-action="account_reject" data-plugin="${esc(c.plugin_id)}" data-applies-to="app" data-values="${values}">Not them</button>` : '';
-  return `<div class="row-set" data-account="${esc(c.plugin_id)}"><div><strong>${surfaceMark(c)} ${esc(c.label)}</strong><small>${text}</small></div><span class="rec-actions">${actions}</span></div>`;
+  // Link by hand: pick any known account of that service (names differ, or two people share one).
+  const choices = Array.isArray(c.panel?.choices) ? c.panel.choices : [];
+  const picker = choices.length ? `<span class="filters" style="margin:6px 0 0"><select class="inp sm" data-account-pick="${esc(c.plugin_id)}" aria-label="${esc(c.label)} account for this person">
+      <option value="">${c.state === 'confirmed' ? 'Change account…' : 'Pick their account…'}</option>${choices.map(o => `<option value="${esc(o.value)}"${o.value === c.id && c.state === 'confirmed' ? ' disabled' : ''}>${esc(o.label)}</option>`).join('')}</select>
+    <button type="button" class="btn sm" data-surface-action="account_confirm" data-plugin="${esc(c.plugin_id)}" data-applies-to="app" data-values="" data-account-link="${esc(c.target || '')}" disabled>Link</button></span>` : '';
+  return `<div class="row-set" data-account="${esc(c.plugin_id)}"><div><strong>${surfaceMark(c)} ${esc(c.label)}</strong><small>${text}</small>${picker}</div><span class="rec-actions">${actions}</span></div>`;
 }
 
 async function renderPerson(host, params){
@@ -68,6 +73,15 @@ async function drawPersonAccounts(personId){
   host.innerHTML = rows.length ? `<h3>Accounts</h3><p class="muted">Who this person is in your Connections. Unconfirmed means unassigned and a plain name.</p>${rows.map(accountRow).join('')}` : '';
 }
 definePage('person', { title: 'Person', render: renderPerson });
+// The Link button carries the picked account as its action values.
+addEventListener('change', event => {
+  const pick = event.target.closest?.('[data-account-pick]');
+  if(!pick) return;
+  const link = pick.parentElement.querySelector('[data-account-link]');
+  if(!link) return;
+  link.dataset.values = pick.value ? JSON.stringify({ person_id: link.dataset.accountLink, external_id: pick.value }) : '';
+  link.disabled = !pick.value;
+});
 document.addEventListener('surfacesrefresh', () => {
   if(shell.page === 'person') drawPersonAccounts(shell.params.id);
   if(shell.page === 'meeting') reloadMeeting();

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.6-beta.9 — 2026-11-26 (pre-beta, owner testing only)
+
+- Link a person to their Notion (or Slack) account by hand: People › the person › Accounts › Pick their account… › Link. For when the name in Notion differs from the one in your meetings, or two people share a first name. Their action items then get them as Assignee.
+
 ## 0.4.6-beta.8 — 2026-11-26 (pre-beta, owner testing only)
 
 - Notion Assignee works with a personal access token. Such a token cannot list the workspace's people (Notion answers 403), so Cora now learns your teammates from the people already assigned on your Tasks (names only) and keeps them across refreshes; you come from the token's owner. Click Settings › Notion › Refresh Tasks once, then Suggest again (Notion) on a meeting.
