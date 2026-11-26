@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0 — 2026-11-26
+
+Everything since 0.4.5, for the whole team. The 0.4.6 betas below were owner-only test builds.
+
+- **New look** (optional): sidebar, Home, ⌘K to search and run anything, each meeting as one page with Notes, Transcript and Action items, Suggested, People, Memory and every Settings panel. Settings › Try the new look; the classic look is one click away.
+- **Live captions in Hinglish on this Mac** (Whisper Turbo Hinglish, 16 GB+ Apple Silicon): Settings › Processing & models. About a second behind; nothing leaves your Mac. With speakers instead of headphones, the other side's words are no longer written as yours, and made-up filler captions are gone.
+- **Notion**: a suggested Task (or a link to an existing one) for each action item, with the assignee filled in, sent only when you Confirm. Works with a personal access token; link a person to their Notion account by hand on their Person page; bring back a dismissed suggestion. Setup guide: docs/NOTION_SETUP.md.
+- **Slack**: send selected action items to Slack as one confirmed message.
+- **Zoom in the browser** is detected again, with participant names.
+- **What's new** after each update, and an occasional one-question satisfaction survey (at most monthly, never while recording, "Don't ask again" works).
+- **Request a feature / Star us on GitHub** in the sidebar and Settings › Help & feedback.
+- New app and menu-bar icon.
+- Usage events (counts only): live captions and echo, plugin buttons, what's new and survey answers, which look and live mode.
+
 ## 0.4.6-beta.9 — 2026-11-26 (pre-beta, owner testing only)
 
 - Link a person to their Notion (or Slack) account by hand: People › the person › Accounts › Pick their account… › Link. For when the name in Notion differs from the one in your meetings, or two people share a first name. Their action items then get them as Assignee.
